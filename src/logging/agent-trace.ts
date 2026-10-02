@@ -44,7 +44,7 @@ function summarize(value: unknown, seen = new WeakSet<object>()): unknown {
 export function createAgentTrace(options: AgentTraceOptions = {}): AgentTrace {
   const enabled =
     options.enabled ?? !["0", "false", "off"].includes(
-      process.env.CUA_TRACE?.toLowerCase() ?? "",
+      process.env.MAAT_TRACE?.toLowerCase() ?? "",
     );
   const write = options.write ?? ((text: string) => process.stderr.write(text));
 

@@ -4,16 +4,33 @@ import {
   createAgentSessionServices,
   getAgentDir,
   InteractiveMode,
+  ModelRuntime,
   SessionManager,
+  SettingsManager,
+  VERSION,
   type CreateAgentSessionRuntimeFactory,
 } from "@earendil-works/pi-coding-agent";
+import { mkdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import path from "node:path";
 
 import { BrowserManager } from "../browser/browser-manager.ts";
 import { CaseManager } from "../cases/case-manager.ts";
 import { createCaseTools } from "../cases/case-tools.ts";
 import { createExecJsTool } from "../tools/exec-js-tool.ts";
+import { createMaatExtension } from "./maat-extension.ts";
+import {
+  createMaatResourceOptions,
+  createMaatSettings,
+} from "./maat-runtime-config.ts";
 
 const cwd = process.cwd();
+const maatDir = path.join(homedir(), ".maat");
+const sessionDir = path.join(maatDir, "sessions");
+const piAgentDir = getAgentDir();
+await mkdir(sessionDir, { recursive: true });
+process.env.PI_SKIP_VERSION_CHECK = "1";
+
 const browserManager = new BrowserManager();
 const caseManager = new CaseManager();
 const caseTools = createCaseTools(caseManager, browserManager);
@@ -21,13 +38,50 @@ const customTools = [
   createExecJsTool(browserManager, caseManager),
   ...caseTools,
 ];
+const piSettings = SettingsManager.create(cwd, getAgentDir()).getGlobalSettings();
+const maatSettings = SettingsManager.create(cwd, maatDir, {
+  projectTrusted: false,
+});
+if (!maatSettings.getDefaultProvider() && piSettings.defaultProvider) {
+  maatSettings.setDefaultProvider(piSettings.defaultProvider);
+}
+if (!maatSettings.getDefaultModel() && piSettings.defaultModel) {
+  if (piSettings.defaultProvider) {
+    maatSettings.setDefaultModelAndProvider(
+      piSettings.defaultProvider,
+      piSettings.defaultModel,
+    );
+  } else {
+    maatSettings.setDefaultModel(piSettings.defaultModel);
+  }
+}
+if (!maatSettings.getDefaultThinkingLevel() && piSettings.defaultThinkingLevel) {
+  maatSettings.setDefaultThinkingLevel(piSettings.defaultThinkingLevel);
+}
+if (!maatSettings.getTheme() && piSettings.theme) {
+  maatSettings.setTheme(piSettings.theme);
+}
+maatSettings.setLastChangelogVersion(VERSION);
+await maatSettings.flush();
+maatSettings.applyOverrides(createMaatSettings(maatSettings.getGlobalSettings()));
+const modelRuntime = await ModelRuntime.create({
+  authPath: path.join(piAgentDir, "auth.json"),
+  modelsPath: path.join(piAgentDir, "models.json"),
+});
+const maatExtension = createMaatExtension(browserManager, caseManager);
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({
   cwd: runtimeCwd,
   sessionManager,
   sessionStartEvent,
 }) => {
-  const services = await createAgentSessionServices({ cwd: runtimeCwd });
+  const services = await createAgentSessionServices({
+    cwd: runtimeCwd,
+    agentDir: maatDir,
+    modelRuntime,
+    settingsManager: maatSettings,
+    resourceLoaderOptions: createMaatResourceOptions([maatExtension]),
+  });
   return {
     ...(await createAgentSessionFromServices({
       services,
@@ -43,8 +97,8 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
 
 const runtime = await createAgentSessionRuntime(createRuntime, {
   cwd,
-  agentDir: getAgentDir(),
-  sessionManager: SessionManager.create(cwd),
+  agentDir: maatDir,
+  sessionManager: SessionManager.create(cwd, sessionDir),
 });
 
 try {

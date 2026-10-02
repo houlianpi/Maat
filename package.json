@@ -1,12 +1,16 @@
 {
-  "name": "pi-cua-agent",
+  "name": "maat",
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "maat": "./bin/maat.mjs"
+  },
   "scripts": {
     "agent": "node --experimental-strip-types src/cli/agent.ts",
     "browser:demo": "node --experimental-strip-types examples/browser-demo.ts",
     "cases": "node --experimental-strip-types src/cli/cases.ts",
+    "maat:test": "node --experimental-strip-types src/cli/cases.ts",
     "replay": "node --experimental-strip-types",
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "tui": "node --experimental-strip-types src/tui/main.ts",

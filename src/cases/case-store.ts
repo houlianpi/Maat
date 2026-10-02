@@ -2,54 +2,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { BrowserManager } from "../browser/browser-manager.ts";
-import { generateReplay } from "../recording/replay-generator.ts";
-import type { CaseDraft, SavedCase } from "./types.ts";
-
-type SuiteFile = { version: 1; id: string; cases: string[] };
-
-function markdownList(items: string[]): string {
-  return items.length > 0
-    ? items.map((item, index) => `${index + 1}. ${item}`).join("\n")
-    : "None.";
-}
-
-function renderCaseMarkdown(draft: CaseDraft): string {
-  return `# ${draft.name}
-
-${draft.description}
-
-## Preconditions
-
-${markdownList(draft.preconditions)}
-
-## Action steps
-
-${markdownList(draft.actionSteps)}
-
-## Test objectives
-
-${draft.objectives
-  .map((objective, index) => `${index + 1}. [${objective.id}] ${objective.description}`)
-  .join("\n")}
-`;
-}
-
-async function updateSuite(
-  suitesDirectory: string,
-  suiteId: string,
-  caseId: string,
-): Promise<void> {
-  await mkdir(suitesDirectory, { recursive: true });
-  const suitePath = path.join(suitesDirectory, `${suiteId}.json`);
-  let suite: SuiteFile = { version: 1, id: suiteId, cases: [] };
-  try {
-    suite = JSON.parse(await readFile(suitePath, "utf8")) as SuiteFile;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-  suite.cases = [...new Set([...suite.cases, caseId])];
-  await writeFile(suitePath, `${JSON.stringify(suite, null, 2)}\n`);
-}
+import {
+  generatePlaywrightSpec,
+  maatFixtureSource,
+  playwrightConfigSource,
+} from "./playwright-spec-generator.ts";
+import type { CaseDraft } from "./types.ts";
 
 export async function validateAndSaveCase(
   draft: CaseDraft,
@@ -68,13 +26,17 @@ export async function validateAndSaveCase(
   }
 
   const root = draft.rootDirectory;
-  const caseDirectory = path.join(root, "cases", draft.id);
-  const suitesDirectory = path.join(root, "suites");
-  const testPath = path.join(caseDirectory, "test.ts");
-  const configPath = path.join(root, "cua.config.json");
+  const casesDirectory = path.join(root, "cases");
+  const caseDirectory = draft.module
+    ? path.join(casesDirectory, ...draft.module.split("/"))
+    : casesDirectory;
+  const testPath = path.join(caseDirectory, `${draft.id}.spec.ts`);
+  const configPath = path.join(root, "maat.config.json");
+  const fixturePath = path.join(root, "fixtures", "maat-test.ts");
+  const playwrightConfigPath = path.join(root, "playwright.config.ts");
   await Promise.all([
     mkdir(caseDirectory, { recursive: true }),
-    mkdir(suitesDirectory, { recursive: true }),
+    mkdir(path.dirname(fixturePath), { recursive: true }),
   ]);
 
   try {
@@ -87,34 +49,18 @@ export async function validateAndSaveCase(
     );
   }
 
-  const browserConfig = browserManager.currentConfig;
-  const savedCase: SavedCase = {
-    version: 1,
-    id: draft.id,
-    name: draft.name,
-    description: draft.description,
-    preconditions: draft.preconditions,
-    actionSteps: draft.actionSteps,
-    objectives: draft.objectives,
-    tags: draft.tags,
-    suites: draft.suites,
-    browser: browserConfig.browser,
-    ...(browserConfig.profile ? { profile: browserConfig.profile } : {}),
-    code: "test.ts",
-    savedAt: new Date().toISOString(),
-  };
-
   await Promise.all([
-    writeFile(path.join(caseDirectory, "case.md"), renderCaseMarkdown(draft)),
-    writeFile(
-      path.join(caseDirectory, "case.json"),
-      `${JSON.stringify(savedCase, null, 2)}\n`,
-    ),
     writeFile(
       testPath,
-      generateReplay(draft.steps, { browser: browserConfig.browser }),
+      generatePlaywrightSpec(draft, {
+        fixtureImport: path
+          .relative(caseDirectory, fixturePath)
+          .replaceAll(path.sep, "/")
+          .replace(/^(?!\.)/, "./"),
+      }),
     ),
-    ...draft.suites.map((suite) => updateSuite(suitesDirectory, suite, draft.id)),
+    writeFile(fixturePath, maatFixtureSource),
+    writeFile(playwrightConfigPath, playwrightConfigSource),
   ]);
 
   return { caseDirectory, testPath };

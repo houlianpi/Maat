@@ -15,7 +15,7 @@ async function createRoot(): Promise<string> {
   return mkdtemp(path.join(testArtifacts, "root-"));
 }
 
-test("Case saves natural language, metadata, code, and Suite membership", async () => {
+test("Case saves natural language, selection metadata, and code in one spec", async () => {
   const root = await createRoot();
   const browserManager = new BrowserManager(root);
   const caseManager = new CaseManager();
@@ -23,6 +23,7 @@ test("Case saves natural language, metadata, code, and Suite membership", async 
   try {
     const draft = caseManager.begin({
       id: "Checkout Counter",
+      module: "checkout/guest",
       name: "Checkout counter increments",
       description: "Verify the checkout counter business outcome.",
       preconditions: ["Checkout page is available"],
@@ -47,21 +48,30 @@ await expect(page.locator('#count')).toHaveText('1');`,
     );
 
     const saved = await validateAndSaveCase(draft, browserManager);
-    const markdown = await readFile(path.join(saved.caseDirectory, "case.md"), "utf8");
-    const metadata = JSON.parse(
-      await readFile(path.join(saved.caseDirectory, "case.json"), "utf8"),
-    ) as { id: string; objectives: Array<{ description: string }> };
+    assert.equal(
+      saved.testPath,
+      path.join(root, "cases/checkout/guest/checkout-counter.spec.ts"),
+    );
     const code = await readFile(saved.testPath, "utf8");
-    const suite = JSON.parse(
-      await readFile(path.join(root, "suites/smoke.json"), "utf8"),
-    ) as { cases: string[] };
 
-    assert.match(markdown, /## Test objectives/);
-    assert.match(markdown, /Counter displays 1/);
-    assert.equal(metadata.id, "checkout-counter");
-    assert.equal(metadata.objectives[0]?.description, "Counter displays 1");
+    assert.match(code, /Case ID: checkout-counter/);
+    assert.match(code, /Description:/);
+    assert.match(code, /Action steps:/);
+    assert.match(code, /Test objectives:/);
+    assert.match(code, /Counter displays 1/);
+    assert.match(code, /@suite:smoke/);
+    assert.match(code, /from "\.\.\/\.\.\/\.\.\/fixtures\/maat-test\.ts"/);
+    assert.match(code, /test\.describe/);
+    assert.match(code, /test\.step/);
     assert.match(code, /expect\(page.locator\('#count'\)\)/);
-    assert.deepEqual(suite.cases, ["checkout-counter"]);
+    await assert.rejects(
+      readFile(path.join(saved.caseDirectory, "checkout-counter.md"), "utf8"),
+      /ENOENT/,
+    );
+    await assert.rejects(
+      readFile(path.join(saved.caseDirectory, "checkout-counter.json"), "utf8"),
+      /ENOENT/,
+    );
 
     const exitCode = await runCases({
       rootDirectory: root,
@@ -69,6 +79,14 @@ await expect(page.locator('#count')).toHaveText('1');`,
       browser: "chrome",
     });
     assert.equal(exitCode, 0);
+    assert.match(
+      await readFile(path.join(root, "playwright.config.ts"), "utf8"),
+      /trace: "retain-on-failure"/,
+    );
+    assert.match(
+      await readFile(path.join(root, "fixtures/maat-test.ts"), "utf8"),
+      /playwright\/test/,
+    );
   } finally {
     await browserManager.close();
     await rm(root, { recursive: true, force: true });
@@ -144,7 +162,7 @@ await expect(page.locator('h1')).toHaveText('Expected');`,
       /Expected.*Expected|expect\(locator\)/s,
     );
     await assert.rejects(
-      readFile(path.join(root, "cases/failing-case/case.json"), "utf8"),
+      readFile(path.join(root, "cases/failing-case/case.spec.ts"), "utf8"),
       /ENOENT/,
     );
   } finally {

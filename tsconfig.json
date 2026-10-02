@@ -9,5 +9,10 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "examples/**/*.ts", "test/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "examples/**/*.ts",
+    "test/**/*.ts",
+    "maat-tests/**/*.ts"
+  ]
 }

@@ -1,4 +1,3 @@
-import type { BrowserName } from "../browser/browser-options.ts";
 import type { JavaScriptObservation } from "../worker/protocol.ts";
 
 export type CaseObjective = {
@@ -28,6 +27,7 @@ export type CaseEvidence = {
 
 export type CaseDraft = {
   id: string;
+  module?: string;
   name: string;
   description: string;
   preconditions: string[];
@@ -39,20 +39,4 @@ export type CaseDraft = {
   steps: CaseStep[];
   failures: CaseAttemptFailure[];
   evidence: CaseEvidence[];
-};
-
-export type SavedCase = {
-  version: 1;
-  id: string;
-  name: string;
-  description: string;
-  preconditions: string[];
-  actionSteps: string[];
-  objectives: CaseObjective[];
-  tags: string[];
-  suites: string[];
-  browser: BrowserName;
-  profile?: string;
-  code: "test.ts";
-  savedAt: string;
 };

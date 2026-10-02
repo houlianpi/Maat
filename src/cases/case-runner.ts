@@ -1,13 +1,9 @@
-import { execFile } from "node:child_process";
-import { readdir, readFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { access, readdir } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 import type { BrowserName } from "../browser/browser-options.ts";
-import type { BrowserProfile } from "../browser/browser-manager.ts";
-import type { SavedCase } from "./types.ts";
-
-const execFileAsync = promisify(execFile);
 
 export type CaseSelection =
   | { mode: "all" }
@@ -20,102 +16,107 @@ export type CaseRunOptions = {
   selection: CaseSelection;
   browser?: BrowserName;
   headed?: boolean;
+  ui?: boolean;
+  workers?: number;
 };
 
-type CuaConfig = { profiles?: Record<string, BrowserProfile> };
-type SuiteFile = { cases: string[] };
-
-async function loadCase(root: string, id: string): Promise<SavedCase> {
-  return JSON.parse(
-    await readFile(path.join(root, "cases", id, "case.json"), "utf8"),
-  ) as SavedCase;
-}
-
-async function selectCases(
-  root: string,
-  selection: CaseSelection,
-): Promise<SavedCase[]> {
-  if (selection.mode === "case") return [await loadCase(root, selection.value)];
-  if (selection.mode === "suite") {
-    const suite = JSON.parse(
-      await readFile(
-        path.join(root, "suites", `${selection.value}.json`),
-        "utf8",
-      ),
-    ) as SuiteFile;
-    return Promise.all(suite.cases.map((id) => loadCase(root, id)));
-  }
-
-  const entries = await readdir(path.join(root, "cases"), {
-    withFileTypes: true,
-  });
-  const cases = await Promise.all(
-    entries.filter((entry) => entry.isDirectory()).map((entry) => loadCase(root, entry.name)),
+async function findSpecs(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(
+    entries.map((entry) => {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) return findSpecs(entryPath);
+      return entry.isFile() && entry.name.endsWith(".spec.ts")
+        ? [entryPath]
+        : [];
+    }),
   );
-  return selection.mode === "tag"
-    ? cases.filter((item) => item.tags.includes(selection.value))
-    : cases;
+  return nested.flat();
 }
 
-async function loadConfig(root: string): Promise<CuaConfig> {
-  try {
-    return JSON.parse(
-      await readFile(path.join(root, "cua.config.json"), "utf8"),
-    ) as CuaConfig;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
-    throw error;
+export async function resolveCaseSpec(
+  root: string,
+  value: string,
+): Promise<string> {
+  const normalized = value
+    .replace(/\\/g, "/")
+    .replace(/\.spec\.ts$/, "")
+    .replace(/^\/+|\/+$/g, "");
+  if (!normalized || normalized.split("/").some((part) => part === "..")) {
+    throw new Error(`Invalid Case selector: ${value}`);
   }
+
+  const casesDirectory = path.join(root, "cases");
+  if (normalized.includes("/")) {
+    const direct = path.join(
+      casesDirectory,
+      ...normalized.split("/"),
+    ) + ".spec.ts";
+    await access(direct);
+    return direct;
+  }
+
+  const matches = (await findSpecs(casesDirectory)).filter(
+    (file) => path.basename(file) === `${normalized}.spec.ts`,
+  );
+  if (matches.length === 0) throw new Error(`Unknown Case: ${value}`);
+  if (matches.length > 1) {
+    throw new Error(
+      `Ambiguous Case "${value}". Use a module path:\n${matches
+        .map((file) => `- ${path.relative(casesDirectory, file).replace(/\.spec\.ts$/, "")}`)
+        .join("\n")}`,
+    );
+  }
+  return matches[0]!;
+}
+
+export async function buildPlaywrightArgs(
+  root: string,
+  options: Omit<CaseRunOptions, "rootDirectory">,
+): Promise<string[]> {
+  const args = [
+    "test",
+    "--config",
+    path.join(root, "playwright.config.ts"),
+    `--project=${options.browser ?? "chrome"}`,
+    ...(options.headed ? ["--headed"] : []),
+    ...(options.ui ? ["--ui"] : []),
+    ...(options.workers ? ["--workers", String(options.workers)] : []),
+  ];
+
+  switch (options.selection.mode) {
+    case "case": {
+      args.push(await resolveCaseSpec(root, options.selection.value));
+      break;
+    }
+    case "suite":
+      args.push("--grep", `@suite:${options.selection.value}`);
+      break;
+    case "tag":
+      args.push("--grep", `@${options.selection.value}`);
+      break;
+    case "all":
+      break;
+  }
+
+  return args;
 }
 
 export async function runCases(options: CaseRunOptions): Promise<number> {
   const root = path.resolve(options.rootDirectory);
-  const [cases, config] = await Promise.all([
-    selectCases(root, options.selection),
-    loadConfig(root),
-  ]);
-  if (cases.length === 0) throw new Error("No Cases matched the selection.");
-
-  let failures = 0;
-  for (const item of cases) {
-    const profile = item.profile ? config.profiles?.[item.profile] : undefined;
-    if (item.profile && !profile) {
-      console.error(`FAIL ${item.id}: unknown profile ${item.profile}`);
-      failures += 1;
-      continue;
-    }
-    const browser = options.browser ?? profile?.browser ?? item.browser;
-    const args = [
-      "--experimental-strip-types",
-      path.join(root, "cases", item.id, item.code),
-      "--browser",
-      browser,
-      options.headed ? "--headed" : "--headless",
-      ...(profile
-        ? [
-            "--user-data-dir",
-            profile.userDataDir,
-            ...(profile.profileDirectory
-              ? ["--profile-directory", profile.profileDirectory]
-              : []),
-          ]
-        : []),
-    ];
-
-    try {
-      const { stdout } = await execFileAsync(process.execPath, args, {
-        cwd: process.cwd(),
-        timeout: 120_000,
-      });
-      console.log(`PASS ${item.id}`);
-      if (stdout.trim()) console.log(stdout.trim());
-    } catch (error) {
-      failures += 1;
-      const failure = error as Error & { stderr?: string };
-      console.error(`FAIL ${item.id}: ${failure.stderr?.trim() || failure.message}`);
-    }
-  }
-
-  console.log(`\nCases: ${cases.length}, passed: ${cases.length - failures}, failed: ${failures}`);
-  return failures === 0 ? 0 : 1;
+  const playwrightCli = fileURLToPath(
+    new URL("../../node_modules/playwright/cli.js", import.meta.url),
+  );
+  const args = await buildPlaywrightArgs(root, options);
+  return new Promise<number>((resolve, reject) => {
+    const child = spawn(process.execPath, [playwrightCli, ...args], {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: "inherit",
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) =>
+      resolve(code ?? (signal ? 1 : 0)),
+    );
+  });
 }

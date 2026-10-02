@@ -19,7 +19,7 @@ export function createCaseTools(
       browser: Type.Optional(Type.Union(browserNames.map((name) => Type.Literal(name)))),
       headless: Type.Optional(Type.Boolean()),
       profile: Type.Optional(
-        Type.String({ description: "Logical profile name from cua-tests/cua.config.json; empty clears it" }),
+        Type.String({ description: "Logical profile name from maat-tests/maat.config.json; empty clears it" }),
       ),
     }),
     execute: async (_id, params) => ({
@@ -59,6 +59,12 @@ export function createCaseTools(
       "Start a test Case from the user's natural-language description, action steps, and explicit test objectives.",
     parameters: Type.Object({
       id: Type.String(),
+      module: Type.Optional(
+        Type.String({
+          description:
+            "Optional module path under maat-tests/cases, for example calculator or payments/refunds",
+        }),
+      ),
       name: Type.String(),
       description: Type.String(),
       preconditions: Type.Optional(Type.Array(Type.String())),
@@ -66,7 +72,7 @@ export function createCaseTools(
       objectives: Type.Array(Type.String(), { minItems: 1 }),
       tags: Type.Optional(Type.Array(Type.String())),
       suites: Type.Optional(Type.Array(Type.String())),
-      rootDirectory: Type.Optional(Type.String({ default: "cua-tests" })),
+      rootDirectory: Type.Optional(Type.String({ default: "maat-tests" })),
     }),
     execute: async (_id, params) => ({
       content: [
@@ -94,7 +100,7 @@ export function createCaseTools(
     name: "save_case",
     label: "Validate and Save Case",
     description:
-      "Re-run all candidate steps in a fresh browser session. Only when every step and assertion passes, save case.md, case.json, test.ts, and Suite membership.",
+      "Re-run all candidate steps in a fresh browser session. Only when every step and assertion passes, save one standard Playwright case.spec.ts containing natural-language documentation, tags, Suite tags, executable steps, and assertions.",
     parameters: Type.Object({}),
     execute: async () => {
       const draft = caseManager.current;

@@ -4,8 +4,8 @@ const macOSChrome =
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 export async function findBrowserExecutable(): Promise<string | undefined> {
-  if (process.env.CUA_BROWSER_EXECUTABLE_PATH) {
-    return process.env.CUA_BROWSER_EXECUTABLE_PATH;
+  if (process.env.MAAT_BROWSER_EXECUTABLE_PATH) {
+    return process.env.MAAT_BROWSER_EXECUTABLE_PATH;
   }
 
   if (process.platform === "darwin") {

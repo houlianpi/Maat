@@ -7,6 +7,7 @@ import type { CaseDraft, CaseEvidence } from "./types.ts";
 
 export type BeginCaseInput = {
   id: string;
+  module?: string;
   name: string;
   description: string;
   preconditions?: string[];
@@ -27,6 +28,17 @@ function normalizeId(value: string): string {
   return id;
 }
 
+function normalizeModule(value: string | undefined): string | undefined {
+  if (!value?.trim()) return undefined;
+  const segments = value
+    .split(/[\/\\]+/)
+    .map(normalizeId);
+  if (segments.some((segment) => !segment)) {
+    throw new Error("Case module contains an invalid path segment.");
+  }
+  return segments.join("/");
+}
+
 export class CaseManager implements StepRecorder {
   private draft: CaseDraft | undefined;
 
@@ -40,6 +52,7 @@ export class CaseManager implements StepRecorder {
     }
     this.draft = {
       id: normalizeId(input.id),
+      ...(input.module ? { module: normalizeModule(input.module) } : {}),
       name: input.name.trim(),
       description: input.description.trim(),
       preconditions: input.preconditions ?? [],
@@ -50,7 +63,7 @@ export class CaseManager implements StepRecorder {
       })),
       tags: [...new Set(input.tags ?? [])],
       suites: [...new Set(input.suites ?? [])],
-      rootDirectory: path.resolve(input.rootDirectory ?? "cua-tests"),
+      rootDirectory: path.resolve(input.rootDirectory ?? "maat-tests"),
       steps: [],
       failures: [],
       evidence: [],
@@ -131,6 +144,7 @@ export class CaseManager implements StepRecorder {
     return {
       active: true,
       id: this.draft.id,
+      module: this.draft.module,
       name: this.draft.name,
       rootDirectory: this.draft.rootDirectory,
       objectives: this.draft.objectives,

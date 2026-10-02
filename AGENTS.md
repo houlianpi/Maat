@@ -1,6 +1,6 @@
-# pi-cua-agent development guide
+# Maat development guide
 
-This repository is a small TypeScript project that builds a browser-control agent with the Pi SDK and Playwright. Keep the design explicit and incremental: Pi owns the model/session loop; this project owns browser state, tool boundaries, worker isolation, and observations.
+Maat is a TypeScript project for conversational, cross-platform UI verification. Its current Web adapter uses the Pi SDK and Playwright. Keep the design explicit and incremental: Pi owns the model/session loop; Maat owns UI state, tool boundaries, worker isolation, Cases, Evidence, and observations.
 
 ## Project structure
 
@@ -16,6 +16,7 @@ src/
 examples/      Small, manually runnable demonstrations
 test/          Automated tests, mirroring the source domains
 artifacts/     Generated screenshots and run records; never source code
+bin/           Thin package executables; dispatch only, with no business logic
 ```
 
 - Organize by runtime responsibility, not by generic categories such as `utils` or `types`.
@@ -57,13 +58,14 @@ Run `npm run browser:demo` when browser lifecycle code changes.
 - Commit `package-lock.json` and use exact versions for runtime dependencies.
 - Never commit `.env`, credentials, `node_modules`, screenshots, or run artifacts.
 - Keep Pi authentication and model selection in Pi's normal configuration; do not copy secrets into this repository.
+- Maat TUI reuses Pi credentials and copies the initial model selection once, but persists its own Settings and Sessions under `~/.maat/`; Skills, Extensions, prompt templates, and project context remain disabled.
 - Never persist browser user-data/profile paths in manifests or generated Replay source. Accept them only as runtime CLI arguments.
 - Reject installed browsers' default user-data roots for automation. Chromium-family browsers disable remote debugging there; use a dedicated automation profile.
 - Trace logs go to stderr, redact secret-shaped fields, and summarize image payloads. They may still contain user prompts and webpage text, so do not publish them.
-- Record only successfully executed `exec_js` code in Replay files. Preserve step order and the shared browser/context/page lifecycle.
-- If any browser launch or `exec_js` execution fails, mark the whole run non-replayable and do not generate `replay.ts`, even if the agent later recovers.
+- Exploration and non-interactive Agent runs may produce Replay files from successfully executed `exec_js` code. Preserve step order and the shared browser/context/page lifecycle.
+- If any browser launch or `exec_js` execution fails in a Replay run, mark the whole run non-replayable. Formal saved Cases always use Playwright Test `case.spec.ts`.
 - Generate `expect` assertions only for outcomes stated in the user's test objective, expected result, or acceptance criteria. Do not assert every operational prerequisite.
-- Saved Cases are source artifacts: keep `case.md`, `case.json`, and `test.ts` aligned by Case id. Runtime Evidence remains under `artifacts/`.
+- A saved Case has one source of truth: a descriptively named Playwright `<case-id>.spec.ts`. Organize files freely under business/module directories; keep natural-language intent in leading JSDoc and selection data in Playwright tags. Runtime Evidence remains under `artifacts/`.
 
 ## Scope and safety
 

@@ -19,19 +19,23 @@ export type BrowserConfig = {
   profile?: string;
 };
 
-type CuaConfig = { profiles?: Record<string, BrowserProfile> };
+type MaatConfig = { profiles?: Record<string, BrowserProfile> };
 
 export class BrowserManager implements JavaScriptSession {
   private readonly configRoot: string;
   private session: JavaScriptSession | undefined;
   private config: BrowserConfig = { browser: "chrome", headless: true };
 
-  constructor(configRoot = path.resolve("cua-tests")) {
+  constructor(configRoot = path.resolve("maat-tests")) {
     this.configRoot = configRoot;
   }
 
   get currentConfig(): Readonly<BrowserConfig> {
     return this.config;
+  }
+
+  get isRunning(): boolean {
+    return this.session !== undefined;
   }
 
   async configure(next: Partial<BrowserConfig>): Promise<BrowserConfig> {
@@ -63,8 +67,8 @@ export class BrowserManager implements JavaScriptSession {
 
   private async readProfile(): Promise<BrowserProfile | undefined> {
     if (!this.config.profile) return undefined;
-    const configPath = path.join(this.configRoot, "cua.config.json");
-    const parsed = JSON.parse(await readFile(configPath, "utf8")) as CuaConfig;
+    const configPath = path.join(this.configRoot, "maat.config.json");
+    const parsed = JSON.parse(await readFile(configPath, "utf8")) as MaatConfig;
     const profile = parsed.profiles?.[this.config.profile];
     if (!profile) {
       throw new Error(

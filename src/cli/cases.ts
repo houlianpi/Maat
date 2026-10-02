@@ -8,11 +8,14 @@ try {
     options: {
       all: { type: "boolean" },
       browser: { type: "string" },
+      project: { type: "string" },
       case: { type: "string" },
       headed: { type: "boolean" },
-      root: { type: "string", default: "cua-tests" },
+      root: { type: "string", default: "maat-tests" },
       suite: { type: "string" },
       tag: { type: "string" },
+      ui: { type: "boolean" },
+      workers: { type: "string" },
     },
     strict: true,
   });
@@ -34,8 +37,12 @@ try {
   process.exitCode = await runCases({
     rootDirectory: values.root,
     selection,
-    ...(values.browser ? { browser: parseBrowserName(values.browser) } : {}),
+    ...((values.project ?? values.browser)
+      ? { browser: parseBrowserName(values.project ?? values.browser!) }
+      : {}),
     headed: values.headed,
+    ui: values.ui,
+    ...(values.workers ? { workers: Number(values.workers) } : {}),
   });
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

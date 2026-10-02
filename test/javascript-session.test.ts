@@ -129,7 +129,7 @@ test("abort terminates an active execution", async () => {
 });
 
 test("persistent profile keeps browser state between sessions", async () => {
-  const userDataDir = await mkdtemp(path.join(tmpdir(), "pi-cua-profile-"));
+  const userDataDir = await mkdtemp(path.join(tmpdir(), "maat-profile-"));
   const executablePath = await findBrowserExecutable();
 
   try {
