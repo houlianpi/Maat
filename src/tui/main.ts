@@ -18,7 +18,10 @@ import { BrowserManager } from "../browser/browser-manager.ts";
 import { CaseManager } from "../cases/case-manager.ts";
 import { createCaseTools } from "../cases/case-tools.ts";
 import { createExecJsTool } from "../tools/exec-js-tool.ts";
+import { ProjectManager } from '../projects/project-manager.ts';
+import { createProjectTools } from '../projects/project-tools.ts';
 import { createMaatExtension } from "./maat-extension.ts";
+import { createWorkModeExtension } from './work-mode.ts';
 import {
   createMaatResourceOptions,
   createMaatSettings,
@@ -31,12 +34,20 @@ const piAgentDir = getAgentDir();
 await mkdir(sessionDir, { recursive: true });
 process.env.PI_SKIP_VERSION_CHECK = "1";
 
-const browserManager = new BrowserManager();
+const browserManager = new BrowserManager(path.resolve('maat-tests/web'));
 const caseManager = new CaseManager();
-const caseTools = createCaseTools(caseManager, browserManager);
+const projects = new ProjectManager();
+const caseTools = createCaseTools(caseManager, browserManager, projects);
 const customTools = [
-  createExecJsTool(browserManager, caseManager),
+  createExecJsTool({
+    close: () => browserManager.close(),
+    execute: (code, signal) => {
+      if (projects.current.platform !== 'web') throw new Error('Use exec_native for the active native project.');
+      return browserManager.execute(code, signal);
+    },
+  }, caseManager),
   ...caseTools,
+  ...createProjectTools(projects, browserManager, caseManager),
 ];
 const piSettings = SettingsManager.create(cwd, getAgentDir()).getGlobalSettings();
 const maatSettings = SettingsManager.create(cwd, maatDir, {
@@ -68,7 +79,11 @@ const modelRuntime = await ModelRuntime.create({
   authPath: path.join(piAgentDir, "auth.json"),
   modelsPath: path.join(piAgentDir, "models.json"),
 });
-const maatExtension = createMaatExtension(browserManager, caseManager);
+const maatExtension = createMaatExtension(browserManager, caseManager, () => {
+  const device = projects.native.currentTarget?.capabilities['appium:deviceName'];
+  return `Project  ${projects.current.name} · ${projects.current.platform}` +
+    (projects.current.platform === 'web' ? '' : ` · ${device ?? 'device auto'} · ${projects.native.isRunning ? 'running' : 'idle'}`);
+});
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({
   cwd: runtimeCwd,
@@ -80,14 +95,20 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
     agentDir: maatDir,
     modelRuntime,
     settingsManager: maatSettings,
-    resourceLoaderOptions: createMaatResourceOptions([maatExtension]),
+    resourceLoaderOptions: createMaatResourceOptions([maatExtension, createWorkModeExtension(), {
+      name: 'maat-cleanup', hidden: true, factory: pi => {
+        pi.on('session_shutdown', async () => {
+          try { await projects.native.close(); } finally { await browserManager.close(); }
+        });
+      },
+    }]),
   });
   return {
     ...(await createAgentSessionFromServices({
       services,
       sessionManager,
       sessionStartEvent,
-      tools: customTools.map((tool) => tool.name),
+      tools: ['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls', 'set_work_mode', ...customTools.map((tool) => tool.name)],
       customTools,
     })),
     services,
@@ -108,6 +129,7 @@ try {
   });
   await tui.run();
 } finally {
-  await browserManager.close();
-  await runtime.dispose();
+  try { await projects.native.close(); } finally {
+    try { await browserManager.close(); } finally { await runtime.dispose(); }
+  }
 }

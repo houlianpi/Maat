@@ -2,6 +2,9 @@ import { parseArgs } from "node:util";
 
 import { parseBrowserName } from "../browser/browser-options.ts";
 import { runCases, type CaseSelection } from "../cases/case-runner.ts";
+import path from 'node:path';
+import { access } from 'node:fs/promises';
+import { platformRoot } from '../projects/layout.ts';
 
 try {
   const { values } = parseArgs({
@@ -34,11 +37,17 @@ try {
         ? { mode: "tag", value: values.tag }
         : { mode: "all" };
 
-  process.exitCode = await runCases({
-    rootDirectory: values.root,
+  const project = values.project ?? 'web';
+  const rootDirectory = platformRoot(values.root, project);
+  const native = await access(path.join(rootDirectory, 'wdio.conf.ts')).then(() => true, () => false);
+  if (native) {
+    const { runNativeProject } = await import('../native/runner.ts');
+    process.exitCode = await runNativeProject(rootDirectory, selection);
+  } else process.exitCode = await runCases({
+    rootDirectory,
     selection,
-    ...((values.project ?? values.browser)
-      ? { browser: parseBrowserName(values.project ?? values.browser!) }
+    ...(values.browser
+      ? { browser: parseBrowserName(values.browser) }
       : {}),
     headed: values.headed,
     ui: values.ui,

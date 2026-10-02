@@ -90,6 +90,8 @@ flowchart LR
 
 ## 🧭 Interactive workflow
 
+Case 目录由代码固定为 `maat-tests/{web,android,ios,macos}/cases/<业务模块>/<case-id>.spec.ts`，模型不能另建 App/设备名称的项目根目录。各平台配置和 `fixtures/` 与 `cases/` 同级。原生截图由共享 fixture 和 WDIO hooks 管理，不在 Case 中生成文件写入代码；结果按平台、运行、Case 归档。
+
 Maat 复用 Pi 的原生 TUI，保留流式聊天、工具调用、Session、模型、Thinking 和 Token 状态，并增加自己的运行状态区：
 
 ```text
@@ -100,6 +102,10 @@ Browser  chrome · headless · temporary profile · idle
 Case     calculator-basic-addition · 3 steps · 0 failed attempts
 Evidence 4 items · 1 objectives
 ```
+
+工作模式：默认 `assist`，可用 Shell 和文件编辑辅助配置、排障及运行已有测试。探索 UI 或生成 Case 时进入 `case`，禁用 Shell（含手动 `!` / `!!`）与直接文件编辑，仍允许只读查看；步骤修正和保存必须经过 Maat 工具。保存成功后自动回到 `assist`，失败则保持限制。
+
+可输入 `/mode assist` 暂停探索并保留草稿，或 `/mode case` 恢复。Agent 请求从 `case` 切回 `assist` 时需要确认。状态栏显示当前模式。此限制不是操作系统沙箱。
 
 可以自然地继续对话：
 
@@ -158,14 +164,14 @@ test.describe("基础加法计算", {
 
 JSDoc 方便源码阅读；相同信息还会写入 Playwright `annotation`，因此会出现在官方 HTML Report 中。
 
-查看真实示例：[calculator-basic-addition.spec.ts](maat-tests/cases/calculator/calculator-basic-addition.spec.ts)
+查看真实示例：[calculator-basic-addition.spec.ts](maat-tests/web/cases/calculator/calculator-basic-addition.spec.ts)
 
 ## 🗂️ Organize Cases your way
 
 Case 以具名文件保存。目录只负责表达模块或业务域：
 
 ```text
-maat-tests/
+maat-tests/web/
 ├── playwright.config.ts
 ├── fixtures/
 │   └── maat-test.ts
@@ -197,7 +203,7 @@ maat test --tag calculator
 maat test --all
 
 # Browser Project / 可见模式 / 并发
-maat test --suite smoke --project edge
+maat test --suite smoke --project web --browser edge
 maat test --case calculator-basic-addition --headed
 maat test --suite smoke --workers 2
 
@@ -211,7 +217,7 @@ maat test --all --ui
 
 Maat 使用 **Playwright 官方 HTML Reporter**，没有修改或 fork Reporter。
 
-统一配置见 [playwright.config.ts](maat-tests/playwright.config.ts)，自动截图 fixture 见 [maat-test.ts](maat-tests/fixtures/maat-test.ts)。
+统一配置见 [playwright.config.ts](maat-tests/web/playwright.config.ts)，自动截图 fixture 见 [maat-test.ts](maat-tests/web/fixtures/maat-test.ts)。
 
 每个正式 Case 自动提供：
 
@@ -293,7 +299,7 @@ Maat 配置位于：
 
 Maat 第一次启动时复制 Pi 当前的默认 Provider、Model、Thinking 和 Theme；后续修改不会写回普通 Pi。
 
-浏览器逻辑 Profile 配置位于 `maat-tests/maat.config.json`。不要直接自动化 Chrome/Edge 的日常默认 Profile，请创建专用自动化 Profile。
+浏览器逻辑 Profile 配置位于 `maat-tests/web/maat.config.json`。不要直接自动化 Chrome/Edge 的日常默认 Profile，请创建专用自动化 Profile。
 
 ## 🛡️ Safety model
 
@@ -339,9 +345,11 @@ maat test --suite smoke --workers 2
 
 ## Current scope
 
-Maat 的长期目标是支持 Web、Desktop、Mobile 等 UI 自动化适配器。**当前实现是实验性的 Web Adapter**，使用 Playwright 驱动 Chromium、Chrome、Chrome Beta、Edge 和 Edge Beta。
+原生 TypeScript 已接入 WebdriverIO、WDIO Runner、Mocha、expect-webdriverio 与 Appium。详见[原生测试说明](docs/native-testing.md)。Web 项目已迁移到 `maat-tests/web/`；运行示例：`maat test --project web --browser edge --suite smoke`。
 
-Desktop 与 Mobile Adapter 尚未实现。
+Web 使用 Playwright。原生端使用 WebdriverIO + Appium（UiAutomator2、XCUITest、Mac2），正式测试使用 WDIO Runner + Mocha + expect-webdriverio。设备准备与依赖审计结果见原生测试说明。
+
+Android/iOS/macOS 接线通过模拟 W3C 服务和真实 WDIO/Appium Runner 验证；真实设备验证仍需要对应 Driver、签名和系统权限。
 
 ## 🗺️ Roadmap
 

@@ -59,8 +59,8 @@ export async function validateAndSaveCase(
           .replace(/^(?!\.)/, "./"),
       }),
     ),
-    writeFile(fixturePath, maatFixtureSource),
-    writeFile(playwrightConfigPath, playwrightConfigSource),
+    writeFile(fixturePath, maatFixtureSource, { flag: 'wx' }).catch(error => { if (error.code !== 'EEXIST') throw error; }),
+    writeFile(playwrightConfigPath, playwrightConfigSource, { flag: 'wx' }).catch(error => { if (error.code !== 'EEXIST') throw error; }),
   ]);
 
   return { caseDirectory, testPath };

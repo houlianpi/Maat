@@ -6,12 +6,12 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 5_000 },
   fullyParallel: true,
-  outputDir: "../artifacts/playwright/test-results",
+  outputDir: "../../artifacts/playwright/test-results",
   reporter: [
     ["line"],
     [
       "html",
-      { outputFolder: "../artifacts/playwright/report", open: "never" },
+      { outputFolder: "../../artifacts/playwright/report", open: "never" },
     ],
   ],
   use: {

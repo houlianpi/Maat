@@ -42,6 +42,8 @@ function normalizeModule(value: string | undefined): string | undefined {
 export class CaseManager implements StepRecorder {
   private draft: CaseDraft | undefined;
 
+  clear(): void { this.draft = undefined; }
+
   get current(): CaseDraft | undefined {
     return this.draft;
   }

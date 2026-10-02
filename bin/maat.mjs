@@ -16,6 +16,8 @@ Usage:
   maat agent [options] PROMPT  Run one non-interactive task
   maat test [options]          Run saved Cases with Playwright Test
   maat cases [options]         Compatibility alias for maat test
+  maat appium list             List installed native drivers
+  maat appium install TARGET   Explicitly install android/ios/macos driver
   maat replay FILE [options]   Run a saved Replay or Case test
   maat help                    Show this help
 
@@ -23,6 +25,8 @@ Examples:
   maat
   maat agent --browser edge --headed "Test Edge"
   maat test --suite smoke
+  maat test --project android --suite smoke
+  maat test --project web --browser edge --suite smoke
   maat test --case calculator-basic-addition --headed
 `;
 
@@ -41,6 +45,10 @@ switch (command) {
     break;
   case "agent":
     script = "src/cli/agent.ts";
+    forwardedArgs = args.slice(1);
+    break;
+  case "appium":
+    script = "src/cli/appium.ts";
     forwardedArgs = args.slice(1);
     break;
   case "cases":

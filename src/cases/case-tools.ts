@@ -5,10 +5,12 @@ import { browserNames, type BrowserName } from "../browser/browser-options.ts";
 import type { BrowserManager } from "../browser/browser-manager.ts";
 import { validateAndSaveCase } from "./case-store.ts";
 import type { CaseManager } from "./case-manager.ts";
+import type { ProjectManager } from '../projects/project-manager.ts';
 
 export function createCaseTools(
   caseManager: CaseManager,
   browserManager: BrowserManager,
+  projects?: ProjectManager,
 ) {
   const configureBrowser = defineTool({
     name: "configure_browser",
@@ -19,7 +21,7 @@ export function createCaseTools(
       browser: Type.Optional(Type.Union(browserNames.map((name) => Type.Literal(name)))),
       headless: Type.Optional(Type.Boolean()),
       profile: Type.Optional(
-        Type.String({ description: "Logical profile name from maat-tests/maat.config.json; empty clears it" }),
+        Type.String({ description: "Logical profile name from the selected Web project's maat.config.json; empty clears it" }),
       ),
     }),
     execute: async (_id, params) => ({
@@ -62,7 +64,7 @@ export function createCaseTools(
       module: Type.Optional(
         Type.String({
           description:
-            "Optional module path under maat-tests/cases, for example calculator or payments/refunds",
+            "Optional business module under maat-tests/<platform>/cases, for example calculator or payments/refunds. The platform root is fixed by select_project.",
         }),
       ),
       name: Type.String(),
@@ -72,13 +74,12 @@ export function createCaseTools(
       objectives: Type.Array(Type.String(), { minItems: 1 }),
       tags: Type.Optional(Type.Array(Type.String())),
       suites: Type.Optional(Type.Array(Type.String())),
-      rootDirectory: Type.Optional(Type.String({ default: "maat-tests" })),
     }),
     execute: async (_id, params) => ({
       content: [
         {
           type: "text",
-          text: JSON.stringify(caseManager.begin(params)),
+          text: JSON.stringify(caseManager.begin({ ...params, ...(projects ? { rootDirectory: projects.current.root } : {}) })),
         },
       ],
       details: {},
@@ -100,12 +101,12 @@ export function createCaseTools(
     name: "save_case",
     label: "Validate and Save Case",
     description:
-      "Re-run all candidate steps in a fresh browser session. Only when every step and assertion passes, save one standard Playwright case.spec.ts containing natural-language documentation, tags, Suite tags, executable steps, and assertions.",
+      "Validate the complete Case in a new session, retaining app data. Save a named TypeScript spec only after validation passes. Web uses Playwright Test; native projects use WDIO Runner/Mocha/expect-webdriverio. Do not change user expectations to make a test pass.",
     parameters: Type.Object({}),
-    execute: async () => {
+    execute: async (_id, _params, signal) => {
       const draft = caseManager.current;
       if (!draft) throw new Error("No active Case. Call begin_case first.");
-      const result = await validateAndSaveCase(draft, browserManager);
+      const result = projects ? await projects.save(draft, browserManager, signal) : await validateAndSaveCase(draft, browserManager);
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
         details: result,

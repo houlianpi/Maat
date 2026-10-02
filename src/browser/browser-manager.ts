@@ -22,13 +22,15 @@ export type BrowserConfig = {
 type MaatConfig = { profiles?: Record<string, BrowserProfile> };
 
 export class BrowserManager implements JavaScriptSession {
-  private readonly configRoot: string;
+  private configRoot: string;
   private session: JavaScriptSession | undefined;
   private config: BrowserConfig = { browser: "chrome", headless: true };
 
-  constructor(configRoot = path.resolve("maat-tests")) {
+  constructor(configRoot = path.resolve("maat-tests/web")) {
     this.configRoot = configRoot;
   }
+
+  setConfigRoot(root: string): void { this.configRoot = root; }
 
   get currentConfig(): Readonly<BrowserConfig> {
     return this.config;

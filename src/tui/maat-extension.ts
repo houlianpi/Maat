@@ -31,6 +31,7 @@ export function maatStatusLines(
 export function createMaatExtension(
   browserManager: BrowserManager,
   caseManager: CaseManager,
+  projectStatus?: () => string,
 ): InlineExtension {
   const factory = (pi: ExtensionAPI) => {
     const applyUi = (ctx: ExtensionContext) => {
@@ -50,7 +51,7 @@ export function createMaatExtension(
       }));
       ctx.ui.setWidget(
         "maat-status",
-        maatStatusLines(browserManager, caseManager),
+        [...(projectStatus ? [projectStatus()] : []), ...maatStatusLines(browserManager, caseManager)],
         { placement: "aboveEditor" },
       );
     };

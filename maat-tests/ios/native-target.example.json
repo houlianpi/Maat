@@ -1,0 +1,7 @@
+{
+  "platform": "ios",
+  "capabilities": {
+    "appium:noReset": true,
+    "appium:fullReset": false
+  }
+}

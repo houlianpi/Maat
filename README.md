@@ -90,6 +90,8 @@ flowchart LR
 
 ## 🧭 Interactive workflow
 
+Case roots are enforced as `maat-tests/{web,android,ios,macos}/cases/<business-module>/<case-id>.spec.ts`. The model cannot create app/device-named project roots. Each platform owns its config and shared `fixtures/` alongside `cases/`. Native Evidence storage is handled by fixtures and WDIO hooks, not filesystem boilerplate in specs; outputs are grouped by platform, run and Case.
+
 Maat embeds Pi's native TUI for streaming conversations, tool calls, sessions, models, thinking controls, and token status. It adds its own runtime panel:
 
 ```text
@@ -100,6 +102,10 @@ Browser  chrome · headless · temporary profile · idle
 Case     calculator-basic-addition · 3 steps · 0 failed attempts
 Evidence 4 items · 1 objectives
 ```
+
+Work modes: `assist` (default) enables shell and file edits for setup, diagnostics, and running saved tests. UI exploration and Case generation enter `case`, blocking shell (including manual `!` / `!!`) and direct edits while allowing read-only inspection. Repair and save Cases through Maat tools. Successful saves return to `assist`; failed saves stay guarded.
+
+Use `/mode assist` to pause exploration without discarding the draft, or `/mode case` to resume. Agent-requested switches from `case` to `assist` require confirmation. The status bar shows the current mode. This workflow guard is not an OS sandbox.
 
 Continue naturally:
 
@@ -158,14 +164,14 @@ test.describe("Basic addition", {
 
 JSDoc keeps intent next to code. The same data is emitted as Playwright `annotation` entries so it appears in the official HTML report.
 
-See a real Case: [calculator-basic-addition.spec.ts](maat-tests/cases/calculator/calculator-basic-addition.spec.ts)
+See a real Case: [calculator-basic-addition.spec.ts](maat-tests/web/cases/calculator/calculator-basic-addition.spec.ts)
 
 ## 🗂️ Organize Cases your way
 
 Cases use descriptive filenames; directories are yours to organize:
 
 ```text
-maat-tests/
+maat-tests/web/
 ├── playwright.config.ts
 ├── fixtures/
 │   └── maat-test.ts
@@ -197,7 +203,7 @@ maat test --tag calculator
 maat test --all
 
 # Browser project, headed mode, and workers
-maat test --suite smoke --project edge
+maat test --suite smoke --project web --browser edge
 maat test --case calculator-basic-addition --headed
 maat test --suite smoke --workers 2
 
@@ -211,7 +217,7 @@ maat test --all --ui
 
 Maat uses the **official Playwright HTML Reporter** without modifying or forking it.
 
-Unified settings live in [playwright.config.ts](maat-tests/playwright.config.ts); automatic final screenshots are provided by [maat-test.ts](maat-tests/fixtures/maat-test.ts).
+Unified settings live in [playwright.config.ts](maat-tests/web/playwright.config.ts); automatic final screenshots are provided by [maat-test.ts](maat-tests/web/fixtures/maat-test.ts).
 
 Every formal Case provides:
 
@@ -293,7 +299,7 @@ Maat stores its own state under:
 
 On first launch, Maat copies Pi's current default provider, model, thinking level, and theme. Future changes do not write back to regular Pi.
 
-Logical browser profiles are configured in `maat-tests/maat.config.json`. Do not automate your everyday Chrome or Edge profile directly; use a dedicated automation profile.
+Logical browser profiles are configured in `maat-tests/web/maat.config.json`. Do not automate your everyday Chrome or Edge profile directly; use a dedicated automation profile.
 
 ## 🛡️ Safety model
 
@@ -339,9 +345,11 @@ maat test --suite smoke --workers 2
 
 ## Current scope
 
-Maat's long-term direction includes Web, Desktop, and Mobile UI automation adapters. **The current implementation is an experimental Web Adapter** powered by Playwright for Chromium, Chrome, Chrome Beta, Edge, and Edge Beta.
+Native TypeScript integration is available with WebdriverIO, WDIO Runner, Mocha, expect-webdriverio and Appium. See [native testing](docs/native-testing.md) for the exact workflow and current verification limits. Web projects now live in `maat-tests/web/`; use `maat test --project web --browser edge --suite smoke`.
 
-Desktop and Mobile adapters are not implemented yet.
+Web execution uses Playwright. Native execution uses WebdriverIO + Appium (UiAutomator2, XCUITest, Mac2); saved native specs use WDIO Runner + Mocha + expect-webdriverio. See the integration guide for device setup and dependency audit findings.
+
+Android/iOS/macOS integration is tested against a mock W3C endpoint and real WDIO/Appium runners. Real-device signing, drivers and permissions must be supplied before hardware validation.
 
 ## 🗺️ Roadmap
 

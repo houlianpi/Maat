@@ -1,6 +1,6 @@
 # Maat development guide
 
-Maat is a TypeScript project for conversational, cross-platform UI verification. Its current Web adapter uses the Pi SDK and Playwright. Keep the design explicit and incremental: Pi owns the model/session loop; Maat owns UI state, tool boundaries, worker isolation, Cases, Evidence, and observations.
+Maat is a TypeScript project for conversational UI verification. Web uses Playwright; native Android/iOS/macOS uses WebdriverIO + Appium with UiAutomator2/XCUITest/Mac2. Saved native tests use WDIO Runner, Mocha and expect-webdriverio. Keep this stack; do not replace it with custom W3C clients or Python bridges.
 
 ## Project structure
 
@@ -63,7 +63,7 @@ Run `npm run browser:demo` when browser lifecycle code changes.
 - Reject installed browsers' default user-data roots for automation. Chromium-family browsers disable remote debugging there; use a dedicated automation profile.
 - Trace logs go to stderr, redact secret-shaped fields, and summarize image payloads. They may still contain user prompts and webpage text, so do not publish them.
 - Exploration and non-interactive Agent runs may produce Replay files from successfully executed `exec_js` code. Preserve step order and the shared browser/context/page lifecycle.
-- If any browser launch or `exec_js` execution fails in a Replay run, mark the whole run non-replayable. Formal saved Cases always use Playwright Test `case.spec.ts`.
+- If any browser launch or `exec_js` execution fails in a Replay run, mark the whole run non-replayable. Formal Cases use the selected project's Playwright or WDIO Runner.
 - Generate `expect` assertions only for outcomes stated in the user's test objective, expected result, or acceptance criteria. Do not assert every operational prerequisite.
 - A saved Case has one source of truth: a descriptively named Playwright `<case-id>.spec.ts`. Organize files freely under business/module directories; keep natural-language intent in leading JSDoc and selection data in Playwright tags. Runtime Evidence remains under `artifacts/`.
 - Every formal Playwright Case attaches a full-page `final-state` screenshot to its report; failed Cases additionally retain Playwright failure screenshots and traces.
@@ -74,3 +74,7 @@ Run `npm run browser:demo` when browser lifecycle code changes.
 - The worker boundary provides killability and resource cleanup, not a security sandbox. Do not claim filesystem or network isolation without an OS/container boundary.
 - Preserve timeout, abort, code-size, output-size, protocol validation, and forced-cleanup tests when changing the worker.
 - Keep the persistent browser lifecycle independent from the Pi session lifecycle. The integration layer owns and closes both.
+- Test roots are fixed to `maat-tests/{web,android,ios,macos}` by the project manager and tool schema. Each platform owns its runner config, `fixtures/` and `cases/<business-module>/<case-id>.spec.ts`. Do not create device/app-named project roots. Device/app/server/signing settings belong in ignored `native-target.local.json`, never in Case code.
+- Native Case source imports the shared `fixtures/maat-test.ts`; never inline filesystem/Evidence persistence boilerplate. WDIO hooks own automatic final/failure screenshots. Explicit `evidence.screenshot(name)` and legacy `display(base64)` use the same helper. Store logs, JUnit and per-test Evidence manifests under `artifacts/native/<platform>/runs/<run-id>/`, resolved from the project root, not the caller's working directory.
+- Retain app data by default; resetting requires explicit user intent. Own local Appium servers through the WDIO Appium service; delete only owned sessions on remote servers.
+- TUI assist mode permits Pi shell/read/edit/write for auxiliary work. Case exploration/generation enters case mode, blocking shell (including manual `!`/`!!`) and direct edit/write tools. Read-only inspection remains available. Failed saves retain the guard; successful saves return to assist. `/mode assist` explicitly pauses the workflow without clearing its draft; model-requested transitions to assist require user confirmation. This is a tool workflow guard, not an OS sandbox.

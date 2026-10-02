@@ -1,0 +1,7 @@
+{
+  "platform": "macos",
+  "capabilities": {
+    "appium:noReset": true,
+    "appium:fullReset": false
+  }
+}
