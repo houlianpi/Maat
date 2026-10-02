@@ -73,7 +73,16 @@ test("worker exposes Playwright expect assertions", async () => {
       session.execute(
         `await expect(page.getByRole('heading', { level: 1 })).toHaveText('Wrong outcome');`,
       ),
-      /Expected.*Wrong outcome|expect\(locator\)/s,
+      (error: unknown) => {
+        const message = (error instanceof Error ? error.message : String(error))
+          .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
+        return (
+          message.includes("expect(locator)") &&
+          message.includes("Expected:") &&
+          message.includes("Wrong outcome") &&
+          message.includes("Received:")
+        );
+      },
     );
   } finally {
     await session.close();
