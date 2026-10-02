@@ -12,8 +12,6 @@ test("maat shows command help", async () => {
 
   assert.match(stdout, /Maat - conversational UI verification/);
   assert.match(stdout, /maat test --suite smoke/);
-  assert.match(stdout, /maat appium doctor/);
-  assert.match(stdout, /maat appium install TARGET/);
 });
 
 test("maat rejects unknown commands", async () => {

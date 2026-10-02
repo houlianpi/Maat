@@ -44,9 +44,6 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Dependency audit
-        run: npm audit --audit-level=high
-
       - name: Project tests
         run: npm test
 

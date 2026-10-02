@@ -81,14 +81,7 @@ export class CaseManager implements StepRecorder {
       code,
       observations,
     });
-    await this.recordEvidence(observations, this.draft.steps.length);
-  }
-
-  async recordEvidence(
-    observations: JavaScriptObservation[],
-    stepNumber = this.draft?.steps.length ?? 0,
-  ): Promise<void> {
-    if (!this.draft) return;
+    const stepNumber = this.draft.steps.length;
     const evidenceDirectory = path.resolve(
       "artifacts/cases",
       this.draft.id,

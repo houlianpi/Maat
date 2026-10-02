@@ -207,49 +207,6 @@ maat test --all --ui
 
 `maat cases` 仍作为 `maat test` 的兼容别名。
 
-## 📱 使用 Appium 测试原生 UI
-
-Maat 已接入 Appium Adapter，用于 Android、iOS 和 macOS 原生 UI 探索。
-
-检查已安装 Driver：
-
-```bash
-maat appium doctor
-maat appium doctor android
-maat appium doctor ios
-maat appium doctor macos
-```
-
-Maat 将 Appium Driver 保存在 `~/.maat/appium`。可通过 `MAAT_APPIUM_HOME` 覆盖此路径。
-
-显式安装官方 Driver：
-
-```bash
-maat appium install android  # UiAutomator2
-maat appium install ios      # XCUITest
-maat appium install macos    # Mac2
-```
-
-然后在 TUI 中配置目标：
-
-```text
-配置 Appium 使用 Android。
-使用 appPackage com.example.demo 和 appActivity .MainActivity。
-启动 Session，读取页面 Source，并截取截图。
-```
-
-Maat 提供结构化的原生工具：配置、Session 生命周期、元素定位、点击与输入、Accessibility/XML Source、坐标 Tap 和截图。它不会暴露任意 Appium JavaScript 执行入口。
-
-平台前置条件：
-
-| 平台 | Driver | 运行环境 |
-|---|---|---|
-| Android | UiAutomator2 | Android SDK、ADB 和已连接设备或 Emulator |
-| iOS | XCUITest | macOS、Xcode 和 iOS 设备或 Simulator |
-| macOS | Mac2 | macOS、Xcode 和 Automation Mode 授权 |
-
-当前已经支持原生 UI 探索与 Evidence 截图。正式 Appium xUnit Case 生成和原生 Suite Runner 是下一层；现阶段正式保存的 Case 仍是 Web UI 的 Playwright Test。
-
 ## 📊 Evidence & reports
 
 Maat 使用 **Playwright 官方 HTML Reporter**，没有修改或 fork Reporter。
@@ -294,14 +251,10 @@ flowchart TD
     Session --> Tools[Maat tools]
     Tools --> CaseManager[Case Manager]
     Tools --> BrowserManager[Browser Manager]
-    Tools --> AppiumManager[Appium Manager]
     BrowserManager --> Parent[Parent watchdog]
     Parent --> Worker[JavaScript Worker]
     Worker --> Playwright[Persistent Playwright page]
     Playwright --> UI[Target UI]
-    AppiumManager --> AppiumServer[Appium Server]
-    AppiumServer --> Drivers[UiAutomator2 / XCUITest / Mac2]
-    Drivers --> NativeUI[Android / iOS / macOS UI]
     Worker --> Evidence[Observations & Evidence]
     Evidence --> TUI
     CaseManager --> Validation[Fresh-browser validation]
@@ -316,7 +269,6 @@ flowchart TD
 | Maat | Browser configuration, Case intent, assertions, Evidence and persistence |
 | Worker | Killable execution boundary for model-generated JavaScript |
 | Playwright | Browser automation, xUnit runner, projects, reports, Trace and screenshots |
-| Appium | Android、iOS 和 macOS 原生 Session、定位、操作、Source 与截图 |
 
 核心实现入口：
 
@@ -324,7 +276,6 @@ flowchart TD
 - [Case tools](src/cases/case-tools.ts)
 - [Playwright spec generator](src/cases/playwright-spec-generator.ts)
 - [JavaScript worker session](src/worker/javascript-session.ts)
-- [Appium manager](src/appium/appium-manager.ts)
 
 ## 🔐 Configuration isolation
 
@@ -388,7 +339,9 @@ maat test --suite smoke --workers 2
 
 ## Current scope
 
-Maat 当前包含基于 Playwright 的实验性 Web Adapter，以及基于 Appium 的 Android、iOS、macOS 原生探索 Adapter。Web Case 可以保存并通过正式 Playwright Test 执行；原生 Appium Case 生成和 Suite 执行尚未实现。
+Maat 的长期目标是支持 Web、Desktop、Mobile 等 UI 自动化适配器。**当前实现是实验性的 Web Adapter**，使用 Playwright 驱动 Chromium、Chrome、Chrome Beta、Edge 和 Edge Beta。
+
+Desktop 与 Mobile Adapter 尚未实现。
 
 ## 🗺️ Roadmap
 
@@ -399,13 +352,10 @@ Maat 当前包含基于 Playwright 的实验性 Web Adapter，以及基于 Appiu
 - [x] Evidence and final-state screenshots
 - [x] Standard Playwright Test Cases
 - [x] Tags, Suites, Projects and HTML Report
-- [x] Appium Server 和 W3C Client
-- [x] Android、iOS、macOS 原生探索工具
-- [x] 原生 Accessibility Source 与截图 Evidence
 - [ ] Maat custom business Reporter
 - [ ] Dedicated profile fixtures
-- [ ] 正式 Appium Case 生成器
-- [ ] 原生 xUnit Suite Runner 与 Reporter
+- [ ] Desktop UI Adapter
+- [ ] Mobile UI Adapter
 - [ ] Container / OS sandbox
 - [ ] CI templates and history trends
 
