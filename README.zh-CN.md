@@ -12,6 +12,7 @@
 [![Playwright](https://img.shields.io/badge/Playwright-Test-2EAD33?logo=playwright&logoColor=white)](https://playwright.dev/)
 [![Pi SDK](https://img.shields.io/badge/Agent-Pi_SDK-6E56CF)](https://pi.dev/docs/latest/sdk)
 [![Status](https://img.shields.io/badge/status-experimental-orange)](#current-scope)
+[![CI](https://github.com/houlianpi/Maat/actions/workflows/ci.yml/badge.svg)](https://github.com/houlianpi/Maat/actions/workflows/ci.yml)
 
 </div>
 

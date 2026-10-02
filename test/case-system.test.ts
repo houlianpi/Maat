@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { BrowserManager } from "../src/browser/browser-manager.ts";
+import { parseBrowserName } from "../src/browser/browser-options.ts";
 import { CaseManager } from "../src/cases/case-manager.ts";
 import { runCases } from "../src/cases/case-runner.ts";
 import { validateAndSaveCase } from "../src/cases/case-store.ts";
@@ -15,9 +16,17 @@ async function createRoot(): Promise<string> {
   return mkdtemp(path.join(testArtifacts, "root-"));
 }
 
+const testBrowser = parseBrowserName(process.env.MAAT_TEST_BROWSER ?? "chrome");
+
+async function createBrowserManager(root: string): Promise<BrowserManager> {
+  const manager = new BrowserManager(root);
+  await manager.configure({ browser: testBrowser });
+  return manager;
+}
+
 test("Case saves natural language, selection metadata, and code in one spec", async () => {
   const root = await createRoot();
-  const browserManager = new BrowserManager(root);
+  const browserManager = await createBrowserManager(root);
   const caseManager = new CaseManager();
 
   try {
@@ -76,7 +85,7 @@ await expect(page.locator('#count')).toHaveText('1');`,
     const exitCode = await runCases({
       rootDirectory: root,
       selection: { mode: "suite", value: "smoke" },
-      browser: "chrome",
+      browser: testBrowser,
     });
     assert.equal(exitCode, 0);
     assert.match(
@@ -140,7 +149,7 @@ test("Case stores screenshot Evidence and failed Attempts outside source Cases",
 
 test("clean validation failure prevents Case files from being saved", async () => {
   const root = await createRoot();
-  const browserManager = new BrowserManager(root);
+  const browserManager = await createBrowserManager(root);
   const caseManager = new CaseManager();
 
   try {
