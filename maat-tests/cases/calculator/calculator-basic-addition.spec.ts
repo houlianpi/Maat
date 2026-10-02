@@ -20,7 +20,16 @@
 
 import { test, expect } from "../../fixtures/maat-test.ts";
 
-test.describe("基础加法计算", { tag: ["@calculator", "@smoke", "@suite:smoke"] }, () => {
+test.describe("基础加法计算", {
+  tag: ["@calculator", "@smoke", "@suite:smoke"],
+  annotation: [
+    { type: "Case ID", description: "calculator-basic-addition" },
+    { type: "Description", description: "清空计算器，输入 12 + 30，验证最终结果显示 42。" },
+    { type: "Preconditions", description: "None." },
+    { type: "Action steps", description: "打开计算器页面\n清空计算器\n输入 12 + 30\n点击等号" },
+    { type: "Test objectives", description: "[objective-1] 最终结果显示 42" },
+  ],
+}, () => {
   test("calculator-basic-addition", async ({ page }) => {
     await page.goto("https://www.leaftools.net/calculator", {
       waitUntil: "domcontentloaded",

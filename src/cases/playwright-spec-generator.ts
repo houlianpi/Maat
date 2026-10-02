@@ -23,6 +23,16 @@ function commentLines(title: string, items: string[]): string[] {
   ];
 }
 
+function annotation(
+  type: string,
+  lines: string[],
+): { type: string; description: string } {
+  return {
+    type,
+    description: lines.length > 0 ? lines.join("\n") : "None.",
+  };
+}
+
 export type PlaywrightSpecOptions = {
   fixtureImport?: string;
 };
@@ -34,6 +44,18 @@ export function generatePlaywrightSpec(
   const tags = [
     ...draft.tags.map(tag),
     ...draft.suites.map((suite) => `@suite:${suite}`),
+  ];
+  const annotations = [
+    annotation("Case ID", [draft.id]),
+    annotation("Description", [draft.description]),
+    annotation("Preconditions", draft.preconditions),
+    annotation("Action steps", draft.actionSteps),
+    annotation(
+      "Test objectives",
+      draft.objectives.map(
+        (objective) => `[${objective.id}] ${objective.description}`,
+      ),
+    ),
   ];
   const recordedSteps = draft.steps
     .map(
@@ -69,7 +91,10 @@ ${indent(step.code, 8)}
 
 import { test, expect } from ${JSON.stringify(options.fixtureImport ?? "../../fixtures/maat-test.ts")};
 
-test.describe(${JSON.stringify(draft.name)}, { tag: ${JSON.stringify(tags)} }, () => {
+test.describe(${JSON.stringify(draft.name)}, {
+  tag: ${JSON.stringify(tags)},
+  annotation: ${JSON.stringify(annotations, null, 2)},
+}, () => {
   test(${JSON.stringify(draft.id)}, async ({ page, context, browser }, testInfo) => {
     const pendingAttachments: Promise<void>[] = [];
     const display = (value: string | Uint8Array) => {
@@ -96,7 +121,25 @@ test.describe(${JSON.stringify(draft.name)}, { tag: ${JSON.stringify(tags)} }, (
 `;
 }
 
-export const maatFixtureSource = `export { test, expect } from "playwright/test";
+export const maatFixtureSource = `import { test as base, expect } from "playwright/test";
+
+export const test = base.extend({
+  page: async ({ page }, use, testInfo) => {
+    try {
+      await use(page);
+    } finally {
+      if (!page.isClosed()) {
+        const body = await page.screenshot({ fullPage: true });
+        await testInfo.attach("final-state", {
+          body,
+          contentType: "image/png",
+        });
+      }
+    }
+  },
+});
+
+export { expect };
 `;
 
 export const playwrightConfigSource = `import { defineConfig } from "playwright/test";

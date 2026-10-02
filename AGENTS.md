@@ -66,6 +66,7 @@ Run `npm run browser:demo` when browser lifecycle code changes.
 - If any browser launch or `exec_js` execution fails in a Replay run, mark the whole run non-replayable. Formal saved Cases always use Playwright Test `case.spec.ts`.
 - Generate `expect` assertions only for outcomes stated in the user's test objective, expected result, or acceptance criteria. Do not assert every operational prerequisite.
 - A saved Case has one source of truth: a descriptively named Playwright `<case-id>.spec.ts`. Organize files freely under business/module directories; keep natural-language intent in leading JSDoc and selection data in Playwright tags. Runtime Evidence remains under `artifacts/`.
+- Every formal Playwright Case attaches a full-page `final-state` screenshot to its report; failed Cases additionally retain Playwright failure screenshots and traces.
 
 ## Scope and safety
 

@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   generatePlaywrightSpec,
+  maatFixtureSource,
   playwrightConfigSource,
 } from "../src/cases/playwright-spec-generator.ts";
 import type { CaseDraft } from "../src/cases/types.ts";
@@ -41,11 +42,19 @@ test("spec generator creates standard Playwright xUnit structure", () => {
   assert.match(spec, /import \{ test, expect \} from/);
   assert.match(spec, /Case ID: sample-case/);
   assert.match(spec, /Test objectives:/);
+  assert.match(spec, /annotation:/);
+  assert.match(spec, /"type": "Case ID"/);
+  assert.match(spec, /"type": "Description"/);
+  assert.match(spec, /"type": "Preconditions"/);
+  assert.match(spec, /"type": "Action steps"/);
+  assert.match(spec, /"type": "Test objectives"/);
   assert.match(spec, /test\.describe\("Sample Case"/);
   assert.match(spec, /@suite:regression/);
   assert.match(spec, /test\("sample-case"/);
   assert.match(spec, /test\.step\("Recorded step 001"/);
   assert.match(playwrightConfigSource, /testMatch: "\*\*\/\*\.spec\.ts"/);
+  assert.match(maatFixtureSource, /testInfo\.attach\("final-state"/);
+  assert.match(maatFixtureSource, /page\.screenshot\(\{ fullPage: true \}\)/);
 });
 
 test("runner resolves unique short names and reports module ambiguity", async () => {
