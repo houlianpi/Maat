@@ -11,6 +11,8 @@ src/
   cli/         Executable entry points; parse input and set exit codes
   tools/       Pi custom-tool adapters (add when the first tool exists)
   worker/      Untrusted-code process boundary (add with worker isolation)
+  cases/       Natural-language Case metadata, clean validation, persistence, and batch execution
+  tui/         Pi InteractiveMode host and long-lived conversational state
 examples/      Small, manually runnable demonstrations
 test/          Automated tests, mirroring the source domains
 artifacts/     Generated screenshots and run records; never source code
@@ -61,6 +63,7 @@ Run `npm run browser:demo` when browser lifecycle code changes.
 - Record only successfully executed `exec_js` code in Replay files. Preserve step order and the shared browser/context/page lifecycle.
 - If any browser launch or `exec_js` execution fails, mark the whole run non-replayable and do not generate `replay.ts`, even if the agent later recovers.
 - Generate `expect` assertions only for outcomes stated in the user's test objective, expected result, or acceptance criteria. Do not assert every operational prerequisite.
+- Saved Cases are source artifacts: keep `case.md`, `case.json`, and `test.ts` aligned by Case id. Runtime Evidence remains under `artifacts/`.
 
 ## Scope and safety
 

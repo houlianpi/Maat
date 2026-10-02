@@ -1,0 +1,87 @@
+import path from "node:path";
+import { readFile } from "node:fs/promises";
+
+import { browserChannel, type BrowserName } from "./browser-options.ts";
+import {
+  launchJavaScriptSession,
+  type JavaScriptSession,
+} from "../worker/javascript-session.ts";
+
+export type BrowserProfile = {
+  browser: BrowserName;
+  userDataDir: string;
+  profileDirectory?: string;
+};
+
+export type BrowserConfig = {
+  browser: BrowserName;
+  headless: boolean;
+  profile?: string;
+};
+
+type CuaConfig = { profiles?: Record<string, BrowserProfile> };
+
+export class BrowserManager implements JavaScriptSession {
+  private readonly configRoot: string;
+  private session: JavaScriptSession | undefined;
+  private config: BrowserConfig = { browser: "chrome", headless: true };
+
+  constructor(configRoot = path.resolve("cua-tests")) {
+    this.configRoot = configRoot;
+  }
+
+  get currentConfig(): Readonly<BrowserConfig> {
+    return this.config;
+  }
+
+  async configure(next: Partial<BrowserConfig>): Promise<BrowserConfig> {
+    await this.close();
+    this.config = { ...this.config, ...next };
+    if (next.profile === "") this.config.profile = undefined;
+    return this.config;
+  }
+
+  async execute(code: string, signal?: AbortSignal) {
+    const session = await this.getSession();
+    return session.execute(code, signal);
+  }
+
+  async close(): Promise<void> {
+    const session = this.session;
+    this.session = undefined;
+    await session?.close();
+  }
+
+  async createValidationSession(): Promise<JavaScriptSession> {
+    return this.launch();
+  }
+
+  private async getSession(): Promise<JavaScriptSession> {
+    this.session ??= await this.launch();
+    return this.session;
+  }
+
+  private async readProfile(): Promise<BrowserProfile | undefined> {
+    if (!this.config.profile) return undefined;
+    const configPath = path.join(this.configRoot, "cua.config.json");
+    const parsed = JSON.parse(await readFile(configPath, "utf8")) as CuaConfig;
+    const profile = parsed.profiles?.[this.config.profile];
+    if (!profile) {
+      throw new Error(
+        `Unknown browser profile "${this.config.profile}" in ${configPath}.`,
+      );
+    }
+    return profile;
+  }
+
+  private async launch(): Promise<JavaScriptSession> {
+    const profile = await this.readProfile();
+    const browser = profile?.browser ?? this.config.browser;
+    return launchJavaScriptSession({
+      channel: browserChannel(browser),
+      headless: this.config.headless,
+      profileDirectory: profile?.profileDirectory,
+      userDataDir: profile?.userDataDir,
+    });
+  }
+}
