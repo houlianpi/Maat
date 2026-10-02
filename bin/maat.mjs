@@ -15,6 +15,8 @@ Usage:
   maat tui                     Start the interactive TUI
   maat agent [options] PROMPT  Run one non-interactive task
   maat test [options]          Run saved Cases with Playwright Test
+  maat appium doctor [TARGET] Show drivers or diagnose one platform
+  maat appium install TARGET  Install android, ios, or macos driver
   maat cases [options]         Compatibility alias for maat test
   maat replay FILE [options]   Run a saved Replay or Case test
   maat help                    Show this help
@@ -24,6 +26,7 @@ Examples:
   maat agent --browser edge --headed "Test Edge"
   maat test --suite smoke
   maat test --case calculator-basic-addition --headed
+  maat appium doctor
 `;
 
 if (command === "help" || command === "--help" || command === "-h") {
@@ -46,6 +49,10 @@ switch (command) {
   case "cases":
   case "test":
     script = "src/cli/cases.ts";
+    forwardedArgs = args.slice(1);
+    break;
+  case "appium":
+    script = "src/cli/appium.ts";
     forwardedArgs = args.slice(1);
     break;
   case "replay": {

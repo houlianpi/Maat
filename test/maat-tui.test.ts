@@ -43,6 +43,7 @@ test("Maat status lines show browser, Case, and Evidence state", () => {
 
   const lines = maatStatusLines(browserManager, caseManager);
   assert.match(lines[0]!, /Browser  chrome · headless/);
-  assert.match(lines[1]!, /Case     login-case · 0 steps/);
-  assert.match(lines[2]!, /Evidence 0 items · 1 objectives/);
+  assert.match(lines[1]!, /Appium   not configured/);
+  assert.match(lines[2]!, /Case     login-case · 0 steps/);
+  assert.match(lines[3]!, /Evidence 0 items · 1 objectives/);
 });

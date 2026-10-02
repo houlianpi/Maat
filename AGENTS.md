@@ -1,6 +1,6 @@
 # Maat development guide
 
-Maat is a TypeScript project for conversational, cross-platform UI verification. Its current Web adapter uses the Pi SDK and Playwright. Keep the design explicit and incremental: Pi owns the model/session loop; Maat owns UI state, tool boundaries, worker isolation, Cases, Evidence, and observations.
+Maat is a TypeScript project for conversational, cross-platform UI verification. Its Web adapter uses Playwright; its native adapter uses Appium for Android, iOS, and macOS. Keep the design explicit and incremental: Pi owns the model/session loop; Maat owns UI state, tool boundaries, worker isolation, Cases, Evidence, and observations.
 
 ## Project structure
 
@@ -8,6 +8,7 @@ Maat is a TypeScript project for conversational, cross-platform UI verification.
 src/
   agent/       Pi session orchestration; no CLI argument parsing
   browser/     Persistent Playwright lifecycle and browser helpers
+  appium/      Native UI server, W3C client, platform capabilities, and tools
   cli/         Executable entry points; parse input and set exit codes
   tools/       Pi custom-tool adapters (add when the first tool exists)
   worker/      Untrusted-code process boundary (add with worker isolation)
@@ -67,6 +68,8 @@ Run `npm run browser:demo` when browser lifecycle code changes.
 - Generate `expect` assertions only for outcomes stated in the user's test objective, expected result, or acceptance criteria. Do not assert every operational prerequisite.
 - A saved Case has one source of truth: a descriptively named Playwright `<case-id>.spec.ts`. Organize files freely under business/module directories; keep natural-language intent in leading JSDoc and selection data in Playwright tags. Runtime Evidence remains under `artifacts/`.
 - Every formal Playwright Case attaches a full-page `final-state` screenshot to its report; failed Cases additionally retain Playwright failure screenshots and traces.
+- Appium tools are structured W3C actions, not arbitrary JavaScript execution. Native Android/iOS/macOS exploration and Evidence are supported; do not claim formal native Case generation until an Appium xUnit runner exists.
+- Maat owns Appium extensions under `~/.maat/appium` (or `MAAT_APPIUM_HOME`); do not rely on or mutate global Appium extension homes implicitly.
 
 ## Scope and safety
 

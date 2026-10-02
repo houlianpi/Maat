@@ -6,10 +6,12 @@ import type {
 
 import type { BrowserManager } from "../browser/browser-manager.ts";
 import type { CaseManager } from "../cases/case-manager.ts";
+import type { AppiumManager } from "../appium/appium-manager.ts";
 
 export function maatStatusLines(
   browserManager: BrowserManager,
   caseManager: CaseManager,
+  appiumManager?: AppiumManager,
 ): string[] {
   const browser = browserManager.currentConfig;
   const draft = caseManager.current;
@@ -25,12 +27,17 @@ export function maatStatusLines(
   const evidenceLine = draft
     ? `Evidence ${draft.evidence.length} items · ${draft.objectives.length} objectives`
     : "Evidence 0 items";
-  return [browserLine, caseLine, evidenceLine];
+  const appium = appiumManager?.currentConfig;
+  const appiumLine = appium
+    ? `Appium   ${appium.platform} · ${String(appium.capabilities["appium:automationName"] ?? "default")} · ${appiumManager.isRunning ? "running" : "idle"}`
+    : "Appium   not configured";
+  return [browserLine, appiumLine, caseLine, evidenceLine];
 }
 
 export function createMaatExtension(
   browserManager: BrowserManager,
   caseManager: CaseManager,
+  appiumManager?: AppiumManager,
 ): InlineExtension {
   const factory = (pi: ExtensionAPI) => {
     const applyUi = (ctx: ExtensionContext) => {
@@ -50,7 +57,7 @@ export function createMaatExtension(
       }));
       ctx.ui.setWidget(
         "maat-status",
-        maatStatusLines(browserManager, caseManager),
+        maatStatusLines(browserManager, caseManager, appiumManager),
         { placement: "aboveEditor" },
       );
     };

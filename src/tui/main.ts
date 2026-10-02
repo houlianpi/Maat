@@ -15,6 +15,8 @@ import { homedir } from "node:os";
 import path from "node:path";
 
 import { BrowserManager } from "../browser/browser-manager.ts";
+import { AppiumManager } from "../appium/appium-manager.ts";
+import { createAppiumTools } from "../appium/appium-tools.ts";
 import { CaseManager } from "../cases/case-manager.ts";
 import { createCaseTools } from "../cases/case-tools.ts";
 import { createExecJsTool } from "../tools/exec-js-tool.ts";
@@ -32,11 +34,14 @@ await mkdir(sessionDir, { recursive: true });
 process.env.PI_SKIP_VERSION_CHECK = "1";
 
 const browserManager = new BrowserManager();
+const appiumManager = new AppiumManager();
 const caseManager = new CaseManager();
 const caseTools = createCaseTools(caseManager, browserManager);
+const appiumTools = createAppiumTools(appiumManager, caseManager);
 const customTools = [
   createExecJsTool(browserManager, caseManager),
   ...caseTools,
+  ...appiumTools,
 ];
 const piSettings = SettingsManager.create(cwd, getAgentDir()).getGlobalSettings();
 const maatSettings = SettingsManager.create(cwd, maatDir, {
@@ -68,7 +73,11 @@ const modelRuntime = await ModelRuntime.create({
   authPath: path.join(piAgentDir, "auth.json"),
   modelsPath: path.join(piAgentDir, "models.json"),
 });
-const maatExtension = createMaatExtension(browserManager, caseManager);
+const maatExtension = createMaatExtension(
+  browserManager,
+  caseManager,
+  appiumManager,
+);
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({
   cwd: runtimeCwd,
@@ -109,5 +118,6 @@ try {
   await tui.run();
 } finally {
   await browserManager.close();
+  await appiumManager.close();
   await runtime.dispose();
 }

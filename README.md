@@ -207,6 +207,49 @@ maat test --all --ui
 
 `maat cases` remains as a compatibility alias for `maat test`.
 
+## 📱 Native UI with Appium
+
+Maat includes an Appium adapter for Android, iOS, and macOS native UI exploration.
+
+Check installed drivers:
+
+```bash
+maat appium doctor
+maat appium doctor android
+maat appium doctor ios
+maat appium doctor macos
+```
+
+Maat stores Appium drivers under `~/.maat/appium`. Override this location with `MAAT_APPIUM_HOME`.
+
+Install an official driver explicitly:
+
+```bash
+maat appium install android  # UiAutomator2
+maat appium install ios      # XCUITest
+maat appium install macos    # Mac2
+```
+
+Then configure a target in the TUI:
+
+```text
+Configure Appium for Android.
+Use appPackage com.example.demo and appActivity .MainActivity.
+Start the session, inspect the source, and capture a screenshot.
+```
+
+Maat exposes structured native tools for configuration, session lifecycle, element lookup, click/input actions, accessibility source, coordinate taps, and screenshots. It intentionally does not expose arbitrary Appium-side JavaScript execution.
+
+Platform prerequisites:
+
+| Platform | Driver | Runtime requirements |
+|---|---|---|
+| Android | UiAutomator2 | Android SDK, ADB, and a connected device or emulator |
+| iOS | XCUITest | macOS, Xcode, and an iOS device or Simulator |
+| macOS | Mac2 | macOS, Xcode, and Automation Mode authorization |
+
+Native exploration and Evidence capture are implemented. Formal Appium xUnit Case generation and native suite execution are the next layer; formal saved Cases currently use Playwright Test for Web UI.
+
 ## 📊 Evidence & reports
 
 Maat uses the **official Playwright HTML Reporter** without modifying or forking it.
@@ -251,10 +294,14 @@ flowchart TD
     Session --> Tools[Maat tools]
     Tools --> CaseManager[Case Manager]
     Tools --> BrowserManager[Browser Manager]
+    Tools --> AppiumManager[Appium Manager]
     BrowserManager --> Parent[Parent watchdog]
     Parent --> Worker[JavaScript Worker]
     Worker --> Playwright[Persistent Playwright page]
     Playwright --> UI[Target UI]
+    AppiumManager --> AppiumServer[Appium Server]
+    AppiumServer --> Drivers[UiAutomator2 / XCUITest / Mac2]
+    Drivers --> NativeUI[Android / iOS / macOS UI]
     Worker --> Evidence[Observations & Evidence]
     Evidence --> TUI
     CaseManager --> Validation[Fresh-browser validation]
@@ -269,6 +316,7 @@ flowchart TD
 | Maat | Browser configuration, Case intent, assertions, Evidence, and persistence |
 | Worker | Killable execution boundary for model-generated JavaScript |
 | Playwright | Browser automation, xUnit runner, projects, reports, traces, and screenshots |
+| Appium | Native Android, iOS, and macOS sessions, selectors, actions, source, and screenshots |
 
 Core implementation:
 
@@ -276,6 +324,7 @@ Core implementation:
 - [Case tools](src/cases/case-tools.ts)
 - [Playwright spec generator](src/cases/playwright-spec-generator.ts)
 - [JavaScript worker session](src/worker/javascript-session.ts)
+- [Appium manager](src/appium/appium-manager.ts)
 
 ## 🔐 Configuration isolation
 
@@ -339,9 +388,7 @@ maat test --suite smoke --workers 2
 
 ## Current scope
 
-Maat's long-term direction includes Web, Desktop, and Mobile UI automation adapters. **The current implementation is an experimental Web Adapter** powered by Playwright for Chromium, Chrome, Chrome Beta, Edge, and Edge Beta.
-
-Desktop and Mobile adapters are not implemented yet.
+Maat currently includes an experimental Web Adapter powered by Playwright and a native exploration Adapter powered by Appium for Android, iOS, and macOS. Web Cases can be saved and executed as formal Playwright Tests; native Appium Case generation and suite execution are not implemented yet.
 
 ## 🗺️ Roadmap
 
@@ -352,10 +399,13 @@ Desktop and Mobile adapters are not implemented yet.
 - [x] Evidence and final-state screenshots
 - [x] Standard Playwright Test Cases
 - [x] Tags, suites, projects, and HTML reports
+- [x] Appium server and W3C client
+- [x] Android, iOS, and macOS native exploration tools
+- [x] Native accessibility source and screenshot Evidence
 - [ ] Maat business-focused custom Reporter
 - [ ] Dedicated profile fixtures
-- [ ] Desktop UI Adapter
-- [ ] Mobile UI Adapter
+- [ ] Formal Appium Case generator
+- [ ] Native xUnit suite runner and Reporter
 - [ ] Container / OS sandbox
 - [ ] CI templates and historical trends
 
