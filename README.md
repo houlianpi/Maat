@@ -1,10 +1,12 @@
 <div align="center">
 
+**English** | [简体中文](README.zh-CN.md)
+
 # ⚖️ Maat
 
 ### Turn intent into executable UI truth.
 
-**对话式构建、验证和维护 UI 自动化测试。**
+**Build, validate, and maintain UI tests through conversation.**
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Playwright](https://img.shields.io/badge/Playwright-Test-2EAD33?logo=playwright&logoColor=white)](https://playwright.dev/)
@@ -15,32 +17,32 @@
 
 ---
 
-Maat 是一个对话式 UI 测试 Agent。你只需要说明**想测试什么**和**预期结果是什么**，Maat 会探索页面、执行操作、生成关键断言、收集 Evidence，并保存为标准 Playwright Test。
+Maat is a conversational UI testing agent. Describe **what you want to test** and **what success looks like**; Maat explores the interface, performs actions, creates focused assertions, captures evidence, and saves a standard Playwright Test.
 
 ```text
-测试意图 → UI 探索 → 业务断言 → Evidence → Playwright Test → Report
+Intent → UI exploration → Business assertions → Evidence → Playwright Test → Report
 ```
 
-> **Maat** 源自古埃及关于真理、秩序与衡量的概念：将 UI 的实际状态与人的预期放在天平两端。
+> **Maat** is named after the ancient Egyptian concept of truth, order, and balance: actual UI state on one side of the scale, human intent on the other.
 
 ## ✨ Why Maat?
 
-- **对话式构建**：在 TUI 中通过多轮聊天完善 Case。
-- **目的驱动断言**：只针对明确测试目的生成 `expect`，不堆砌无意义检查。
-- **真实浏览器探索**：模型通过持久 Playwright 页面观察、操作和修正。
-- **可终止 Worker**：模型生成的 JavaScript 在独立进程执行，具备超时、Abort 和输出限制。
-- **单文件 Case**：自然语言说明、Tags、Suite、代码和断言都在一个 `*.spec.ts`。
-- **官方测试生态**：正式 Case 使用 Playwright Test、HTML Reporter、Trace 和截图。
-- **Evidence first**：TUI 中可查看截图；正式报告自动附加最终页面全屏截图。
-- **模块自由组织**：Case 可按业务域、模块或团队习惯任意分层。
+- **Conversational authoring** — refine a test over multiple turns in an interactive TUI.
+- **Intent-driven assertions** — assert explicit business outcomes instead of every operational prerequisite.
+- **Live browser exploration** — observe, operate, and correct a persistent Playwright page.
+- **Killable execution boundary** — model-generated JavaScript runs in a worker with timeouts, aborts, and output limits.
+- **One-file Cases** — human intent, tags, suites, code, and assertions live in one `*.spec.ts` file.
+- **Native Playwright ecosystem** — formal Cases use Playwright Test, projects, HTML reports, traces, and screenshots.
+- **Evidence first** — inspect screenshots in the TUI and attach final-state screenshots to formal reports.
+- **Flexible modules** — organize Cases by domain, feature, team, or any directory structure you choose.
 
 ## 🎬 Quick start
 
 ### Requirements
 
-- Node.js 22+（当前开发环境使用 Node.js 26）
-- Chrome、Edge 或 Playwright Chromium
-- 已配置并登录的 [Pi](https://pi.dev/) 模型 Provider
+- Node.js 22+ (development currently uses Node.js 26)
+- Chrome, Edge, or Playwright Chromium
+- A configured and authenticated [Pi](https://pi.dev/) model provider
 
 ### Install from source
 
@@ -51,43 +53,43 @@ npm install
 npm link
 ```
 
-启动交互界面：
+Start the interactive experience:
 
 ```bash
 maat
 ```
 
-默认使用 Chrome、Headless 和临时隔离 Profile。
+Maat defaults to Chrome, headless mode, and an isolated temporary profile.
 
-进入 TUI 后，可以直接说：
+Then describe a Case:
 
 ```text
-为 https://www.leaftools.net/calculator 构建并保存一个测试 Case。
+Build and save a test Case for https://www.leaftools.net/calculator.
 
-模块：calculator
-Case ID：calculator-basic-addition
-名称：基础加法计算
-测试目的：验证 12 + 30 的最终结果显示为 42。
-标签：calculator、smoke
-Suite：smoke
+Module: calculator
+Case ID: calculator-basic-addition
+Name: Basic addition
+Test objective: verify that 12 + 30 displays 42.
+Tags: calculator, smoke
+Suite: smoke
 ```
 
-Maat 会自动完成：
+Maat handles the workflow:
 
 ```mermaid
 flowchart LR
-    A[理解测试目的] --> B[探索 UI]
-    B --> C[执行操作]
-    C --> D[生成业务断言]
-    D --> E[保存 Evidence]
-    E --> F[全新浏览器验证]
-    F -->|Pass| G[保存 Playwright Case]
+    A[Understand intent] --> B[Explore UI]
+    B --> C[Perform actions]
+    C --> D[Create assertions]
+    D --> E[Capture evidence]
+    E --> F[Validate in a fresh browser]
+    F -->|Pass| G[Save Playwright Case]
     F -->|Fail| B
 ```
 
 ## 🧭 Interactive workflow
 
-Maat 复用 Pi 的原生 TUI，保留流式聊天、工具调用、Session、模型、Thinking 和 Token 状态，并增加自己的运行状态区：
+Maat embeds Pi's native TUI for streaming conversations, tool calls, sessions, models, thinking controls, and token status. It adds its own runtime panel:
 
 ```text
 Maat
@@ -98,50 +100,50 @@ Case     calculator-basic-addition · 3 steps · 0 failed attempts
 Evidence 4 items · 1 objectives
 ```
 
-可以自然地继续对话：
+Continue naturally:
 
 ```text
-切换到 Edge，并显示浏览器窗口。
-显示当前 Case 状态。
-列出 Evidence。
-显示最后一张截图。
-把这个 Case 保存到 calculator 模块。
+Switch to Edge and show the browser window.
+Show the current Case status.
+List the Evidence.
+Show the latest screenshot.
+Save this Case under the calculator module.
 ```
 
 | Tool | Purpose |
 |---|---|
-| `configure_browser` | 切换浏览器、Headless/Headed 和逻辑 Profile |
-| `get_browser_config` | 查看当前浏览器配置 |
-| `begin_case` | 创建带测试目的的 Case Draft |
-| `exec_js` | 操作持久 Playwright 页面并执行 `expect` |
-| `get_case_status` | 查看候选步骤、失败 Attempt 与 Evidence 数量 |
-| `list_evidence` | 列出当前 Case 的 Evidence |
-| `show_evidence` | 在支持图片协议的终端中显示截图 |
-| `save_case` | 使用全新浏览器验证并保存正式 Case |
+| `configure_browser` | Switch browser, headless/headed mode, and logical profile |
+| `get_browser_config` | Inspect the active browser configuration |
+| `begin_case` | Start a Case Draft with explicit objectives |
+| `exec_js` | Operate the persistent page and execute Playwright `expect` assertions |
+| `get_case_status` | Inspect candidate steps, failed attempts, and Evidence counts |
+| `list_evidence` | List Evidence captured for the active Case |
+| `show_evidence` | Render screenshots in supported terminals |
+| `save_case` | Revalidate in a fresh browser and save the formal Case |
 
 ## 🧪 A Case is just Playwright Test
 
-正式 Case 不依赖 LLM 才能运行。它是普通的 Playwright Test：
+Formal Cases do not require an LLM at runtime. They are ordinary Playwright Tests:
 
 ```typescript
 /**
  * Case ID: calculator-basic-addition
- * Name: 基础加法计算
+ * Name: Basic addition
  *
  * Description:
- * 验证在线计算器正确计算 12 + 30。
+ * Verify that an online calculator correctly computes 12 + 30.
  *
  * Test objectives:
- * 1. 最终结果显示 42
+ * 1. The final result displays 42.
  */
 
 import { test, expect } from "../../fixtures/maat-test.ts";
 
-test.describe("基础加法计算", {
+test.describe("Basic addition", {
   tag: ["@calculator", "@smoke", "@suite:smoke"],
   annotation: [
     { type: "Case ID", description: "calculator-basic-addition" },
-    { type: "Test objectives", description: "最终结果显示 42" },
+    { type: "Test objectives", description: "The final result displays 42." },
   ],
 }, () => {
   test("calculator-basic-addition", async ({ page }) => {
@@ -153,13 +155,13 @@ test.describe("基础加法计算", {
 });
 ```
 
-JSDoc 方便源码阅读；相同信息还会写入 Playwright `annotation`，因此会出现在官方 HTML Report 中。
+JSDoc keeps intent next to code. The same data is emitted as Playwright `annotation` entries so it appears in the official HTML report.
 
-查看真实示例：[calculator-basic-addition.spec.ts](maat-tests/cases/calculator/calculator-basic-addition.spec.ts)
+See a real Case: [calculator-basic-addition.spec.ts](maat-tests/cases/calculator/calculator-basic-addition.spec.ts)
 
 ## 🗂️ Organize Cases your way
 
-Case 以具名文件保存。目录只负责表达模块或业务域：
+Cases use descriptive filenames; directories are yours to organize:
 
 ```text
 maat-tests/
@@ -175,25 +177,25 @@ maat-tests/
     └── health-check.spec.ts
 ```
 
-支持嵌套模块，例如 `payments/refunds/refund-approved.spec.ts`。
+Nested modules such as `payments/refunds/refund-approved.spec.ts` are supported.
 
 ## 🚀 Run tests
 
 ```bash
-# 单个 Case：短名称会递归查找
+# Unique short names are resolved recursively
 maat test --case calculator-basic-addition
 
-# 模块路径：重名时使用此形式
+# Use a module path to disambiguate duplicate names
 maat test --case calculator/calculator-basic-addition
 
-# Suite 与 Tag 来自 Playwright tags
+# Suites and tags are Playwright tags
 maat test --suite smoke
 maat test --tag calculator
 
-# 全部 Case
+# Run every Case
 maat test --all
 
-# Browser Project / 可见模式 / 并发
+# Browser project, headed mode, and workers
 maat test --suite smoke --project edge
 maat test --case calculator-basic-addition --headed
 maat test --suite smoke --workers 2
@@ -202,36 +204,36 @@ maat test --suite smoke --workers 2
 maat test --all --ui
 ```
 
-`maat cases` 仍作为 `maat test` 的兼容别名。
+`maat cases` remains as a compatibility alias for `maat test`.
 
 ## 📊 Evidence & reports
 
-Maat 使用 **Playwright 官方 HTML Reporter**，没有修改或 fork Reporter。
+Maat uses the **official Playwright HTML Reporter** without modifying or forking it.
 
-统一配置见 [playwright.config.ts](maat-tests/playwright.config.ts)，自动截图 fixture 见 [maat-test.ts](maat-tests/fixtures/maat-test.ts)。
+Unified settings live in [playwright.config.ts](maat-tests/playwright.config.ts); automatic final screenshots are provided by [maat-test.ts](maat-tests/fixtures/maat-test.ts).
 
-每个正式 Case 自动提供：
+Every formal Case provides:
 
-- Case ID、Description、Preconditions、Action steps、Test objectives
-- `test.step` 执行结构
-- `final-state` 最终页面全屏截图（成功和失败都会附加）
-- 失败截图与 Trace
-- 显式 `display()` Evidence 附件
-- 可选视频：`MAAT_VIDEO=1 maat test --suite smoke`
+- Case ID, description, preconditions, action steps, and test objectives
+- `test.step` execution structure
+- A full-page `final-state` screenshot on success and failure
+- Failure screenshots and traces
+- Explicit `display()` Evidence attachments
+- Optional video via `MAAT_VIDEO=1 maat test --suite smoke`
 
-报告位置：
+Report location:
 
 ```text
 artifacts/playwright/report/index.html
 ```
 
-打开报告：
+Open it with:
 
 ```bash
 npx playwright show-report artifacts/playwright/report
 ```
 
-探索阶段的 Evidence 与失败 Attempt 保存在：
+Exploration Evidence and failed attempts live under:
 
 ```text
 artifacts/cases/<case-id>/
@@ -260,14 +262,14 @@ flowchart TD
     Runner --> Report[Official HTML Report]
 ```
 
-| Layer | Owns |
+| Layer | Responsibility |
 |---|---|
-| Pi SDK | Model calls, conversation, streaming, TUI and Session lifecycle |
-| Maat | Browser configuration, Case intent, assertions, Evidence and persistence |
+| Pi SDK | Model calls, conversation, streaming, TUI, and session lifecycle |
+| Maat | Browser configuration, Case intent, assertions, Evidence, and persistence |
 | Worker | Killable execution boundary for model-generated JavaScript |
-| Playwright | Browser automation, xUnit runner, projects, reports, Trace and screenshots |
+| Playwright | Browser automation, xUnit runner, projects, reports, traces, and screenshots |
 
-核心实现入口：
+Core implementation:
 
 - [TUI runtime](src/tui/main.ts)
 - [Case tools](src/cases/case-tools.ts)
@@ -278,34 +280,34 @@ flowchart TD
 
 ```text
 Shared:    Pi credentials and initial model catalog
-Isolated:  Maat settings, Sessions, Skills, Extensions and project context
+Isolated:  Maat settings, sessions, skills, extensions, and project context
 ```
 
-Maat 配置位于：
+Maat stores its own state under:
 
 ```text
 ~/.maat/settings.json
 ~/.maat/sessions/
 ```
 
-Maat 第一次启动时复制 Pi 当前的默认 Provider、Model、Thinking 和 Theme；后续修改不会写回普通 Pi。
+On first launch, Maat copies Pi's current default provider, model, thinking level, and theme. Future changes do not write back to regular Pi.
 
-浏览器逻辑 Profile 配置位于 `maat-tests/maat.config.json`。不要直接自动化 Chrome/Edge 的日常默认 Profile，请创建专用自动化 Profile。
+Logical browser profiles are configured in `maat-tests/maat.config.json`. Do not automate your everyday Chrome or Edge profile directly; use a dedicated automation profile.
 
 ## 🛡️ Safety model
 
-Worker 提供的是**可终止的进程边界**，不是容器级安全沙箱。
+The Worker is a **killable process boundary**, not a container-grade security sandbox.
 
-已实现：
+Implemented safeguards:
 
-- 60 秒执行上限与 Abort
-- 64 KiB 代码限制
-- 12 MiB 输出限制
-- IPC 协议校验
-- 敏感环境变量过滤
-- Worker/Browser 强制清理
+- 60-second execution deadline and abort support
+- 64 KiB code limit
+- 12 MiB output limit
+- IPC protocol validation
+- Sensitive environment-variable filtering
+- Forced Worker and browser cleanup
 
-尚未实现文件系统、网络、容器或 OS 级隔离。不要在不受信任环境中执行未知模型生成的代码。
+Filesystem, network, container, and OS-level isolation are not implemented. Do not execute unknown model-generated code in an untrusted environment.
 
 ## 🧰 CLI reference
 
@@ -321,9 +323,9 @@ maat help                    Show help
 
 | Variable | Purpose |
 |---|---|
-| `MAAT_TRACE=0` | 关闭非交互 Agent 的模型/工具 Trace 日志 |
-| `MAAT_BROWSER_EXECUTABLE_PATH` | 指定开发/探索模式浏览器路径 |
-| `MAAT_VIDEO=1` | 为正式 Playwright Case 启用失败视频 |
+| `MAAT_TRACE=0` | Disable model/tool trace logs in non-interactive mode |
+| `MAAT_BROWSER_EXECUTABLE_PATH` | Set a browser executable for development/exploration |
+| `MAAT_VIDEO=1` | Retain failure video for formal Playwright Cases |
 
 ## 🧑‍💻 Development
 
@@ -336,9 +338,9 @@ maat test --suite smoke --workers 2
 
 ## Current scope
 
-Maat 的长期目标是支持 Web、Desktop、Mobile 等 UI 自动化适配器。**当前实现是实验性的 Web Adapter**，使用 Playwright 驱动 Chromium、Chrome、Chrome Beta、Edge 和 Edge Beta。
+Maat's long-term direction includes Web, Desktop, and Mobile UI automation adapters. **The current implementation is an experimental Web Adapter** powered by Playwright for Chromium, Chrome, Chrome Beta, Edge, and Edge Beta.
 
-Desktop 与 Mobile Adapter 尚未实现。
+Desktop and Mobile adapters are not implemented yet.
 
 ## 🗺️ Roadmap
 
@@ -348,13 +350,13 @@ Desktop 与 Mobile Adapter 尚未实现。
 - [x] Intent-driven Playwright assertions
 - [x] Evidence and final-state screenshots
 - [x] Standard Playwright Test Cases
-- [x] Tags, Suites, Projects and HTML Report
-- [ ] Maat custom business Reporter
+- [x] Tags, suites, projects, and HTML reports
+- [ ] Maat business-focused custom Reporter
 - [ ] Dedicated profile fixtures
 - [ ] Desktop UI Adapter
 - [ ] Mobile UI Adapter
 - [ ] Container / OS sandbox
-- [ ] CI templates and history trends
+- [ ] CI templates and historical trends
 
 ---
 
