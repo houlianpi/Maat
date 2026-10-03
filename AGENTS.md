@@ -1,6 +1,6 @@
 # Maat development guide
 
-Maat is a TypeScript project for conversational UI verification. Web uses Playwright; native Android/iOS/macOS uses WebdriverIO + Appium with UiAutomator2/XCUITest/Mac2. Saved native tests use WDIO Runner, Mocha and expect-webdriverio. Keep this stack; do not replace it with custom W3C clients or Python bridges.
+Maat is a TypeScript project for conversational UI verification. Exploration uses a shared killable Worker harness with platform runtimes. Saved Cases use one Mocha format and may mix Playwright Library with WebdriverIO/Appium Sessions. Keep official clients; do not replace them with custom W3C clients or Python bridges.
 
 ## Project structure
 
@@ -13,12 +13,9 @@ src/
   worker/      Untrusted-code process boundary (add with worker isolation)
   cases/       Natural-language Case metadata, clean validation, persistence, and batch execution
   tui/         Pi InteractiveMode host and long-lived conversational state
-  native/
-    environment/ Stable config schema plus device/application discovery
-    exploration/ Persistent Agent session and isolated TypeScript worker
-    execution/   WDIO runner, configuration, and Evidence lifecycle
-    appium/      Owned local Appium server lifecycle
-    cases/       Native Case target metadata, fixture, and spec generation
+  core/         Shared exploration Worker, Case renderer/saver, Mocha runner, SessionPool, and Evidence
+  platforms/    PlatformAdapter registry plus Web, Android, iOS, macOS, and shared Appium Session code
+  setup/        Optional device and application discovery used by Agent setup tools
 examples/      Small, manually runnable demonstrations
 test/          Automated tests, mirroring the source domains
 artifacts/     Generated screenshots and run records; never source code
@@ -68,11 +65,11 @@ Run `npm run browser:demo` when browser lifecycle code changes.
 - Never persist browser user-data/profile paths in manifests or generated Replay source. Accept them only as runtime CLI arguments.
 - Reject installed browsers' default user-data roots for automation. Chromium-family browsers disable remote debugging there; use a dedicated automation profile.
 - Trace logs go to stderr, redact secret-shaped fields, and summarize image payloads. They may still contain user prompts and webpage text, so do not publish them.
-- Exploration and non-interactive Agent runs may produce Replay files from successfully executed `exec_js` code. Preserve step order and the shared browser/context/page lifecycle.
-- If any browser launch or `exec_js` execution fails in a Replay run, mark the whole run non-replayable. Formal Cases use the selected project's Playwright or WDIO Runner.
+- Exploration and non-interactive Agent runs may produce Replay files from successfully executed `exe_js` code. Preserve step order and the active Adapter Session lifecycle.
+- If any launch or `exe_js` execution fails in a Replay run, mark the whole run non-replayable. Formal Cases use the selected Adapter runner.
 - Generate `expect` assertions only for outcomes stated in the user's test objective, expected result, or acceptance criteria. Do not assert every operational prerequisite.
-- A saved Case has one source of truth: a descriptively named Playwright `<case-id>.spec.ts`. Organize files freely under business/module directories; keep natural-language intent in leading JSDoc and selection data in Playwright tags. Runtime Evidence remains under `artifacts/`.
-- Every formal Playwright Case attaches a full-page `final-state` screenshot to its report; failed Cases additionally retain Playwright failure screenshots and traces.
+- A saved Case has one source of truth: a Mocha `<case-id>.spec.ts` under `maat-tests/cases`. Steps record Adapter IDs in execution order; pure Web and mixed Web/Appium use the same format.
+- Formal Evidence and the Maat HTML report live under `artifacts/maat/runs/<run-id>`. Web trace may be added as Adapter Evidence.
 
 ## Scope and safety
 
@@ -80,8 +77,7 @@ Run `npm run browser:demo` when browser lifecycle code changes.
 - The worker boundary provides killability and resource cleanup, not a security sandbox. Do not claim filesystem or network isolation without an OS/container boundary.
 - Preserve timeout, abort, code-size, output-size, protocol validation, and forced-cleanup tests when changing the worker.
 - Keep the persistent browser lifecycle independent from the Pi session lifecycle. The integration layer owns and closes both.
-- Test roots are fixed to `maat-tests/{web,android,ios,macos}` by the project manager and tool schema. Each platform owns its runner config, `fixtures/` and `cases/<business-module>/<case-id>.spec.ts`. Do not create device/app-named project roots. Device/app/server/signing settings belong in ignored `native-target.local.json`, never in Case code.
-- Native Case source imports the shared `fixtures/maat-test.ts`; never inline filesystem/Evidence persistence boilerplate. WDIO hooks own automatic final/failure screenshots. Explicit `evidence.screenshot(name)` and legacy `display(base64)` use the same helper. Store logs, JUnit and per-test Evidence manifests under `artifacts/native/<platform>/runs/<run-id>/`, resolved from the project root, not the caller's working directory.
-- Saved native specs include `@maat-target` with only app identity. The WDIO runner applies it before each Case session. Platform-local config stores stable device selectors, server and signing; locally discovered UUIDs and exploration app identities are transient. Batch runs use one session per spec. Do not put device IDs or signing in source metadata.
-- Retain app data by default; resetting requires explicit user intent. Own local Appium servers through the WDIO Appium service; delete only owned sessions on remote servers.
+- Maat Core depends only on PlatformAdapter and PlatformRegistry. Platform conditionals, Session discovery, framework globals, save/validation, runner, status, and platform-specific tools belong in adapters. `exe_js` is the single JavaScript execution tool; future language executors such as `exe_py` remain separate tools.
+- Cases live under `maat-tests/cases/<business-module>/<case-id>.spec.ts`; Adapter environment hints live under `maat-tests/<adapter>/`. Never put device IDs or signing into Case source.
+- Maat does not install drivers or start/stop Appium Server. Agent/Shell/user setup provides a reachable Server; Maat creates and deletes only its own Sessions. Retain app data by default; resetting requires explicit user intent.
 - TUI assist mode permits Pi shell/read/edit/write for auxiliary work. Case exploration/generation enters case mode, blocking shell (including manual `!`/`!!`) and direct edit/write tools. Read-only inspection remains available. Failed saves retain the guard; successful saves return to assist. `/mode assist` explicitly pauses the workflow without clearing its draft; model-requested transitions to assist require user confirmation. This is a tool workflow guard, not an OS sandbox.

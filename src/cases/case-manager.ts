@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type { StepRecorder } from "../recording/run-recorder.ts";
 import type { JavaScriptObservation } from "../worker/protocol.ts";
+import type { StepExecution } from '../recording/run-recorder.ts';
 import type { CaseDraft, CaseEvidence } from "./types.ts";
 
 export type BeginCaseInput = {
@@ -66,6 +67,7 @@ export class CaseManager implements StepRecorder {
       tags: [...new Set(input.tags ?? [])],
       suites: [...new Set(input.suites ?? [])],
       rootDirectory: path.resolve(input.rootDirectory ?? "maat-tests"),
+      requirements: [],
       steps: [],
       failures: [],
       evidence: [],
@@ -76,13 +78,22 @@ export class CaseManager implements StepRecorder {
   async recordSuccessfulStep(
     code: string,
     observations: JavaScriptObservation[],
+    execution?: StepExecution,
   ): Promise<void> {
     if (!this.draft) return;
     this.draft.steps.push({
       number: this.draft.steps.length + 1,
+      adapterId: execution?.adapterId ?? 'web',
+      bindings: execution?.bindings ?? ['page', 'context', 'browser', 'expect', 'display'],
       code,
       observations,
     });
+    if (execution) {
+      const requirements = this.draft.requirements ??= [];
+      const index = requirements.findIndex(item => item.adapterId === execution.requirement.adapterId);
+      if (index === -1) requirements.push(execution.requirement);
+      else requirements[index] = execution.requirement;
+    }
     const stepNumber = this.draft.steps.length;
     const evidenceDirectory = path.resolve(
       "artifacts/cases",
@@ -119,9 +130,10 @@ export class CaseManager implements StepRecorder {
     }
   }
 
-  async recordFailedStep(code: string, error: unknown): Promise<void> {
+  async recordFailedStep(code: string, error: unknown, execution?: StepExecution): Promise<void> {
     if (!this.draft) return;
     this.draft.failures.push({
+      ...(execution ? { adapterId: execution.adapterId } : {}),
       code,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -151,6 +163,7 @@ export class CaseManager implements StepRecorder {
       rootDirectory: this.draft.rootDirectory,
       objectives: this.draft.objectives,
       candidateSteps: this.draft.steps.length,
+      adapters: [...new Set(this.draft.steps.map(step => step.adapterId ?? 'web'))],
       failedAttempts: this.draft.failures.length,
       evidenceItems: this.draft.evidence.length,
       suites: this.draft.suites,

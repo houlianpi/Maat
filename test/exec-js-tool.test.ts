@@ -5,7 +5,7 @@ import { createExecJsTool } from "../src/tools/exec-js-tool.ts";
 import type { StepRecorder } from "../src/recording/run-recorder.ts";
 import type { JavaScriptSession } from "../src/worker/javascript-session.ts";
 
-test("exec_js exposes only the custom browser tool contract", async () => {
+test("exe_js exposes the JavaScript execution contract", async () => {
   const session: JavaScriptSession = {
     close: async () => undefined,
     execute: async () => [{ type: "text", text: "tool-result" }],
@@ -27,8 +27,7 @@ test("exec_js exposes only the custom browser tool contract", async () => {
     {} as Parameters<typeof tool.execute>[4],
   );
 
-  assert.equal(tool.name, "exec_js");
-  assert.match(tool.description, /Playwright expect/);
+  assert.equal(tool.name, "exe_js");
   assert.ok(
     tool.promptGuidelines?.some((guideline) =>
       guideline.includes("user's explicit test objective"),
@@ -39,7 +38,7 @@ test("exec_js exposes only the custom browser tool contract", async () => {
   assert.deepEqual(recorded, [`console.log('tool-result');`]);
 });
 
-test("exec_js does not record failed code", async () => {
+test("exe_js does not record failed code", async () => {
   const session: JavaScriptSession = {
     close: async () => undefined,
     execute: async () => {

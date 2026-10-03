@@ -1,89 +1,36 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { mkdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
-import type { BrowserManager } from '../browser/browser-manager.ts';
-import { NativeManager } from '../native/exploration/manager.ts';
-import { readNativeEnvironment, type NativeAppTarget, type NativeEnvironment } from '../native/environment/schema.ts';
-import { platformRoot, casePath, type Platform } from './layout.ts';
-import { scaffoldNativeFixture } from '../native/cases/fixture.ts';
-import { nativeSpec } from '../native/cases/spec-generator.ts';
-import { runNativeProject } from '../native/execution/runner.ts';
+import type { CaseSelection } from '../cases/case-runner.ts';
 import type { CaseDraft } from '../cases/types.ts';
-import { validateAndSaveCase } from '../cases/case-store.ts';
+import { saveCase } from '../core/cases/save-case.ts';
+import { runMaatTests } from '../core/testing/runner.ts';
+import type { PlatformAdapter } from '../platforms/contracts.ts';
+import { PlatformRegistry } from '../platforms/registry.ts';
 
-export type { Platform } from './layout.ts';
 export class ProjectManager {
-  readonly native = new NativeManager();
-  private active: { name: Platform; platform: Platform; root: string };
-  private readonly base: string;
-  constructor(base = path.resolve('maat-tests')) {
-    this.base = base;
-    this.active = { name: 'web', platform: 'web', root: platformRoot(base, 'web') };
+  readonly registry: PlatformRegistry;
+  readonly root: string;
+
+  constructor(registry: PlatformRegistry, root: string) { this.registry = registry; this.root = root; }
+
+  get adapter(): PlatformAdapter { return this.registry.current; }
+  get current() { return { name: this.adapter.id, platform: this.adapter.id, root: this.root }; }
+
+  async select(platform: string) { await this.registry.select(platform); return this.status(); }
+  status() { return this.adapter.status(); }
+  execute(code: string, signal?: AbortSignal) { return this.adapter.execute(code, signal); }
+  save(draft: CaseDraft, signal?: AbortSignal) {
+    if (draft.rootDirectory !== this.root) throw new Error('Draft belongs to a different Maat test root.');
+    return saveCase(draft, this.root, signal);
   }
-  get current() { return this.active; }
-  async select(name: string, platform: Platform, browser: BrowserManager) {
-    const root = platformRoot(this.base, platform);
-    if (name !== platform) throw new Error(`Project name must equal platform (${platform}). Put business grouping in begin_case.module, not a new project directory.`);
-    const existing = await readFile(path.join(root, 'wdio.conf.ts'), 'utf8').catch(() => undefined);
-    if (platform === 'web' && existing) throw new Error('This project already uses WDIO.');
-    if (platform !== 'web' && await readFile(path.join(root, 'playwright.config.ts')).then(() => true, () => false)) throw new Error('This project already uses Playwright.');
-    await browser.close(); await this.native.close();
-    if (platform === 'web') {
-      this.active = { name: platform, platform, root };
-      browser.setConfigRoot(root);
-    } else {
-      const targetFile = path.join(root, 'native-target.local.json');
-      let environment: NativeEnvironment;
-      try { environment = await readNativeEnvironment(targetFile); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        environment = { platform, capabilities: {} };
-      }
-      if (environment.platform !== platform) throw new Error('Project platform conflicts with its target configuration.');
-      await this.native.configure(environment);
-      this.active = { name: platform, platform, root };
-      await this.scaffold();
-    }
-    return this.active;
+  async run(selection: CaseSelection, options?: { browser?: string; headed?: boolean; adapterId?: string }, signal?: AbortSignal) { return (await runMaatTests(this.root, selection, signal, undefined, options)).exitCode; }
+
+  async configureSession(input: Parameters<NonNullable<PlatformAdapter['configureSession']>>[0]): Promise<void> {
+    if (!this.adapter.configureSession) throw new Error(`${this.adapter.label} does not accept Session hints.`);
+    await this.adapter.configureSession(input);
   }
-  async configure(environment: NativeEnvironment, app?: NativeAppTarget) {
-    if (environment.platform !== this.active.platform) throw new Error('Select the matching native project first.');
-    await this.native.configure(environment, app);
-    await this.scaffold();
-    await writeFile(path.join(this.active.root, 'native-target.local.json'), JSON.stringify(environment, null, 2) + '\n', { mode: 0o600 });
+  async inspectSetup(request: Parameters<NonNullable<PlatformAdapter['inspectSetup']>>[0]): Promise<unknown> {
+    if (!this.adapter.inspectSetup) throw new Error(`${this.adapter.label} does not support this setup inspection.`);
+    return this.adapter.inspectSetup(request);
   }
-  private async scaffold() {
-    const root = this.active.root;
-    await mkdir(path.join(root, 'cases'), { recursive: true });
-    const implementation = fileURLToPath(new URL('../native/execution/wdio-config.ts', import.meta.url));
-    let importPath = path.relative(root, implementation).split(path.sep).join('/');
-    if (!importPath.startsWith('.')) importPath = './' + importPath;
-    const source = `import { createNativeConfig } from ${JSON.stringify(importPath)};
-import { fileURLToPath } from 'node:url';
-export const config = await createNativeConfig(fileURLToPath(new URL('.', import.meta.url)));
-`;
-    await writeFile(path.join(root, 'wdio.conf.ts'), source, { flag: 'wx' }).catch(error => { if (error.code !== 'EEXIST') throw error; });
-    await scaffoldNativeFixture(root);
-  }
-  async save(draft: CaseDraft, browser: BrowserManager, signal?: AbortSignal) {
-    if (draft.rootDirectory !== this.active.root) throw new Error('Draft belongs to a different project.');
-    const final = casePath(this.active.root, draft.id, draft.module);
-    if (this.active.platform === 'web') return validateAndSaveCase(draft, browser);
-    if (!draft.steps.length) throw new Error('No native steps to save.');
-    const app = this.native.currentApp;
-    if (!this.native.currentEnvironment) throw new Error('Configure a native environment first.');
-    if (!app || Object.keys(app).length === 0) throw new Error('Configure a native app before saving the Case.');
-    await this.native.close();
-    const directory = path.dirname(final);
-    await mkdir(directory, { recursive: true });
-    const candidate = path.join(directory, `.validate-${randomUUID()}.spec.ts`);
-    await writeFile(candidate, nativeSpec(draft, app));
-    try {
-      const code = await runNativeProject(this.active.root, { mode: 'all' }, candidate, signal);
-      if (code !== 0) throw new Error('WDIO validation failed; no formal Case saved.');
-      await rename(candidate, final);
-    } finally { await unlink(candidate).catch(error => { if (error.code !== 'ENOENT') throw error; }); }
-    return { caseDirectory: directory, testPath: final };
-  }
+
+  async close(): Promise<void> { await this.registry.close(); }
 }

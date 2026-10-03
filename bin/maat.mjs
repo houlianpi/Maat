@@ -14,10 +14,8 @@ Usage:
   maat                         Start the interactive TUI
   maat tui                     Start the interactive TUI
   maat agent [options] PROMPT  Run one non-interactive task
-  maat test [options]          Run saved Cases with Playwright Test
+  maat test [options]          Run saved Maat/Mocha Cases
   maat cases [options]         Compatibility alias for maat test
-  maat appium list             List installed native drivers
-  maat appium install TARGET   Explicitly install android/ios/macos driver
   maat replay FILE [options]   Run a saved Replay or Case test
   maat help                    Show this help
 
@@ -45,10 +43,6 @@ switch (command) {
     break;
   case "agent":
     script = "src/cli/agent.ts";
-    forwardedArgs = args.slice(1);
-    break;
-  case "appium":
-    script = "src/cli/appium.ts";
     forwardedArgs = args.slice(1);
     break;
   case "cases":

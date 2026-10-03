@@ -47,17 +47,15 @@ jobs:
       - name: Project tests
         run: npm test
 
-      - name: Playwright smoke suite
+      - name: Maat smoke suite
         run: npm run maat:test -- --project web --suite smoke --browser chromium --workers 2
 
-      - name: Upload Playwright report
+      - name: Upload Maat report
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: playwright-report-${{ github.run_attempt }}
+          name: maat-report-${{ github.run_attempt }}
           path: |
-            artifacts/playwright/report
-            artifacts/playwright/test-results
-            artifacts/native
+            artifacts/maat
           if-no-files-found: ignore
           retention-days: 14

@@ -1,10 +1,7 @@
 import path from 'node:path';
 
-export const platforms = ['web', 'android', 'ios', 'macos'] as const;
-export type Platform = typeof platforms[number];
-
 export function platformRoot(base: string, platform: string): string {
-  if (!platforms.includes(platform as Platform)) throw new Error('Platform must be web, android, ios or macos.');
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(platform)) throw new Error('Platform ID must be a lowercase slug.');
   return path.resolve(base, platform);
 }
 

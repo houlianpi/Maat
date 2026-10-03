@@ -20,6 +20,7 @@ import { createCaseTools } from "../cases/case-tools.ts";
 import { createExecJsTool } from "../tools/exec-js-tool.ts";
 import { ProjectManager } from '../projects/project-manager.ts';
 import { createProjectTools } from '../projects/project-tools.ts';
+import { createDefaultPlatformRegistry } from '../platforms/default-registry.ts';
 import { createMaatExtension } from "./maat-extension.ts";
 import { createWorkModeExtension } from './work-mode.ts';
 import {
@@ -36,18 +37,20 @@ process.env.PI_SKIP_VERSION_CHECK = "1";
 
 const browserManager = new BrowserManager(path.resolve('maat-tests/web'));
 const caseManager = new CaseManager();
-const projects = new ProjectManager();
-const caseTools = createCaseTools(caseManager, browserManager, projects);
+const testsRoot = path.resolve('maat-tests');
+const projects = new ProjectManager(createDefaultPlatformRegistry(testsRoot, browserManager), testsRoot);
+const caseTools = createCaseTools(caseManager, projects);
 const customTools = [
   createExecJsTool({
-    close: () => browserManager.close(),
-    execute: (code, signal) => {
-      if (projects.current.platform !== 'web') throw new Error('Use exec_native for the active native project.');
-      return browserManager.execute(code, signal);
-    },
-  }, caseManager),
+    close: () => projects.adapter.close(),
+    execute: (code, signal) => projects.execute(code, signal),
+  }, caseManager, {
+    description: 'Execute JavaScript against the active Platform Adapter. Call list_platforms after switching to see the available runtime globals.',
+    guidelines: ['Use only globals exposed by the active adapter codeContext.'],
+  }, () => ({ adapterId: projects.adapter.id, bindings: projects.adapter.codeContext.globals.map(item => item.name), requirement: projects.adapter.runtimeRequirement() })),
   ...caseTools,
-  ...createProjectTools(projects, browserManager, caseManager),
+  ...createProjectTools(projects, caseManager),
+  ...projects.registry.list().flatMap(adapter => adapter.tools?.() ?? []),
 ];
 const piSettings = SettingsManager.create(cwd, getAgentDir()).getGlobalSettings();
 const maatSettings = SettingsManager.create(cwd, maatDir, {
@@ -79,11 +82,7 @@ const modelRuntime = await ModelRuntime.create({
   authPath: path.join(piAgentDir, "auth.json"),
   modelsPath: path.join(piAgentDir, "models.json"),
 });
-const maatExtension = createMaatExtension(browserManager, caseManager, () => {
-  const device = projects.native.currentEnvironment?.device?.name ?? projects.native.currentTarget?.capabilities['appium:deviceName'];
-  return `Project  ${projects.current.name} · ${projects.current.platform}` +
-    (projects.current.platform === 'web' ? '' : ` · ${device ?? 'device auto'} · ${projects.native.isRunning ? 'running' : 'idle'}`);
-});
+const maatExtension = createMaatExtension(caseManager, () => projects.status());
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({
   cwd: runtimeCwd,
@@ -98,7 +97,7 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
     resourceLoaderOptions: createMaatResourceOptions([maatExtension, createWorkModeExtension(), {
       name: 'maat-cleanup', hidden: true, factory: pi => {
         pi.on('session_shutdown', async () => {
-          try { await projects.native.close(); } finally { await browserManager.close(); }
+          await projects.close();
         });
       },
     }]),
@@ -129,7 +128,5 @@ try {
   });
   await tui.run();
 } finally {
-  try { await projects.native.close(); } finally {
-    try { await browserManager.close(); } finally { await runtime.dispose(); }
-  }
+  try { await projects.close(); } finally { await runtime.dispose(); }
 }

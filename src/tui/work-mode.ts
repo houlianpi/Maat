@@ -3,7 +3,7 @@ import type { ExtensionContext, InlineExtension } from '@earendil-works/pi-codin
 
 export type WorkMode = 'assist' | 'case';
 const protectedTools = new Set(['bash', 'powershell', 'edit', 'write']);
-const caseTools = new Set(['begin_case', 'exec_js', 'exec_native', 'save_case']);
+const caseTools = new Set(['begin_case', 'exe_js', 'save_case']);
 const entryType = 'maat-work-mode';
 const blockedReason = 'Case mode: shell and direct file edits are disabled. Use Maat execution and save_case tools. To troubleshoot, explicitly switch to assist mode with user approval.';
 

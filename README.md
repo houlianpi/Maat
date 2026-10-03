@@ -4,373 +4,139 @@
 
 # ⚖️ Maat
 
-### Turn intent into executable UI truth.
+### Intent → UI → evidence → executable truth
 
-**Build, validate, and maintain UI tests through conversation.**
-
-[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![Playwright](https://img.shields.io/badge/Playwright-Test-2EAD33?logo=playwright&logoColor=white)](https://playwright.dev/)
-[![Pi SDK](https://img.shields.io/badge/Agent-Pi_SDK-6E56CF)](https://pi.dev/docs/latest/sdk)
-[![Status](https://img.shields.io/badge/status-experimental-orange)](#current-scope)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](https://www.typescriptlang.org/)
+[![Playwright](https://img.shields.io/badge/Web-Playwright-2EAD33)](https://playwright.dev/)
+[![Appium](https://img.shields.io/badge/Native-Appium-662D91)](https://appium.io/)
 [![CI](https://github.com/houlianpi/Maat/actions/workflows/ci.yml/badge.svg)](https://github.com/houlianpi/Maat/actions/workflows/ci.yml)
 
 </div>
 
----
+Maat is a conversational UI testing Harness. The Agent explores real interfaces, executes focused JavaScript, records observations and successful steps, validates them with fresh Sessions, and saves one standard Mocha TypeScript Case that runs without an LLM.
 
-Maat is a conversational UI testing agent. Describe **what you want to test** and **what success looks like**; Maat explores the interface, performs actions, creates focused assertions, captures evidence, and saves a standard Playwright Test.
-
-```text
-Intent → UI exploration → Business assertions → Evidence → Playwright Test → Report
-```
-
-> **Maat** is named after the ancient Egyptian concept of truth, order, and balance: actual UI state on one side of the scale, human intent on the other.
-
-## ✨ Why Maat?
-
-- **Conversational authoring** — refine a test over multiple turns in an interactive TUI.
-- **Intent-driven assertions** — assert explicit business outcomes instead of every operational prerequisite.
-- **Live browser exploration** — observe, operate, and correct a persistent Playwright page.
-- **Killable execution boundary** — model-generated JavaScript runs in a worker with timeouts, aborts, and output limits.
-- **One-file Cases** — human intent, tags, suites, code, and assertions live in one `*.spec.ts` file.
-- **Native Playwright ecosystem** — formal Cases use Playwright Test, projects, HTML reports, traces, and screenshots.
-- **Evidence first** — inspect screenshots in the TUI and attach final-state screenshots to formal reports.
-- **Flexible modules** — organize Cases by domain, feature, team, or any directory structure you choose.
-
-## 🎬 Quick start
-
-### Requirements
-
-- Node.js 22+ (development currently uses Node.js 26)
-- Chrome, Edge, or Playwright Chromium
-- A configured and authenticated [Pi](https://pi.dev/) model provider
-
-### Install from source
+## Quick start
 
 ```bash
 git clone https://github.com/houlianpi/Maat.git
 cd Maat
 npm install
 npm link
-```
-
-Start the interactive experience:
-
-```bash
 maat
 ```
 
-Maat defaults to Chrome, headless mode, and an isolated temporary profile.
+Describe the UI, actions, and explicit business outcome. Maat uses `exe_js` against the active Adapter. Web exposes Playwright `page/context/browser`; Android, iOS and macOS expose WebdriverIO `driver/browser` backed by an Appium Session.
 
-Then describe a Case:
+## One Case format
 
-```text
-Build and save a test Case for https://www.leaftools.net/calculator.
-
-Module: calculator
-Case ID: calculator-basic-addition
-Name: Basic addition
-Test objective: verify that 12 + 30 displays 42.
-Tags: calculator, smoke
-Suite: smoke
-```
-
-Maat handles the workflow:
-
-```mermaid
-flowchart LR
-    A[Understand intent] --> B[Explore UI]
-    B --> C[Perform actions]
-    C --> D[Create assertions]
-    D --> E[Capture evidence]
-    E --> F[Validate in a fresh browser]
-    F -->|Pass| G[Save Playwright Case]
-    F -->|Fail| B
-```
-
-## 🧭 Interactive workflow
-
-Case roots are enforced as `maat-tests/{web,android,ios,macos}/cases/<business-module>/<case-id>.spec.ts`. The model cannot create app/device-named project roots. Each platform owns its config and shared `fixtures/` alongside `cases/`. Native Evidence storage is handled by fixtures and WDIO hooks, not filesystem boilerplate in specs; outputs are grouped by platform, run and Case.
-
-Maat embeds Pi's native TUI for streaming conversations, tool calls, sessions, models, thinking controls, and token status. It adds its own runtime panel:
-
-```text
-Maat
-Conversational UI verification · intent → evidence → executable truth
-
-Browser  chrome · headless · temporary profile · idle
-Case     calculator-basic-addition · 3 steps · 0 failed attempts
-Evidence 4 items · 1 objectives
-```
-
-Work modes: `assist` (default) enables shell and file edits for setup, diagnostics, and running saved tests. UI exploration and Case generation enter `case`, blocking shell (including manual `!` / `!!`) and direct edits while allowing read-only inspection. Repair and save Cases through Maat tools. Successful saves return to `assist`; failed saves stay guarded.
-
-Use `/mode assist` to pause exploration without discarding the draft, or `/mode case` to resume. Agent-requested switches from `case` to `assist` require confirmation. The status bar shows the current mode. This workflow guard is not an OS sandbox.
-
-Continue naturally:
-
-```text
-Switch to Edge and show the browser window.
-Show the current Case status.
-List the Evidence.
-Show the latest screenshot.
-Save this Case under the calculator module.
-```
-
-| Tool | Purpose |
-|---|---|
-| `configure_browser` | Switch browser, headless/headed mode, and logical profile |
-| `get_browser_config` | Inspect the active browser configuration |
-| `begin_case` | Start a Case Draft with explicit objectives |
-| `exec_js` | Operate the persistent page and execute Playwright `expect` assertions |
-| `get_case_status` | Inspect candidate steps, failed attempts, and Evidence counts |
-| `list_evidence` | List Evidence captured for the active Case |
-| `show_evidence` | Render screenshots in supported terminals |
-| `save_case` | Revalidate in a fresh browser and save the formal Case |
-
-## 🧪 A Case is just Playwright Test
-
-Formal Cases do not require an LLM at runtime. They are ordinary Playwright Tests:
+All Cases live under `maat-tests/cases`. A Case may be pure Web, pure Appium, or mixed:
 
 ```typescript
-/**
- * Case ID: calculator-basic-addition
- * Name: Basic addition
- *
- * Description:
- * Verify that an online calculator correctly computes 12 + 30.
- *
- * Test objectives:
- * 1. The final result displays 42.
- */
+import { describe, it } from 'mocha';
+import { createMaatTest } from '../../../src/core/testing/fixture.ts';
 
-import { test, expect } from "../../fixtures/maat-test.ts";
-
-test.describe("Basic addition", {
-  tag: ["@calculator", "@smoke", "@suite:smoke"],
-  annotation: [
-    { type: "Case ID", description: "calculator-basic-addition" },
-    { type: "Test objectives", description: "The final result displays 42." },
-  ],
-}, () => {
-  test("calculator-basic-addition", async ({ page }) => {
-    await page.goto("https://www.leaftools.net/calculator", {
-      waitUntil: "domcontentloaded",
-    });
-    await expect(page.locator(".curr")).toHaveText("42");
+describe('Web opens desktop confirmation', () => {
+  it('mixed-confirmation', async () => {
+    const maat = await createMaatTest('mixed-confirmation', [
+      { adapterId: 'web', setup: { browser: 'chrome' } },
+      { adapterId: 'macos', setup: { app: { 'appium:bundleId': 'com.example.desktop' } } },
+    ]);
+    let passed = false;
+    try {
+      await maat.step('Open web', 'web', async ({ page }) => { await page.goto('https://example.com'); });
+      await maat.step('Confirm desktop', 'macos', async ({ driver }) => { await driver.$('~Confirm').click(); });
+      await maat.step('Verify web', 'web', async ({ page, expect }) => { await expect(page.locator('.status')).toHaveText('Success'); });
+      passed = true;
+    } finally { await maat.close(passed); }
   });
 });
 ```
 
-JSDoc keeps intent next to code. The same data is emitted as Playwright `annotation` entries so it appears in the official HTML report.
+The SessionPool creates only referenced Sessions. Returning to `web` reuses the original Playwright Page. Pure Web Cases never create or load Appium Sessions.
 
-See a real Case: [calculator-basic-addition.spec.ts](maat-tests/web/cases/calculator/calculator-basic-addition.spec.ts)
-
-## 🗂️ Organize Cases your way
-
-Cases use descriptive filenames; directories are yours to organize:
-
-```text
-maat-tests/web/
-├── playwright.config.ts
-├── fixtures/
-│   └── maat-test.ts
-└── cases/
-    ├── calculator/
-    │   ├── calculator-basic-addition.spec.ts
-    │   └── calculator-32-plus-30.spec.ts
-    ├── checkout/
-    │   └── guest-checkout.spec.ts
-    └── health-check.spec.ts
-```
-
-Nested modules such as `payments/refunds/refund-approved.spec.ts` are supported.
-
-## 🚀 Run tests
-
-```bash
-# Unique short names are resolved recursively
-maat test --case calculator-basic-addition
-
-# Use a module path to disambiguate duplicate names
-maat test --case calculator/calculator-basic-addition
-
-# Suites and tags are Playwright tags
-maat test --suite smoke
-maat test --tag calculator
-
-# Run every Case
-maat test --all
-
-# Browser project, headed mode, and workers
-maat test --suite smoke --project web --browser edge
-maat test --case calculator-basic-addition --headed
-maat test --suite smoke --workers 2
-
-# Playwright UI Mode
-maat test --all --ui
-```
-
-`maat cases` remains as a compatibility alias for `maat test`.
-
-## 📊 Evidence & reports
-
-Maat uses the **official Playwright HTML Reporter** without modifying or forking it.
-
-Unified settings live in [playwright.config.ts](maat-tests/web/playwright.config.ts); automatic final screenshots are provided by [maat-test.ts](maat-tests/web/fixtures/maat-test.ts).
-
-Every formal Case provides:
-
-- Case ID, description, preconditions, action steps, and test objectives
-- `test.step` execution structure
-- A full-page `final-state` screenshot on success and failure
-- Failure screenshots and traces
-- Explicit `display()` Evidence attachments
-- Optional video via `MAAT_VIDEO=1 maat test --suite smoke`
-
-Report location:
-
-```text
-artifacts/playwright/report/index.html
-```
-
-Open it with:
-
-```bash
-npx playwright show-report artifacts/playwright/report
-```
-
-Exploration Evidence and failed attempts live under:
-
-```text
-artifacts/cases/<case-id>/
-├── evidence/
-└── attempts/
-```
-
-## 🏗️ Architecture
+## Harness flow
 
 ```mermaid
-flowchart TD
-    User[User intent] --> TUI[Maat TUI / Pi InteractiveMode]
-    TUI --> Session[Pi AgentSession]
-    Session --> Tools[Maat tools]
-    Tools --> CaseManager[Case Manager]
-    Tools --> BrowserManager[Browser Manager]
-    BrowserManager --> Parent[Parent watchdog]
-    Parent --> Worker[JavaScript Worker]
-    Worker --> Playwright[Persistent Playwright page]
-    Playwright --> UI[Target UI]
-    Worker --> Evidence[Observations & Evidence]
-    Evidence --> TUI
-    CaseManager --> Validation[Fresh-browser validation]
-    Validation --> Spec[Standard *.spec.ts]
-    Spec --> Runner[Playwright Test]
-    Runner --> Report[Official HTML Report]
+flowchart LR
+  User --> Agent
+  Agent --> Execute[exe_js]
+  Execute --> Worker[shared killable Worker Harness]
+  Worker --> Adapter[active Platform Runtime]
+  Adapter --> Observation
+  Observation --> Draft
+  Draft --> Candidate[one Mocha spec]
+  Candidate --> Validate[fresh SessionPool validation]
+  Validate --> Case[formal Case]
+  Case --> Runner[Maat Mocha Runner]
+  Runner --> Report[Evidence + HTML report]
 ```
 
-| Layer | Responsibility |
+Exploration uses one common Worker Host/Client and independent Worker instances per active Adapter. Formal Cases execute compiled TypeScript directly and do not use exploration Workers.
+
+## Adapters and Session setup
+
+Built-in Adapters: Web, Android, iOS, macOS. Core depends only on `PlatformAdapter` and `PlatformRegistry`; adding another Adapter does not change Case, Runner, Renderer, SessionPool or Evidence.
+
+For Appium, Maat resolves a reachable Server and device, then creates and deletes its own Session. Driver installation, Server startup, ADB/Xcode, signing, simulators and OS permissions are prepared by the user or Agent through Shell. See [Appium Sessions](docs/native-testing.md).
+
+Ignored local hints live under `maat-tests/<adapter>/native-target.local.json`. They do not persist UUID, app identity, platformName or automationName.
+
+## Tools
+
+| Tool | Purpose |
 |---|---|
-| Pi SDK | Model calls, conversation, streaming, TUI, and session lifecycle |
-| Maat | Browser configuration, Case intent, assertions, Evidence, and persistence |
-| Worker | Killable execution boundary for model-generated JavaScript |
-| Playwright | Browser automation, xUnit runner, projects, reports, traces, and screenshots |
+| `list_platforms` / `select_platform` | Inspect and select an Adapter |
+| `configure_session` | Supply optional Server/device/App hints |
+| `list_devices` / `find_applications` | Assist Appium Session setup |
+| `begin_case` | Create a Draft with explicit objectives |
+| `exe_js` | Execute JavaScript in the active persistent UI Session |
+| `get_case_status` | Inspect steps, attempts and Evidence |
+| `save_case` | Validate with fresh Sessions and promote one Mocha spec |
 
-Core implementation:
+Assist mode permits Shell/setup work. Case mode blocks Shell and direct file edits while exploration and generation are active.
 
-- [TUI runtime](src/tui/main.ts)
-- [Case tools](src/cases/case-tools.ts)
-- [Playwright spec generator](src/cases/playwright-spec-generator.ts)
-- [JavaScript worker session](src/worker/javascript-session.ts)
+## Run and report
 
-## 🔐 Configuration isolation
-
-```text
-Shared:    Pi credentials and initial model catalog
-Isolated:  Maat settings, sessions, skills, extensions, and project context
+```bash
+maat test --case calculator-basic-addition
+maat test --suite smoke --browser chrome
+maat test --tag calculator
+maat test --all
 ```
 
-Maat stores its own state under:
+Formal output is grouped under `artifacts/maat/runs/<run-id>`:
 
 ```text
-~/.maat/settings.json
-~/.maat/sessions/
+mocha.log
+result.json
+report/index.html
+cases/<case-id>/evidence.json
+cases/<case-id>/*.png
 ```
 
-On first launch, Maat copies Pi's current default provider, model, thinking level, and theme. Future changes do not write back to regular Pi.
+Exploration Evidence and failed attempts live under `artifacts/cases/<case-id>`.
 
-Logical browser profiles are configured in `maat-tests/web/maat.config.json`. Do not automate your everyday Chrome or Edge profile directly; use a dedicated automation profile.
-
-## 🛡️ Safety model
-
-The Worker is a **killable process boundary**, not a container-grade security sandbox.
-
-Implemented safeguards:
-
-- 60-second execution deadline and abort support
-- 64 KiB code limit
-- 12 MiB output limit
-- IPC protocol validation
-- Sensitive environment-variable filtering
-- Forced Worker and browser cleanup
-
-Filesystem, network, container, and OS-level isolation are not implemented. Do not execute unknown model-generated code in an untrusted environment.
-
-## 🧰 CLI reference
+## Architecture
 
 ```text
-maat                         Start interactive TUI
-maat tui                     Start interactive TUI
-maat agent [options] PROMPT  Run one non-interactive task
-maat test [options]          Run formal Playwright Cases
-maat cases [options]         Compatibility alias for maat test
-maat replay FILE [options]   Run an exploration Replay
-maat help                    Show help
+src/
+├── core/          shared Worker Harness, Case renderer/saver, Runner, SessionPool, Evidence
+├── platforms/     Web, Android, iOS, macOS and shared Appium Session implementation
+├── setup/         optional device and application discovery
+├── cases/         Draft state and selection utilities
+├── tui/           Pi interactive host
+└── tools/         Agent tool adapters
 ```
 
-| Variable | Purpose |
-|---|---|
-| `MAAT_TRACE=0` | Disable model/tool trace logs in non-interactive mode |
-| `MAAT_BROWSER_EXECUTABLE_PATH` | Set a browser executable for development/exploration |
-| `MAAT_VIDEO=1` | Retain failure video for formal Playwright Cases |
+The Worker is a killable process boundary with timeout, Abort, code/output limits and sensitive environment filtering. It is not an OS or container sandbox.
 
-## 🧑‍💻 Development
+## Development
 
 ```bash
 npm install
 npm run typecheck
 npm test
-maat test --suite smoke --workers 2
+maat test --suite smoke --browser chromium
 ```
 
-## Current scope
-
-Native TypeScript integration is available with WebdriverIO, WDIO Runner, Mocha, expect-webdriverio and Appium. See [native testing](docs/native-testing.md) for the exact workflow and current verification limits. Web projects now live in `maat-tests/web/`; use `maat test --project web --browser edge --suite smoke`.
-
-Web execution uses Playwright. Native execution uses WebdriverIO + Appium (UiAutomator2, XCUITest, Mac2); saved native specs use WDIO Runner + Mocha + expect-webdriverio. See the integration guide for device setup and dependency audit findings.
-
-Android/iOS/macOS integration is tested against a mock W3C endpoint and real WDIO/Appium runners. Real-device signing, drivers and permissions must be supplied before hardware validation.
-
-## 🗺️ Roadmap
-
-- [x] Conversational TUI
-- [x] Persistent browser runtime
-- [x] Killable JavaScript Worker
-- [x] Intent-driven Playwright assertions
-- [x] Evidence and final-state screenshots
-- [x] Standard Playwright Test Cases
-- [x] Tags, suites, projects, and HTML reports
-- [ ] Maat business-focused custom Reporter
-- [ ] Dedicated profile fixtures
-- [ ] Desktop UI Adapter
-- [ ] Mobile UI Adapter
-- [ ] Container / OS sandbox
-- [ ] CI templates and historical trends
-
----
-
-<div align="center">
-
-**Maat — intent, evidence, executable truth.**
-
-</div>
+The current dependency audit reports 16 high-severity transitive advisories. They are not suppressed or force-upgraded; review upstream fixes before production distribution.

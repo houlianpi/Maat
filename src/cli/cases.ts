@@ -1,10 +1,9 @@
 import { parseArgs } from "node:util";
 
-import { parseBrowserName } from "../browser/browser-options.ts";
-import { runCases, type CaseSelection } from "../cases/case-runner.ts";
+import type { CaseSelection } from "../cases/case-runner.ts";
 import path from 'node:path';
-import { access } from 'node:fs/promises';
-import { platformRoot } from '../projects/layout.ts';
+import { ProjectManager } from '../projects/project-manager.ts';
+import { createDefaultPlatformRegistry } from '../platforms/default-registry.ts';
 
 try {
   const { values } = parseArgs({
@@ -37,22 +36,11 @@ try {
         ? { mode: "tag", value: values.tag }
         : { mode: "all" };
 
-  const project = values.project ?? 'web';
-  const rootDirectory = platformRoot(values.root, project);
-  const native = await access(path.join(rootDirectory, 'wdio.conf.ts')).then(() => true, () => false);
-  if (native) {
-    const { runNativeProject } = await import('../native/execution/runner.ts');
-    process.exitCode = await runNativeProject(rootDirectory, selection);
-  } else process.exitCode = await runCases({
-    rootDirectory,
-    selection,
-    ...(values.browser
-      ? { browser: parseBrowserName(values.browser) }
-      : {}),
-    headed: values.headed,
-    ui: values.ui,
-    ...(values.workers ? { workers: Number(values.workers) } : {}),
-  });
+  const project = values.project;
+  const testsRoot = path.resolve(values.root);
+  const projects = new ProjectManager(createDefaultPlatformRegistry(testsRoot), testsRoot);
+  if (project) await projects.select(project);
+  try { process.exitCode = await projects.run(selection, { browser: values.browser, headed: values.headed, adapterId: project }); } finally { await projects.close(); }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;

@@ -2,10 +2,8 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 
 import { browserChannel, type BrowserName } from "./browser-options.ts";
-import {
-  launchJavaScriptSession,
-  type JavaScriptSession,
-} from "../worker/javascript-session.ts";
+import type { JavaScriptSession } from "../worker/javascript-session.ts";
+import { createWebExplorationSession } from '../platforms/web/exploration-session.ts';
 
 export type BrowserProfile = {
   browser: BrowserName;
@@ -83,7 +81,7 @@ export class BrowserManager implements JavaScriptSession {
   private async launch(): Promise<JavaScriptSession> {
     const profile = await this.readProfile();
     const browser = profile?.browser ?? this.config.browser;
-    return launchJavaScriptSession({
+    return createWebExplorationSession({
       channel: browserChannel(browser),
       headless: this.config.headless,
       profileDirectory: profile?.profileDirectory,

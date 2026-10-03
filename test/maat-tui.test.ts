@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { BrowserManager } from "../src/browser/browser-manager.ts";
 import { CaseManager } from "../src/cases/case-manager.ts";
 import { maatStatusLines } from "../src/tui/maat-extension.ts";
 import {
@@ -32,7 +31,6 @@ test("Maat isolates Pi resources while copying initial model preferences", () =>
 });
 
 test("Maat status lines show browser, Case, and Evidence state", () => {
-  const browserManager = new BrowserManager();
   const caseManager = new CaseManager();
   caseManager.begin({
     id: "login-case",
@@ -41,8 +39,8 @@ test("Maat status lines show browser, Case, and Evidence state", () => {
     objectives: ["Dashboard is visible"],
   });
 
-  const lines = maatStatusLines(browserManager, caseManager);
-  assert.match(lines[0]!, /Browser  chrome · headless/);
+  const lines = maatStatusLines({ id: 'web', label: 'Web', root: '/tmp/web', session: 'idle', detail: 'chrome · headless' }, caseManager);
+  assert.match(lines[0]!, /Platform Web · chrome · headless · idle/);
   assert.match(lines[1]!, /Case     login-case · 0 steps/);
   assert.match(lines[2]!, /Evidence 0 items · 1 objectives/);
 });

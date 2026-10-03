@@ -1,59 +1,13 @@
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 
-import { browserNames, type BrowserName } from "../browser/browser-options.ts";
-import type { BrowserManager } from "../browser/browser-manager.ts";
-import { validateAndSaveCase } from "./case-store.ts";
 import type { CaseManager } from "./case-manager.ts";
 import type { ProjectManager } from '../projects/project-manager.ts';
 
 export function createCaseTools(
   caseManager: CaseManager,
-  browserManager: BrowserManager,
-  projects?: ProjectManager,
+  projects: ProjectManager,
 ) {
-  const configureBrowser = defineTool({
-    name: "configure_browser",
-    label: "Configure Browser",
-    description:
-      "Configure the browser used by later exec_js calls. Changing configuration closes the current browser.",
-    parameters: Type.Object({
-      browser: Type.Optional(Type.Union(browserNames.map((name) => Type.Literal(name)))),
-      headless: Type.Optional(Type.Boolean()),
-      profile: Type.Optional(
-        Type.String({ description: "Logical profile name from the selected Web project's maat.config.json; empty clears it" }),
-      ),
-    }),
-    execute: async (_id, params) => ({
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            await browserManager.configure({
-              ...(params.browser ? { browser: params.browser as BrowserName } : {}),
-              ...(params.headless !== undefined ? { headless: params.headless } : {}),
-              ...(params.profile !== undefined ? { profile: params.profile } : {}),
-            }),
-          ),
-        },
-      ],
-      details: {},
-    }),
-  });
-
-  const getBrowserConfig = defineTool({
-    name: "get_browser_config",
-    label: "Get Browser Config",
-    description: "Return the current browser configuration.",
-    parameters: Type.Object({}),
-    execute: async () => ({
-      content: [
-        { type: "text", text: JSON.stringify(browserManager.currentConfig) },
-      ],
-      details: {},
-    }),
-  });
-
   const beginCase = defineTool({
     name: "begin_case",
     label: "Begin Case",
@@ -64,7 +18,7 @@ export function createCaseTools(
       module: Type.Optional(
         Type.String({
           description:
-            "Optional business module under maat-tests/<platform>/cases, for example calculator or payments/refunds. The platform root is fixed by select_project.",
+            "Optional business module under maat-tests/<platform>/cases, for example calculator or payments/refunds. The platform root is fixed by select_platform.",
         }),
       ),
       name: Type.String(),
@@ -79,7 +33,7 @@ export function createCaseTools(
       content: [
         {
           type: "text",
-          text: JSON.stringify(caseManager.begin({ ...params, ...(projects ? { rootDirectory: projects.current.root } : {}) })),
+          text: JSON.stringify(caseManager.begin({ ...params, rootDirectory: projects.current.root })),
         },
       ],
       details: {},
@@ -101,12 +55,12 @@ export function createCaseTools(
     name: "save_case",
     label: "Validate and Save Case",
     description:
-      "Validate the complete Case in a new session, retaining app data. Save a named TypeScript spec only after validation passes. Web uses Playwright Test; native projects use WDIO Runner/Mocha/expect-webdriverio. Do not change user expectations to make a test pass.",
+      "Validate the complete Case with fresh Adapter Sessions, then save one Mocha TypeScript spec. A Case may contain Web and Appium steps. Do not change user expectations to make a test pass.",
     parameters: Type.Object({}),
     execute: async (_id, _params, signal) => {
       const draft = caseManager.current;
       if (!draft) throw new Error("No active Case. Call begin_case first.");
-      const result = projects ? await projects.save(draft, browserManager, signal) : await validateAndSaveCase(draft, browserManager);
+      const result = await projects.save(draft, signal);
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
         details: result,
@@ -160,8 +114,6 @@ export function createCaseTools(
   });
 
   return [
-    configureBrowser,
-    getBrowserConfig,
     beginCase,
     getCaseStatus,
     saveCase,

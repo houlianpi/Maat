@@ -12,9 +12,10 @@ export type RunRecorderOptions = {
 };
 
 export type StepRecorder = {
-  recordSuccessfulStep(code: string, observations: JavaScriptObservation[]): Promise<void>;
-  recordFailedStep(code: string, error: unknown): Promise<void>;
+  recordSuccessfulStep(code: string, observations: JavaScriptObservation[], execution?: StepExecution): Promise<void>;
+  recordFailedStep(code: string, error: unknown, execution?: StepExecution): Promise<void>;
 };
+export type StepExecution = { adapterId: string; bindings: string[]; requirement: import('../platforms/contracts.ts').RuntimeRequirement };
 
 export type RunRecorder = StepRecorder & {
   readonly runDirectory: string;

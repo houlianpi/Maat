@@ -1,22 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:http';
-import { mkdtemp, mkdir, writeFile, rm, readFile, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { startNativeSession } from '../src/native/exploration/session.ts';
-import { startOwnedServer } from '../src/native/appium/server.ts';
-import { capabilities, connection, splitCapabilities } from '../src/native/environment/schema.ts';
-import { matchDevices, parseAndroidDevices, parseIosDevices } from '../src/native/environment/devices.ts';
-import { nativeSpec } from '../src/native/cases/spec-generator.ts';
-import { runNativeProject } from '../src/native/execution/runner.ts';
+import { startNativeSession } from '../src/platforms/appium/runtime/session.ts';
+import { capabilities, connection, splitCapabilities } from '../src/platforms/appium/schema.ts';
+import { matchDevices, parseAndroidDevices, parseIosDevices } from '../src/setup/devices.ts';
 import { CaseManager } from '../src/cases/case-manager.ts';
 import { ProjectManager } from '../src/projects/project-manager.ts';
 import { BrowserManager } from '../src/browser/browser-manager.ts';
-import { scaffoldNativeFixture } from '../src/native/cases/fixture.ts';
 import { platformRoot, casePath } from '../src/projects/layout.ts';
 import { createProjectTools } from '../src/projects/project-tools.ts';
 import { createCaseTools } from '../src/cases/case-tools.ts';
 import { createMaatResourceOptions } from '../src/tui/maat-runtime-config.ts';
+import { AppiumPlatformAdapter } from '../src/platforms/appium/appium-adapter.ts';
+import { createDefaultPlatformRegistry } from '../src/platforms/default-registry.ts';
 
 async function mockAppium() {
   let deletes = 0; let creations = 0;
@@ -95,122 +93,63 @@ test('native execution enforces code/output limits and a parent deadline', async
   try {
     await assert.rejects(session.execute('x'.repeat(65537)), /64 KiB/);
     await assert.rejects(session.execute("console.log('x'.repeat(13 * 1024 * 1024))"), /12 MiB/);
-    await assert.rejects(session.execute('await Promise.resolve(); while (true) {}'), /timed out/);
+    await assert.rejects(session.execute('await Promise.resolve(); while (true) {}'), /exceeded 1500ms/);
   } finally { await session.close(); mock.server.close(); }
   assert.equal(mock.deleted(), 1);
-});
-
-test('official Appium service starts and stops its owned server without drivers', async () => {
-  const server = await startOwnedServer();
-  try { assert.equal((await fetch(server.url + 'status')).status, 200); } finally { await server.close(); }
-  await assert.rejects(fetch(server.url + 'status'));
-});
-
-test('generated native Case runs under actual WDIO Runner, Mocha and expect-webdriverio', async () => {
-  const mock = await mockAppium();
-  await mkdir('artifacts/native-tests', { recursive: true });
-  const root = await mkdtemp(path.resolve('artifacts/native-tests/run-'));
-  try {
-    await mkdir(path.join(root, 'cases'));
-    await scaffoldNativeFixture(root);
-    const draft = new CaseManager().begin({ id: 'native-smoke', name: 'Native smoke', description: 'Welcome label', objectives: ['Welcome visible'], suites: ['smoke'] });
-    draft.steps.push({ number: 1, observations: [], code: `await expect(driver.$('~welcome')).toBeDisplayed(); await expect(driver.$('~welcome')).toHaveText('Welcome'); await evidence.screenshot('welcome'); display(await driver.takeScreenshot());` });
-    await writeFile(path.join(root, 'cases/native-smoke.spec.ts'), nativeSpec(draft, { 'appium:appPackage': 'example.smoke' }));
-    await writeFile(path.join(root, 'native-target.local.json'), JSON.stringify({ platform: 'android', serverUrl: mock.url, capabilities: { 'appium:deviceName': 'mock', 'appium:appPackage': 'example.other' } }));
-    const implementation = path.resolve('src/native/execution/wdio-config.ts');
-    await writeFile(path.join(root, 'wdio.conf.ts'), `import { createNativeConfig } from ${JSON.stringify(implementation)}; export const config = await createNativeConfig(${JSON.stringify(root)});`);
-    assert.equal(await runNativeProject(root, { mode: 'all' }), 0);
-    assert.equal(mock.deleted(), 1);
-    assert.equal(mock.sessionCapabilities[0]?.['appium:appPackage'], 'example.smoke');
-    const runs = path.resolve(root, '../../artifacts/native', path.basename(root), 'runs');
-    const [run] = await readdir(runs);
-    const evidenceRoot = path.join(runs, run, 'evidence');
-    const [testDirectory] = await readdir(evidenceRoot);
-    const manifest = JSON.parse(await readFile(path.join(evidenceRoot, testDirectory, 'evidence.json'), 'utf8'));
-    assert.equal(manifest.test.title, 'native-smoke');
-    assert.equal(manifest.passed, true);
-    assert.deepEqual(manifest.items.map((item: { name: string }) => item.name), ['welcome', 'observation', 'final-state']);
-    for (const item of manifest.items) assert.ok((await readFile(path.join(evidenceRoot, testDirectory, item.path))).length);
-  } finally { mock.server.close(); await rm(root, { recursive: true, force: true }); }
-});
-
-test('native batch continues after a failing Case and reports aggregate failure', async () => {
-  const mock = await mockAppium();
-  await mkdir('artifacts/native-tests', { recursive: true });
-  const root = await mkdtemp(path.resolve('artifacts/native-tests/batch-'));
-  try {
-    await mkdir(path.join(root, 'cases'));
-    await scaffoldNativeFixture(root);
-    const first = new CaseManager().begin({ id: 'first', name: 'First', description: 'Fails', objectives: ['Fail'] });
-    first.steps.push({ number: 1, observations: [], code: `await expect(1).toBe(2);` });
-    const second = new CaseManager().begin({ id: 'second', name: 'Second', description: 'Passes', objectives: ['Pass'] });
-    second.steps.push({ number: 1, observations: [], code: `await expect(2).toBe(2);` });
-    await writeFile(path.join(root, 'cases/first.spec.ts'), nativeSpec(first, { 'appium:appPackage': 'example.first' }));
-    await writeFile(path.join(root, 'cases/second.spec.ts'), nativeSpec(second, { 'appium:appPackage': 'example.second' }));
-    await writeFile(path.join(root, 'native-target.local.json'), JSON.stringify({ platform: 'android', serverUrl: mock.url, capabilities: { 'appium:deviceName': 'mock' } }));
-    const implementation = path.resolve('src/native/execution/wdio-config.ts');
-    await writeFile(path.join(root, 'wdio.conf.ts'), `import { createNativeConfig } from ${JSON.stringify(implementation)}; export const config = await createNativeConfig(${JSON.stringify(root)});`);
-    assert.equal(await runNativeProject(root, { mode: 'all' }), 1);
-    assert.deepEqual(mock.sessionCapabilities.map(caps => caps['appium:appPackage']), ['example.first', 'example.second']);
-  } finally { mock.server.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test('Agent project flow saves a verified TypeScript native Case and retains remote server', async () => {
   const mock = await mockAppium();
   await mkdir('artifacts/native-tests', { recursive: true });
   const base = await mkdtemp(path.resolve('artifacts/native-tests/layout-'));
-  const projects = new ProjectManager(base);
   const browser = new BrowserManager();
+  const projects = new ProjectManager(createDefaultPlatformRegistry(base, browser), base);
   const cases = new CaseManager();
   const root = path.join(base, 'android');
   try {
-    await projects.select('android', 'android', browser);
-    await projects.configure({ platform: 'android', serverUrl: mock.url, capabilities: { 'appium:deviceName': 'mock' } }, { 'appium:appPackage': 'example.welcome' });
-    const configure = createProjectTools(projects, browser, cases).find(tool => tool.name === 'configure_native')!;
+    await projects.select('android');
+    await projects.configureSession({ serverUrl: mock.url, capabilities: { 'appium:deviceName': 'mock', 'appium:appPackage': 'example.welcome' } });
+    const configure = createProjectTools(projects, cases).find(tool => tool.name === 'configure_session')!;
     await configure.execute('update', { capabilities: { 'appium:newCommandTimeout': 180 } }, undefined, undefined, {} as never);
-    assert.equal(projects.native.currentEnvironment?.serverUrl, mock.url);
-    assert.equal(projects.native.currentEnvironment?.capabilities['appium:deviceName'], 'mock');
-    const draft = cases.begin({ id: 'welcome', module: 'account/login', name: 'Welcome', description: 'Welcome is shown', objectives: ['Welcome'], rootDirectory: root });
+    assert.ok(projects.adapter instanceof AppiumPlatformAdapter);
+    assert.equal(projects.adapter.sessionHints?.serverUrl, mock.url);
+    assert.equal(projects.adapter.sessionHints?.capabilities['appium:deviceName'], 'mock');
+    const draft = cases.begin({ id: 'welcome', module: 'account/login', name: 'Welcome', description: 'Welcome is shown', objectives: ['Welcome'], rootDirectory: base });
     const code = `await expect(driver.$('~welcome')).toHaveText('Welcome');`;
-    await cases.recordSuccessfulStep(code, await projects.native.execute(code));
-    const saved = await projects.save(draft, browser);
+    await cases.recordSuccessfulStep(code, await projects.execute(code), { adapterId: 'android', bindings: ['driver', 'browser', 'expect', 'display', 'evidence'], requirement: projects.adapter.runtimeRequirement() });
+    const saved = await projects.save(draft);
     const { readFile } = await import('node:fs/promises');
     const spec = await readFile(saved.testPath, 'utf8');
-    assert.ok(spec.includes('fixtures/maat-test.ts'));
-    assert.equal(mock.created(), 2); assert.equal(mock.deleted(), 2);
-    assert.equal(saved.testPath, path.join(root, 'cases/account/login/welcome.spec.ts'));
-    assert.ok(spec.includes('../../../fixtures/maat-test.ts'));
+    assert.match(spec, /createMaatTest/);
+    assert.equal(mock.created(), 2); assert.equal(mock.deleted(), 1);
+    assert.equal(saved.testPath, path.join(base, 'cases/account/login/welcome.spec.ts'));
+    assert.match(spec, /maat\.step\("Recorded step 001", "android"/);
     assert.doesNotMatch(spec, /node:fs|mkdirSync|writeFileSync|randomUUID|path.resolve/);
     assert.equal(mock.server.listening, true);
     assert.ok(!spec.includes(mock.url));
-    draft.steps.push({ number: 2, observations: [], code: `await expect(1).toBe(2);` });
-    await assert.rejects(projects.save(draft, browser), /WDIO validation failed/);
+    draft.steps.push({ number: 2, adapterId: 'android', bindings: ['expect'], observations: [], code: `await expect(1).toBe(2);` });
+    await assert.rejects(projects.save(draft), /Clean validation failed/);
     assert.equal(await readFile(saved.testPath, 'utf8'), spec);
-    const runs = path.resolve(root, '../../artifacts/native/android/runs');
-    const manifests = [];
-    for (const run of await readdir(runs)) {
-      const evidenceRoot = path.join(runs, run, 'evidence');
-      for (const testDirectory of await readdir(evidenceRoot)) manifests.push(JSON.parse(await readFile(path.join(evidenceRoot, testDirectory, 'evidence.json'), 'utf8')));
-    }
-    assert.ok(manifests.some(m => m.passed === false && m.items.some((item: { name: string }) => item.name === 'failure')));
+    const runs = path.resolve('artifacts/maat/runs');
+    assert.ok((await readdir(runs)).length > 0);
   } finally {
-    await projects.native.close(); await browser.close(); mock.server.close();
+    await projects.close(); await browser.close(); mock.server.close();
     await rm(base, { recursive: true, force: true });
   }
 });
 
 test('platform layout is enforced by schema and manager, not model naming', async () => {
-  const projects = new ProjectManager();
+  const projects = new ProjectManager(createDefaultPlatformRegistry(), path.resolve('maat-tests'));
   const browser = new BrowserManager();
-  await assert.rejects(projects.select('iphone-calculator', 'ios', browser), /must equal platform/);
+  await assert.rejects(projects.select('iphone-calculator'), /Unknown platform/);
   assert.equal(projects.current.platform, 'web');
   for (const platform of ['web', 'android', 'ios', 'macos']) assert.equal(platformRoot('maat-tests', platform), path.resolve('maat-tests', platform));
   assert.throws(() => platformRoot('maat-tests', '../escape'));
   assert.throws(() => casePath('/root/ios', '../escape'));
   assert.throws(() => casePath('/root/ios', 'case', '../escape'));
-  const tools = createProjectTools(projects, browser, new CaseManager());
-  assert.equal(tools.find(tool => tool.name === 'select_project')!.parameters.properties.name, undefined);
-  const caseTools = createCaseTools(new CaseManager(), browser, projects);
+  const tools = createProjectTools(projects, new CaseManager());
+  assert.equal(tools.find(tool => tool.name === 'select_platform')!.parameters.properties.platform.type, 'string');
+  const caseTools = createCaseTools(new CaseManager(), projects);
   assert.equal(caseTools.find(tool => tool.name === 'begin_case')!.parameters.properties.rootDirectory, undefined);
   assert.ok(createMaatResourceOptions([]).systemPrompt.includes('maat-tests/<platform>/cases/<module>/<case-id>.spec.ts'));
 });

@@ -7,10 +7,8 @@ import { browserChannel, type BrowserName } from "../browser/browser-options.ts"
 import { createAgentTrace } from "../logging/agent-trace.ts";
 import { createRunRecorder } from "../recording/run-recorder.ts";
 import { createExecJsTool } from "../tools/exec-js-tool.ts";
-import {
-  launchJavaScriptSession,
-  type JavaScriptSession,
-} from "../worker/javascript-session.ts";
+import type { JavaScriptSession } from "../worker/javascript-session.ts";
+import { createWebExplorationSession } from '../platforms/web/exploration-session.ts';
 
 function shortToolCallId(id: string): string {
   return id.split("|", 1)[0].slice(0, 24);
@@ -38,7 +36,7 @@ export async function runAgent(
   let javascriptSession: JavaScriptSession | undefined;
   let runError: unknown;
   try {
-    javascriptSession = await launchJavaScriptSession({
+    javascriptSession = await createWebExplorationSession({
       channel: browserChannel(browser),
       executablePath: options.executablePath,
       headless: options.headless ?? false,
@@ -47,8 +45,11 @@ export async function runAgent(
     });
     const { session } = await createAgentSession({
       cwd: process.cwd(),
-      tools: ["exec_js"],
-      customTools: [createExecJsTool(javascriptSession, recorder)],
+      tools: ["exe_js"],
+      customTools: [createExecJsTool(javascriptSession, recorder, {
+        description: 'Execute asynchronous JavaScript against one persistent Playwright page. The globals page, context, browser, expect, console and display are available.',
+        guidelines: ['Use Playwright locators.', 'Use display(await page.screenshot()) for visual Evidence.'],
+      })],
       sessionManager: SessionManager.inMemory(),
     });
 

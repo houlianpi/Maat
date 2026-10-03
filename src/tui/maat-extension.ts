@@ -4,34 +4,27 @@ import type {
   InlineExtension,
 } from "@earendil-works/pi-coding-agent";
 
-import type { BrowserManager } from "../browser/browser-manager.ts";
 import type { CaseManager } from "../cases/case-manager.ts";
+import type { PlatformStatus } from '../platforms/contracts.ts';
 
 export function maatStatusLines(
-  browserManager: BrowserManager,
+  platform: PlatformStatus,
   caseManager: CaseManager,
 ): string[] {
-  const browser = browserManager.currentConfig;
   const draft = caseManager.current;
-  const browserLine = [
-    `Browser  ${browser.browser}`,
-    browser.headless ? "headless" : "headed",
-    browser.profile ? `profile: ${browser.profile}` : "temporary profile",
-    browserManager.isRunning ? "running" : "idle",
-  ].join(" · " );
+  const platformLine = [`Platform ${platform.label}`, platform.detail, platform.session].filter(Boolean).join(' · ');
   const caseLine = draft
     ? `Case     ${draft.id} · ${draft.steps.length} steps · ${draft.failures.length} failed attempts`
     : "Case     no active Case";
   const evidenceLine = draft
     ? `Evidence ${draft.evidence.length} items · ${draft.objectives.length} objectives`
     : "Evidence 0 items";
-  return [browserLine, caseLine, evidenceLine];
+  return [platformLine, caseLine, evidenceLine];
 }
 
 export function createMaatExtension(
-  browserManager: BrowserManager,
   caseManager: CaseManager,
-  projectStatus?: () => string,
+  platformStatus: () => PlatformStatus,
 ): InlineExtension {
   const factory = (pi: ExtensionAPI) => {
     const applyUi = (ctx: ExtensionContext) => {
@@ -51,7 +44,7 @@ export function createMaatExtension(
       }));
       ctx.ui.setWidget(
         "maat-status",
-        [...(projectStatus ? [projectStatus()] : []), ...maatStatusLines(browserManager, caseManager)],
+        maatStatusLines(platformStatus(), caseManager),
         { placement: "aboveEditor" },
       );
     };
