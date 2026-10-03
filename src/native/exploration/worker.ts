@@ -3,7 +3,7 @@ import { format } from 'node:util';
 import { attach } from 'webdriverio';
 import { expect } from 'expect-webdriverio';
 import ts from 'typescript';
-import { maxCodeBytes, maxOutputBytes, type JavaScriptObservation } from '../worker/protocol.ts';
+import { maxCodeBytes, maxOutputBytes, type JavaScriptObservation } from '../../worker/protocol.ts';
 
 let driver: Awaited<ReturnType<typeof attach>>;
 let busy = false;

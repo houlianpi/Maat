@@ -20,7 +20,7 @@ export type CaseRunOptions = {
   workers?: number;
 };
 
-async function findSpecs(directory: string): Promise<string[]> {
+export async function findSpecs(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
   const nested = await Promise.all(
     entries.map((entry) => {

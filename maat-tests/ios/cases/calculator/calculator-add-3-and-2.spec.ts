@@ -11,6 +11,7 @@
  * 验证结果为 5 并截图
  * Objectives:
  * 计算器执行 3 + 2 = 后，最终结果为 5
+ * @maat-target {"appium:bundleId":"com.apple.calculator"}
  */
 import { driver, expect, describe, it } from '../../fixtures/maat-test.ts';
 

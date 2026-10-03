@@ -80,7 +80,7 @@ const modelRuntime = await ModelRuntime.create({
   modelsPath: path.join(piAgentDir, "models.json"),
 });
 const maatExtension = createMaatExtension(browserManager, caseManager, () => {
-  const device = projects.native.currentTarget?.capabilities['appium:deviceName'];
+  const device = projects.native.currentEnvironment?.device?.name ?? projects.native.currentTarget?.capabilities['appium:deviceName'];
   return `Project  ${projects.current.name} · ${projects.current.platform}` +
     (projects.current.platform === 'web' ? '' : ` · ${device ?? 'device auto'} · ${projects.native.isRunning ? 'running' : 'idle'}`);
 });

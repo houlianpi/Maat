@@ -1,5 +1,8 @@
 {
   "platform": "macos",
+  "device": {
+    "kind": "host"
+  },
   "capabilities": {
     "appium:noReset": true,
     "appium:fullReset": false

@@ -13,6 +13,12 @@ src/
   worker/      Untrusted-code process boundary (add with worker isolation)
   cases/       Natural-language Case metadata, clean validation, persistence, and batch execution
   tui/         Pi InteractiveMode host and long-lived conversational state
+  native/
+    environment/ Stable config schema plus device/application discovery
+    exploration/ Persistent Agent session and isolated TypeScript worker
+    execution/   WDIO runner, configuration, and Evidence lifecycle
+    appium/      Owned local Appium server lifecycle
+    cases/       Native Case target metadata, fixture, and spec generation
 examples/      Small, manually runnable demonstrations
 test/          Automated tests, mirroring the source domains
 artifacts/     Generated screenshots and run records; never source code
@@ -76,5 +82,6 @@ Run `npm run browser:demo` when browser lifecycle code changes.
 - Keep the persistent browser lifecycle independent from the Pi session lifecycle. The integration layer owns and closes both.
 - Test roots are fixed to `maat-tests/{web,android,ios,macos}` by the project manager and tool schema. Each platform owns its runner config, `fixtures/` and `cases/<business-module>/<case-id>.spec.ts`. Do not create device/app-named project roots. Device/app/server/signing settings belong in ignored `native-target.local.json`, never in Case code.
 - Native Case source imports the shared `fixtures/maat-test.ts`; never inline filesystem/Evidence persistence boilerplate. WDIO hooks own automatic final/failure screenshots. Explicit `evidence.screenshot(name)` and legacy `display(base64)` use the same helper. Store logs, JUnit and per-test Evidence manifests under `artifacts/native/<platform>/runs/<run-id>/`, resolved from the project root, not the caller's working directory.
+- Saved native specs include `@maat-target` with only app identity. The WDIO runner applies it before each Case session. Platform-local config stores stable device selectors, server and signing; locally discovered UUIDs and exploration app identities are transient. Batch runs use one session per spec. Do not put device IDs or signing in source metadata.
 - Retain app data by default; resetting requires explicit user intent. Own local Appium servers through the WDIO Appium service; delete only owned sessions on remote servers.
 - TUI assist mode permits Pi shell/read/edit/write for auxiliary work. Case exploration/generation enters case mode, blocking shell (including manual `!`/`!!`) and direct edit/write tools. Read-only inspection remains available. Failed saves retain the guard; successful saves return to assist. `/mode assist` explicitly pauses the workflow without clearing its draft; model-requested transitions to assist require user confirmation. This is a tool workflow guard, not an OS sandbox.

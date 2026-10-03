@@ -3,18 +3,23 @@ import { promisify } from 'node:util';
 import { mkdtemp, readFile, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { NativeTarget } from './config.ts';
-import { selectDevice } from './devices.ts';
+import type { NativeEnvironment } from './schema.ts';
+import { resolveDevice } from './devices.ts';
 const exec = promisify(execFile);
 
-export async function discoverApplications(input: NativeTarget, query: string) {
-  if (input.serverUrl) throw new Error('Remote installed-app discovery is driver-specific. Supply an app identifier or package path.');
-  const target = await selectDevice(input);
+export async function discoverApplications(input: NativeEnvironment, query: string) {
+  if (input.serverUrl && !input.device) throw new Error('Remote installed-app discovery is driver-specific. Supply an app identifier or package path.');
+  const target = await resolveDevice(input);
   let apps: Array<{ name: string; id: string }> = [];
-  if (target.platform === 'android') {
+  if (target.environment.platform === 'android') {
     const { stdout } = await exec('adb', ['-s', String(target.capabilities['appium:udid']), 'shell', 'pm', 'list', 'packages'], { timeout: 15_000 });
     apps = stdout.split('\n').filter(line => line.startsWith('package:')).map(line => ({ name: line.slice(8).trim(), id: line.slice(8).trim() }));
-  } else if (target.platform === 'ios') {
+  } else if (target.environment.platform === 'ios') {
+    if (target.environment.device?.kind === 'simulator') {
+      const { stdout } = await exec('xcrun', ['simctl', 'listapps', String(target.capabilities['appium:udid'])], { timeout: 20_000 });
+      const identifiers = [...stdout.matchAll(/^\s*"([^"]+)" =/gm)].map(match => match[1]!);
+      apps = identifiers.map(id => ({ name: id, id }));
+    } else {
     const dir = await mkdtemp(path.join(tmpdir(), 'maat-app-list-'));
     try {
       const file = path.join(dir, 'apps.json');
@@ -22,6 +27,7 @@ export async function discoverApplications(input: NativeTarget, query: string) {
       const result = JSON.parse(await readFile(file, 'utf8'));
       apps = (result.result?.apps ?? []).map((a: { name: string; bundleIdentifier: string }) => ({ name: a.name, id: a.bundleIdentifier }));
     } finally { await rm(dir, { recursive: true, force: true }); }
+    }
   } else {
     for (const folder of ['/Applications', '/System/Applications']) {
       for (const entry of await readdir(folder)) {

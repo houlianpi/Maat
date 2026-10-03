@@ -1,15 +1,15 @@
 import { fork } from 'node:child_process';
 import { remote } from 'webdriverio';
-import { capabilities, connection, type NativeTarget } from './config.ts';
-import { startOwnedServer } from './server.ts';
-import { isRecord, maxCodeBytes, parseObservations } from '../worker/protocol.ts';
-import type { JavaScriptSession } from '../worker/javascript-session.ts';
+import { capabilities, connection, type ResolvedNativeSession } from '../environment/schema.ts';
+import { startOwnedServer } from '../appium/server.ts';
+import { isRecord, maxCodeBytes, parseObservations } from '../../worker/protocol.ts';
+import type { JavaScriptSession } from '../../worker/javascript-session.ts';
 
-export async function startNativeSession(target: NativeTarget, timeoutMs = 60_000): Promise<JavaScriptSession> {
+export async function startNativeSession(target: ResolvedNativeSession, timeoutMs = 60_000): Promise<JavaScriptSession> {
   const desired = capabilities(target);
-  if (target.serverUrl) connection(target.serverUrl);
-  const owned = target.serverUrl ? undefined : await startOwnedServer();
-  const endpoint = connection(target.serverUrl ?? owned!.url);
+  if (target.environment.serverUrl) connection(target.environment.serverUrl);
+  const owned = target.environment.serverUrl ? undefined : await startOwnedServer();
+  const endpoint = connection(target.environment.serverUrl ?? owned!.url);
   let driver: Awaited<ReturnType<typeof remote>>;
   try {
     driver = await remote({ ...endpoint, capabilities: desired, logLevel: 'silent',

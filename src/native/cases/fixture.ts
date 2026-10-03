@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export function nativeFixtureSource(root: string): string {
-  const implementation = fileURLToPath(new URL('./evidence.ts', import.meta.url));
+  const implementation = fileURLToPath(new URL('../execution/evidence.ts', import.meta.url));
   let relative = path.relative(path.join(root, 'fixtures'), implementation).split(path.sep).join('/');
   if (!relative.startsWith('.')) relative = './' + relative;
   return `// Shared native test fixture. Evidence lifecycle is owned by wdio.conf.ts.

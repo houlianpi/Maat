@@ -3,16 +3,16 @@ import test from 'node:test';
 import { createServer } from 'node:http';
 import { mkdtemp, mkdir, writeFile, rm, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { startNativeSession } from '../src/native/session.ts';
-import { startOwnedServer } from '../src/native/server.ts';
-import { capabilities, connection } from '../src/native/config.ts';
-import { parseAndroidDevices } from '../src/native/devices.ts';
-import { nativeSpec } from '../src/native/spec-generator.ts';
-import { runNativeProject } from '../src/native/runner.ts';
+import { startNativeSession } from '../src/native/exploration/session.ts';
+import { startOwnedServer } from '../src/native/appium/server.ts';
+import { capabilities, connection, splitCapabilities } from '../src/native/environment/schema.ts';
+import { matchDevices, parseAndroidDevices, parseIosDevices } from '../src/native/environment/devices.ts';
+import { nativeSpec } from '../src/native/cases/spec-generator.ts';
+import { runNativeProject } from '../src/native/execution/runner.ts';
 import { CaseManager } from '../src/cases/case-manager.ts';
 import { ProjectManager } from '../src/projects/project-manager.ts';
 import { BrowserManager } from '../src/browser/browser-manager.ts';
-import { scaffoldNativeFixture } from '../src/native/fixture.ts';
+import { scaffoldNativeFixture } from '../src/native/cases/fixture.ts';
 import { platformRoot, casePath } from '../src/projects/layout.ts';
 import { createProjectTools } from '../src/projects/project-tools.ts';
 import { createCaseTools } from '../src/cases/case-tools.ts';
@@ -20,11 +20,12 @@ import { createMaatResourceOptions } from '../src/tui/maat-runtime-config.ts';
 
 async function mockAppium() {
   let deletes = 0; let creations = 0;
+  const sessionCapabilities: Record<string, unknown>[] = [];
   const server = createServer(async (req, res) => {
     let raw = ''; for await (const chunk of req) raw += chunk;
     const body = raw ? JSON.parse(raw) : {};
     let value: unknown = null;
-    if (req.url === '/session' && req.method === 'POST') { creations++; value = { sessionId: 'owned-' + creations, capabilities: body.capabilities.alwaysMatch }; }
+    if (req.url === '/session' && req.method === 'POST') { creations++; sessionCapabilities.push(body.capabilities.alwaysMatch); value = { sessionId: 'owned-' + creations, capabilities: body.capabilities.alwaysMatch }; }
     else if (req.method === 'DELETE') deletes++;
     else if (req.url?.endsWith('/element')) value = { 'element-6066-11e4-a52e-4f735466cecf': 'button-1' };
     else if (req.url?.endsWith('/text')) value = 'Welcome';
@@ -35,7 +36,7 @@ async function mockAppium() {
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('No address');
-  return { url: `http://127.0.0.1:${address.port}/`, server, deleted: () => deletes, created: () => creations };
+  return { url: `http://127.0.0.1:${address.port}/`, server, deleted: () => deletes, created: () => creations, sessionCapabilities };
 }
 
 test('native defaults preserve data and device discovery excludes offline devices', () => {
@@ -45,9 +46,25 @@ test('native defaults preserve data and device discovery excludes offline device
   assert.equal(parseAndroidDevices('List of devices attached\na device model:Pixel\nb unauthorized\nc offline').length, 1);
 });
 
+test('native target persists stable environment and resolves changing device UUIDs', () => {
+  const split = splitCapabilities({ 'appium:udid': 'old-uuid', 'appium:bundleId': 'com.example.old', 'appium:xcodeOrgId': 'TEAM' });
+  assert.equal(split.environment['appium:udid'], undefined);
+  assert.equal(split.app['appium:bundleId'], 'com.example.old');
+  assert.equal(split.environment['appium:xcodeOrgId'], 'TEAM');
+  assert.equal(matchDevices([{ id: 'new-uuid', name: 'iPhone 17', kind: 'simulator' }], { kind: 'simulator', name: 'iPhone 17' })[0]?.id, 'new-uuid');
+});
+
+test('iOS discovery keeps simulators listed after offline devices', () => {
+  const devices = parseIosDevices(`== Devices ==\nPhone (26.7) (00000000-0000000000000001)\n== Devices Offline ==\nOld Phone (26.6) (00000000-0000000000000002)\n== Simulators ==\niPhone 17 Simulator (27.0) (00000000-0000-0000-0000-000000000003)`);
+  assert.deepEqual(devices.map(({ name, kind }) => ({ name, kind })), [
+    { name: 'Phone', kind: 'device' },
+    { name: 'iPhone 17', kind: 'simulator' },
+  ]);
+});
+
 test('WDIO worker executes TypeScript and assertions, owns only its remote session', async () => {
   const mock = await mockAppium();
-  const session = await startNativeSession({ platform: 'android', serverUrl: mock.url, capabilities: {} });
+  const session = await startNativeSession({ environment: { platform: 'android', serverUrl: mock.url, capabilities: {} }, capabilities: {} });
   try {
     const result = await session.execute(`const label: string = await driver.$('~welcome').getText(); expect(label).toBe('Welcome'); console.log(label);`);
     assert.deepEqual(result, [{ type: 'text', text: 'Welcome' }]);
@@ -62,7 +79,7 @@ test('WDIO worker executes TypeScript and assertions, owns only its remote sessi
 
 test('native synchronous runaway is killed and remote session deleted', async () => {
   const mock = await mockAppium();
-  const session = await startNativeSession({ platform: 'android', serverUrl: mock.url, capabilities: {} }, 5000);
+  const session = await startNativeSession({ environment: { platform: 'android', serverUrl: mock.url, capabilities: {} }, capabilities: {} }, 5000);
   const abort = new AbortController();
   try {
     const executing = session.execute('while (true) {}', abort.signal);
@@ -74,7 +91,7 @@ test('native synchronous runaway is killed and remote session deleted', async ()
 
 test('native execution enforces code/output limits and a parent deadline', async () => {
   const mock = await mockAppium();
-  const session = await startNativeSession({ platform: 'ios', serverUrl: mock.url, capabilities: {} }, 1500);
+  const session = await startNativeSession({ environment: { platform: 'ios', serverUrl: mock.url, capabilities: {} }, capabilities: {} }, 1500);
   try {
     await assert.rejects(session.execute('x'.repeat(65537)), /64 KiB/);
     await assert.rejects(session.execute("console.log('x'.repeat(13 * 1024 * 1024))"), /12 MiB/);
@@ -98,12 +115,13 @@ test('generated native Case runs under actual WDIO Runner, Mocha and expect-webd
     await scaffoldNativeFixture(root);
     const draft = new CaseManager().begin({ id: 'native-smoke', name: 'Native smoke', description: 'Welcome label', objectives: ['Welcome visible'], suites: ['smoke'] });
     draft.steps.push({ number: 1, observations: [], code: `await expect(driver.$('~welcome')).toBeDisplayed(); await expect(driver.$('~welcome')).toHaveText('Welcome'); await evidence.screenshot('welcome'); display(await driver.takeScreenshot());` });
-    await writeFile(path.join(root, 'cases/native-smoke.spec.ts'), nativeSpec(draft));
-    await writeFile(path.join(root, 'native-target.local.json'), JSON.stringify({ platform: 'android', serverUrl: mock.url, capabilities: { 'appium:deviceName': 'mock' } }));
-    const implementation = path.resolve('src/native/wdio-config.ts');
+    await writeFile(path.join(root, 'cases/native-smoke.spec.ts'), nativeSpec(draft, { 'appium:appPackage': 'example.smoke' }));
+    await writeFile(path.join(root, 'native-target.local.json'), JSON.stringify({ platform: 'android', serverUrl: mock.url, capabilities: { 'appium:deviceName': 'mock', 'appium:appPackage': 'example.other' } }));
+    const implementation = path.resolve('src/native/execution/wdio-config.ts');
     await writeFile(path.join(root, 'wdio.conf.ts'), `import { createNativeConfig } from ${JSON.stringify(implementation)}; export const config = await createNativeConfig(${JSON.stringify(root)});`);
     assert.equal(await runNativeProject(root, { mode: 'all' }), 0);
     assert.equal(mock.deleted(), 1);
+    assert.equal(mock.sessionCapabilities[0]?.['appium:appPackage'], 'example.smoke');
     const runs = path.resolve(root, '../../artifacts/native', path.basename(root), 'runs');
     const [run] = await readdir(runs);
     const evidenceRoot = path.join(runs, run, 'evidence');
@@ -113,6 +131,27 @@ test('generated native Case runs under actual WDIO Runner, Mocha and expect-webd
     assert.equal(manifest.passed, true);
     assert.deepEqual(manifest.items.map((item: { name: string }) => item.name), ['welcome', 'observation', 'final-state']);
     for (const item of manifest.items) assert.ok((await readFile(path.join(evidenceRoot, testDirectory, item.path))).length);
+  } finally { mock.server.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('native batch continues after a failing Case and reports aggregate failure', async () => {
+  const mock = await mockAppium();
+  await mkdir('artifacts/native-tests', { recursive: true });
+  const root = await mkdtemp(path.resolve('artifacts/native-tests/batch-'));
+  try {
+    await mkdir(path.join(root, 'cases'));
+    await scaffoldNativeFixture(root);
+    const first = new CaseManager().begin({ id: 'first', name: 'First', description: 'Fails', objectives: ['Fail'] });
+    first.steps.push({ number: 1, observations: [], code: `await expect(1).toBe(2);` });
+    const second = new CaseManager().begin({ id: 'second', name: 'Second', description: 'Passes', objectives: ['Pass'] });
+    second.steps.push({ number: 1, observations: [], code: `await expect(2).toBe(2);` });
+    await writeFile(path.join(root, 'cases/first.spec.ts'), nativeSpec(first, { 'appium:appPackage': 'example.first' }));
+    await writeFile(path.join(root, 'cases/second.spec.ts'), nativeSpec(second, { 'appium:appPackage': 'example.second' }));
+    await writeFile(path.join(root, 'native-target.local.json'), JSON.stringify({ platform: 'android', serverUrl: mock.url, capabilities: { 'appium:deviceName': 'mock' } }));
+    const implementation = path.resolve('src/native/execution/wdio-config.ts');
+    await writeFile(path.join(root, 'wdio.conf.ts'), `import { createNativeConfig } from ${JSON.stringify(implementation)}; export const config = await createNativeConfig(${JSON.stringify(root)});`);
+    assert.equal(await runNativeProject(root, { mode: 'all' }), 1);
+    assert.deepEqual(mock.sessionCapabilities.map(caps => caps['appium:appPackage']), ['example.first', 'example.second']);
   } finally { mock.server.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -126,11 +165,11 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
   const root = path.join(base, 'android');
   try {
     await projects.select('android', 'android', browser);
-    await projects.configure({ platform: 'android', serverUrl: mock.url, capabilities: { 'appium:deviceName': 'mock' } });
+    await projects.configure({ platform: 'android', serverUrl: mock.url, capabilities: { 'appium:deviceName': 'mock' } }, { 'appium:appPackage': 'example.welcome' });
     const configure = createProjectTools(projects, browser, cases).find(tool => tool.name === 'configure_native')!;
     await configure.execute('update', { capabilities: { 'appium:newCommandTimeout': 180 } }, undefined, undefined, {} as never);
-    assert.equal(projects.native.currentTarget?.serverUrl, mock.url);
-    assert.equal(projects.native.currentTarget?.capabilities['appium:deviceName'], 'mock');
+    assert.equal(projects.native.currentEnvironment?.serverUrl, mock.url);
+    assert.equal(projects.native.currentEnvironment?.capabilities['appium:deviceName'], 'mock');
     const draft = cases.begin({ id: 'welcome', module: 'account/login', name: 'Welcome', description: 'Welcome is shown', objectives: ['Welcome'], rootDirectory: root });
     const code = `await expect(driver.$('~welcome')).toHaveText('Welcome');`;
     await cases.recordSuccessfulStep(code, await projects.native.execute(code));

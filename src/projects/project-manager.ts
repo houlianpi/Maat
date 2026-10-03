@@ -3,12 +3,12 @@ import { fileURLToPath } from 'node:url';
 import { mkdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import type { BrowserManager } from '../browser/browser-manager.ts';
-import { NativeManager } from '../native/manager.ts';
-import { readNativeTarget, type NativeTarget } from '../native/config.ts';
+import { NativeManager } from '../native/exploration/manager.ts';
+import { readNativeEnvironment, type NativeAppTarget, type NativeEnvironment } from '../native/environment/schema.ts';
 import { platformRoot, casePath, type Platform } from './layout.ts';
-import { scaffoldNativeFixture } from '../native/fixture.ts';
-import { nativeSpec } from '../native/spec-generator.ts';
-import { runNativeProject } from '../native/runner.ts';
+import { scaffoldNativeFixture } from '../native/cases/fixture.ts';
+import { nativeSpec } from '../native/cases/spec-generator.ts';
+import { runNativeProject } from '../native/execution/runner.ts';
 import type { CaseDraft } from '../cases/types.ts';
 import { validateAndSaveCase } from '../cases/case-store.ts';
 
@@ -34,29 +34,29 @@ export class ProjectManager {
       browser.setConfigRoot(root);
     } else {
       const targetFile = path.join(root, 'native-target.local.json');
-      let target: NativeTarget;
-      try { target = await readNativeTarget(targetFile); }
+      let environment: NativeEnvironment;
+      try { environment = await readNativeEnvironment(targetFile); }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        target = { platform, capabilities: {} };
+        environment = { platform, capabilities: {} };
       }
-      if (target.platform !== platform) throw new Error('Project platform conflicts with its target configuration.');
-      await this.native.configure(target);
+      if (environment.platform !== platform) throw new Error('Project platform conflicts with its target configuration.');
+      await this.native.configure(environment);
       this.active = { name: platform, platform, root };
       await this.scaffold();
     }
     return this.active;
   }
-  async configure(target: NativeTarget) {
-    if (target.platform !== this.active.platform) throw new Error('Select the matching native project first.');
-    await this.native.configure(target);
+  async configure(environment: NativeEnvironment, app?: NativeAppTarget) {
+    if (environment.platform !== this.active.platform) throw new Error('Select the matching native project first.');
+    await this.native.configure(environment, app);
     await this.scaffold();
-    await writeFile(path.join(this.active.root, 'native-target.local.json'), JSON.stringify(target, null, 2) + '\n', { mode: 0o600 });
+    await writeFile(path.join(this.active.root, 'native-target.local.json'), JSON.stringify(environment, null, 2) + '\n', { mode: 0o600 });
   }
   private async scaffold() {
     const root = this.active.root;
     await mkdir(path.join(root, 'cases'), { recursive: true });
-    const implementation = fileURLToPath(new URL('../native/wdio-config.ts', import.meta.url));
+    const implementation = fileURLToPath(new URL('../native/execution/wdio-config.ts', import.meta.url));
     let importPath = path.relative(root, implementation).split(path.sep).join('/');
     if (!importPath.startsWith('.')) importPath = './' + importPath;
     const source = `import { createNativeConfig } from ${JSON.stringify(importPath)};
@@ -71,16 +71,14 @@ export const config = await createNativeConfig(fileURLToPath(new URL('.', import
     const final = casePath(this.active.root, draft.id, draft.module);
     if (this.active.platform === 'web') return validateAndSaveCase(draft, browser);
     if (!draft.steps.length) throw new Error('No native steps to save.');
-    const target = this.native.currentTarget;
-    if (!target) throw new Error('Configure a native target first.');
-    // Discovery resolves once; persist device choice only in ignored local target config.
-    const { selectDevice } = await import('../native/devices.ts');
-    await this.configure(await selectDevice(target));
+    const app = this.native.currentApp;
+    if (!this.native.currentEnvironment) throw new Error('Configure a native environment first.');
+    if (!app || Object.keys(app).length === 0) throw new Error('Configure a native app before saving the Case.');
     await this.native.close();
     const directory = path.dirname(final);
     await mkdir(directory, { recursive: true });
     const candidate = path.join(directory, `.validate-${randomUUID()}.spec.ts`);
-    await writeFile(candidate, nativeSpec(draft));
+    await writeFile(candidate, nativeSpec(draft, app));
     try {
       const code = await runNativeProject(this.active.root, { mode: 'all' }, candidate, signal);
       if (code !== 0) throw new Error('WDIO validation failed; no formal Case saved.');

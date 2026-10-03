@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { appiumEntry, appiumHome } from '../native/server.ts';
+import { appiumEntry, appiumHome } from '../native/appium/server.ts';
 
 const drivers: Record<string, string> = { android: 'uiautomator2', ios: 'xcuitest', macos: 'mac2' };
 const [command = 'list', platform] = process.argv.slice(2);

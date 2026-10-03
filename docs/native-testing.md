@@ -22,7 +22,7 @@ await expect(driver.$('~welcome')).toBeDisplayed();
 display(await driver.takeScreenshot());
 ```
 
-Only one online local device is selected automatically. Multiple devices require one selection; that UDID is retained for the conversation. Remote Appium has no standard device-discovery endpoint: configure deviceName or udid for that project. Android app lookup currently matches package IDs; real iOS discovery uses Xcode, and macOS discovery lists installed app bundles.
+Only one matching local device is selected automatically. `native-target.local.json` stores a stable selector such as `{ "kind": "simulator", "name": "iPhone 17" }`; Maat resolves its current UUID at runtime. An explicit remote Appium server has no standard device-discovery endpoint, so use its stable `deviceName` routing capability. Android app lookup currently matches package IDs; real iOS discovery uses Xcode, and macOS discovery lists installed app bundles.
 
 ## Projects and configuration
 
@@ -45,9 +45,8 @@ Native platform scaffolds are created on selection. Agent configuration is saved
 ```json
 {
   "platform": "android",
+  "device": { "kind": "device", "name": "Pixel 9" },
   "capabilities": {
-    "appium:appPackage": "com.example.demo",
-    "appium:appActivity": ".MainActivity",
     "appium:noReset": true,
     "appium:fullReset": false
   }
@@ -56,7 +55,11 @@ Native platform scaffolds are created on selection. Agent configuration is saved
 
 Add `serverUrl` for remote Appium, including any `/wd/hub` base path. Omit it for a Maat-owned local server. Maat uses the WDIO Appium service for local process lifecycle and deletes only its own remote Session. A new Session does not clear application data. Data reset requires an explicit user request.
 
-For iOS/macOS set `appium:bundleId`; for installation set `appium:app`. Driver-specific signing capabilities remain configuration, not test code. Real iPhone XCUITest still requires Apple signing/provisioning and Developer Mode.
+The local target contains the environment: Appium endpoint, stable device selector, signing, timeouts and data-retention policy. It does not persist a discovered UUID or the current app. App identifiers are transient during exploration and saved as Case target metadata. Driver-specific signing capabilities remain configuration. Real iPhone XCUITest still requires Apple signing/provisioning and Developer Mode.
+
+Each saved native Case records only its app target (`appium:bundleId`, Android package/activity, or app path) in a leading `@maat-target` comment. `maat test` applies that app target before WDIO creates the session, so changing the exploration app cannot replay a calculator Case in Calendar. The device selector, Appium URL, signing and data-retention settings come from ignored `native-target.local.json` or the `MAAT_NATIVE_TARGET` override. Batch runs start a separate session for each spec to apply its target. Existing native specs without target metadata need to be revalidated and saved.
+
+The same `beforeSession` hook applies Case target metadata when WDIO is launched directly through `wdio.conf.ts`; there is no Maat-only environment variable contract. Suite, tag and all-Case runs execute every selected spec in its own Session and return a failing aggregate status after the remaining Cases finish.
 
 ## Driver prerequisites
 

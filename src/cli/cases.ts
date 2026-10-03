@@ -41,7 +41,7 @@ try {
   const rootDirectory = platformRoot(values.root, project);
   const native = await access(path.join(rootDirectory, 'wdio.conf.ts')).then(() => true, () => false);
   if (native) {
-    const { runNativeProject } = await import('../native/runner.ts');
+    const { runNativeProject } = await import('../native/execution/runner.ts');
     process.exitCode = await runNativeProject(rootDirectory, selection);
   } else process.exitCode = await runCases({
     rootDirectory,
