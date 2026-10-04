@@ -1,16 +1,13 @@
-import { Type } from "@earendil-works/pi-ai";
-import { defineTool } from "@earendil-works/pi-coding-agent";
+import { Type } from '@earendil-works/pi-ai';
+import { defineTool } from '@earendil-works/pi-coding-agent';
 
-import type { CaseManager } from "./case-manager.ts";
+import type { CaseManager } from './case-manager.ts';
 import type { ProjectManager } from '../projects/project-manager.ts';
 
-export function createCaseTools(
-  caseManager: CaseManager,
-  projects: ProjectManager,
-) {
+export function createCaseTools(caseManager: CaseManager, projects: ProjectManager) {
   const beginCase = defineTool({
-    name: "begin_case",
-    label: "Begin Case",
+    name: 'begin_case',
+    label: 'Begin Case',
     description:
       "Start a test Case from the user's natural-language description, action steps, and explicit test objectives.",
     parameters: Type.Object({
@@ -18,7 +15,7 @@ export function createCaseTools(
       module: Type.Optional(
         Type.String({
           description:
-            "Optional business module under maat-tests/<platform>/cases, for example calculator or payments/refunds. The platform root is fixed by select_platform.",
+            'Optional business module under maat-tests/<platform>/cases, for example calculator or payments/refunds. The platform root is fixed by select_platform.',
         }),
       ),
       name: Type.String(),
@@ -32,8 +29,10 @@ export function createCaseTools(
     execute: async (_id, params) => ({
       content: [
         {
-          type: "text",
-          text: JSON.stringify(caseManager.begin({ ...params, rootDirectory: projects.current.root })),
+          type: 'text',
+          text: JSON.stringify(
+            caseManager.begin({ ...params, rootDirectory: projects.current.root }),
+          ),
         },
       ],
       details: {},
@@ -41,58 +40,57 @@ export function createCaseTools(
   });
 
   const getCaseStatus = defineTool({
-    name: "get_case_status",
-    label: "Get Case Status",
-    description: "Return the active Case objectives, candidate steps, failures, and Evidence count.",
+    name: 'get_case_status',
+    label: 'Get Case Status',
+    description:
+      'Return the active Case objectives, candidate steps, failures, and Evidence count.',
     parameters: Type.Object({}),
     execute: async () => ({
-      content: [{ type: "text", text: JSON.stringify(caseManager.status()) }],
+      content: [{ type: 'text', text: JSON.stringify(caseManager.status()) }],
       details: {},
     }),
   });
 
   const saveCase = defineTool({
-    name: "save_case",
-    label: "Validate and Save Case",
+    name: 'save_case',
+    label: 'Validate and Save Case',
     description:
-      "Validate the complete Case with fresh Adapter Sessions, then save one Mocha TypeScript spec. A Case may contain Web and Appium steps. Do not change user expectations to make a test pass.",
+      'Validate the complete Case with fresh Adapter Sessions, then save one Mocha TypeScript spec. A Case may contain Web and Appium steps. Do not change user expectations to make a test pass.',
     parameters: Type.Object({}),
     execute: async (_id, _params, signal) => {
       const draft = caseManager.current;
-      if (!draft) throw new Error("No active Case. Call begin_case first.");
+      if (!draft) throw new Error('No active Case. Call begin_case first.');
       const result = await projects.save(draft, signal);
       return {
-        content: [{ type: "text", text: JSON.stringify(result) }],
+        content: [{ type: 'text', text: JSON.stringify(result) }],
         details: result,
       };
     },
   });
 
   const listEvidence = defineTool({
-    name: "list_evidence",
-    label: "List Evidence",
-    description: "List text and screenshot Evidence captured for the active Case.",
+    name: 'list_evidence',
+    label: 'List Evidence',
+    description: 'List text and screenshot Evidence captured for the active Case.',
     parameters: Type.Object({}),
     execute: async () => ({
-      content: [
-        { type: "text", text: JSON.stringify(caseManager.listEvidence()) },
-      ],
+      content: [{ type: 'text', text: JSON.stringify(caseManager.listEvidence()) }],
       details: {},
     }),
   });
 
   const showEvidence = defineTool({
-    name: "show_evidence",
-    label: "Show Evidence",
+    name: 'show_evidence',
+    label: 'Show Evidence',
     description:
-      "Return one Evidence item. Screenshot Evidence is rendered inline by Pi TUI when the terminal supports images.",
+      'Return one Evidence item. Screenshot Evidence is rendered inline by Pi TUI when the terminal supports images.',
     parameters: Type.Object({ id: Type.String() }),
     execute: async (_id, params) => {
       const evidence = caseManager.getEvidence(params.id);
       if (!evidence) throw new Error(`Unknown Evidence id: ${params.id}`);
-      if (evidence.type === "text") {
+      if (evidence.type === 'text') {
         return {
-          content: [{ type: "text" as const, text: evidence.text ?? "" }],
+          content: [{ type: 'text' as const, text: evidence.text ?? '' }],
           details: evidence,
         };
       }
@@ -102,23 +100,17 @@ export function createCaseTools(
       return {
         content: [
           {
-            type: "image" as const,
-            data: (await readFile(evidence.path)).toString("base64"),
+            type: 'image' as const,
+            data: (await readFile(evidence.path)).toString('base64'),
             mimeType: evidence.mimeType,
           },
-          { type: "text" as const, text: evidence.path },
+          { type: 'text' as const, text: evidence.path },
         ],
         details: evidence,
       };
     },
   });
 
-  return [
-    beginCase,
-    getCaseStatus,
-    saveCase,
-    listEvidence,
-    showEvidence,
-  ];
+  return [beginCase, getCaseStatus, saveCase, listEvidence, showEvidence];
 }
-import { readFile } from "node:fs/promises";
+import { readFile } from 'node:fs/promises';

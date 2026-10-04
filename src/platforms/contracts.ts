@@ -14,7 +14,12 @@ export type CodeContext = {
   globals: Array<{ name: string; description: string }>;
   guidelines: string[];
 };
-export type SessionSetup = { serverUrl?: string; device?: { kind?: string; name?: string }; capabilities?: Record<string, unknown>; allowDataReset?: boolean };
+export type SessionSetup = {
+  serverUrl?: string;
+  device?: { kind?: string; name?: string };
+  capabilities?: Record<string, unknown>;
+  allowDataReset?: boolean;
+};
 export type SetupInspection = { kind: 'devices' | 'applications'; query?: string };
 export type RuntimeRequirement = { adapterId: string; setup?: Record<string, unknown> };
 export type TestSession = {

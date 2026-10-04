@@ -12,10 +12,19 @@ export async function saveCase(draft: CaseDraft, testsRoot: string, signal?: Abo
   await mkdir(directory, { recursive: true });
   const final = path.join(directory, `${draft.id}.spec.ts`);
   const candidate = path.join(directory, `.validate-${randomUUID()}.spec.ts`);
-  let fixtureImport = path.relative(directory, path.resolve('src/core/testing/fixture.ts')).split(path.sep).join('/');
+  let fixtureImport = path
+    .relative(directory, path.resolve('src/core/testing/fixture.ts'))
+    .split(path.sep)
+    .join('/');
   if (!fixtureImport.startsWith('.')) fixtureImport = `./${fixtureImport}`;
   await writeFile(candidate, renderSpec(buildSpecModel(draft), fixtureImport));
-  try { await runMaatTests(testsRoot, { mode: 'all' }, signal, candidate); await rename(candidate, final); }
-  finally { await unlink(candidate).catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }); }
+  try {
+    await runMaatTests(testsRoot, { mode: 'all' }, signal, candidate);
+    await rename(candidate, final);
+  } finally {
+    await unlink(candidate).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    });
+  }
   return { caseDirectory: directory, testPath: final };
 }

@@ -7,22 +7,19 @@ export type ReplayDefaults = {
   browser?: string;
 };
 
-export function generateReplay(
-  steps: ReplayStep[],
-  defaults: ReplayDefaults = {},
-): string {
+export function generateReplay(steps: ReplayStep[], defaults: ReplayDefaults = {}): string {
   const stepBodies = steps
     .map(
       ({ number, code }) => `
-  console.log("[replay] step ${String(number).padStart(3, "0")}");
+  console.log("[replay] step ${String(number).padStart(3, '0')}");
   await (async (page, context, browser, expect, console, display) => {
 ${code
-  .split("\n")
+  .split('\n')
   .map((line) => `    ${line}`)
-  .join("\n")}
+  .join('\n')}
   })(page, context, browser, expect, console, display);`,
     )
-    .join("\n");
+    .join('\n');
 
   return `import { mkdirSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -41,7 +38,7 @@ const browserChannels = {
 
 const { values } = parseArgs({
   options: {
-    browser: { type: "string", default: ${JSON.stringify(defaults.browser ?? "chromium")} },
+    browser: { type: "string", default: ${JSON.stringify(defaults.browser ?? 'chromium')} },
     "executable-path": { type: "string" },
     "user-data-dir": { type: "string" },
     "profile-directory": { type: "string" },

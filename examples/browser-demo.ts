@@ -1,5 +1,5 @@
-import { findBrowserExecutable } from "../src/browser/browser-executable.ts";
-import { BrowserRuntime } from "../src/browser/browser-runtime.ts";
+import { findBrowserExecutable } from '../src/browser/browser-executable.ts';
+import { BrowserRuntime } from '../src/browser/browser-runtime.ts';
 
 const runtime = new BrowserRuntime({
   executablePath: await findBrowserExecutable(),
@@ -16,10 +16,10 @@ try {
       });
     </script>
   `);
-  await firstPage.locator("#counter").click();
+  await firstPage.locator('#counter').click();
 
   const secondPage = await runtime.start();
-  const counter = await secondPage.locator("#counter").textContent();
+  const counter = await secondPage.locator('#counter').textContent();
 
   console.log({
     counter,

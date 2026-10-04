@@ -1,10 +1,10 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 
-import type { StepRecorder } from "../recording/run-recorder.ts";
-import type { JavaScriptObservation } from "../worker/protocol.ts";
+import type { StepRecorder } from '../recording/run-recorder.ts';
+import type { JavaScriptObservation } from '../worker/protocol.ts';
 import type { StepExecution } from '../recording/run-recorder.ts';
-import type { CaseDraft, CaseEvidence } from "./types.ts";
+import type { CaseDraft, CaseEvidence } from './types.ts';
 
 export type BeginCaseInput = {
   id: string;
@@ -23,27 +23,27 @@ function normalizeId(value: string): string {
   const id = value
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  if (!id) throw new Error("Case id must contain letters or numbers.");
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (!id) throw new Error('Case id must contain letters or numbers.');
   return id;
 }
 
 function normalizeModule(value: string | undefined): string | undefined {
   if (!value?.trim()) return undefined;
-  const segments = value
-    .split(/[\/\\]+/)
-    .map(normalizeId);
+  const segments = value.split(/[\/\\]+/).map(normalizeId);
   if (segments.some((segment) => !segment)) {
-    throw new Error("Case module contains an invalid path segment.");
+    throw new Error('Case module contains an invalid path segment.');
   }
-  return segments.join("/");
+  return segments.join('/');
 }
 
 export class CaseManager implements StepRecorder {
   private draft: CaseDraft | undefined;
 
-  clear(): void { this.draft = undefined; }
+  clear(): void {
+    this.draft = undefined;
+  }
 
   get current(): CaseDraft | undefined {
     return this.draft;
@@ -51,7 +51,7 @@ export class CaseManager implements StepRecorder {
 
   begin(input: BeginCaseInput): CaseDraft {
     if (input.objectives.length === 0) {
-      throw new Error("A Case requires at least one explicit test objective.");
+      throw new Error('A Case requires at least one explicit test objective.');
     }
     this.draft = {
       id: normalizeId(input.id),
@@ -66,7 +66,7 @@ export class CaseManager implements StepRecorder {
       })),
       tags: [...new Set(input.tags ?? [])],
       suites: [...new Set(input.suites ?? [])],
-      rootDirectory: path.resolve(input.rootDirectory ?? "maat-tests"),
+      rootDirectory: path.resolve(input.rootDirectory ?? 'maat-tests'),
       requirements: [],
       steps: [],
       failures: [],
@@ -89,40 +89,38 @@ export class CaseManager implements StepRecorder {
       observations,
     });
     if (execution) {
-      const requirements = this.draft.requirements ??= [];
-      const index = requirements.findIndex(item => item.adapterId === execution.requirement.adapterId);
+      const requirements = (this.draft.requirements ??= []);
+      const index = requirements.findIndex(
+        (item) => item.adapterId === execution.requirement.adapterId,
+      );
       if (index === -1) requirements.push(execution.requirement);
       else requirements[index] = execution.requirement;
     }
     const stepNumber = this.draft.steps.length;
-    const evidenceDirectory = path.resolve(
-      "artifacts/cases",
-      this.draft.id,
-      "evidence",
-    );
+    const evidenceDirectory = path.resolve('artifacts/cases', this.draft.id, 'evidence');
     await mkdir(evidenceDirectory, { recursive: true });
     for (const observation of observations) {
-      const id = `${String(stepNumber).padStart(3, "0")}-${String(this.draft.evidence.length + 1).padStart(3, "0")}`;
-      if (observation.type === "text") {
+      const id = `${String(stepNumber).padStart(3, '0')}-${String(this.draft.evidence.length + 1).padStart(3, '0')}`;
+      if (observation.type === 'text') {
         const filename = `${id}.txt`;
         const outputPath = path.join(evidenceDirectory, filename);
         await writeFile(outputPath, `${observation.text}\n`);
         this.draft.evidence.push({
           id,
           stepNumber,
-          type: "text",
+          type: 'text',
           text: observation.text,
           path: outputPath,
         });
       } else {
-        const extension = observation.mimeType === "image/jpeg" ? "jpg" : "png";
+        const extension = observation.mimeType === 'image/jpeg' ? 'jpg' : 'png';
         const filename = `${id}.${extension}`;
         const outputPath = path.join(evidenceDirectory, filename);
-        await writeFile(outputPath, Buffer.from(observation.data, "base64"));
+        await writeFile(outputPath, Buffer.from(observation.data, 'base64'));
         this.draft.evidence.push({
           id,
           stepNumber,
-          type: "image",
+          type: 'image',
           mimeType: observation.mimeType,
           path: outputPath,
         });
@@ -137,13 +135,9 @@ export class CaseManager implements StepRecorder {
       code,
       error: error instanceof Error ? error.message : String(error),
     });
-    const attemptsDirectory = path.resolve(
-      "artifacts/cases",
-      this.draft.id,
-      "attempts",
-    );
+    const attemptsDirectory = path.resolve('artifacts/cases', this.draft.id, 'attempts');
     await mkdir(attemptsDirectory, { recursive: true });
-    const attempt = String(this.draft.failures.length).padStart(3, "0");
+    const attempt = String(this.draft.failures.length).padStart(3, '0');
     await Promise.all([
       writeFile(path.join(attemptsDirectory, `${attempt}.js`), `${code.trim()}\n`),
       writeFile(
@@ -163,7 +157,7 @@ export class CaseManager implements StepRecorder {
       rootDirectory: this.draft.rootDirectory,
       objectives: this.draft.objectives,
       candidateSteps: this.draft.steps.length,
-      adapters: [...new Set(this.draft.steps.map(step => step.adapterId ?? 'web'))],
+      adapters: [...new Set(this.draft.steps.map((step) => step.adapterId ?? 'web'))],
       failedAttempts: this.draft.failures.length,
       evidenceItems: this.draft.evidence.length,
       suites: this.draft.suites,

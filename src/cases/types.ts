@@ -1,4 +1,4 @@
-import type { JavaScriptObservation } from "../worker/protocol.ts";
+import type { JavaScriptObservation } from '../worker/protocol.ts';
 import type { RuntimeRequirement } from '../platforms/contracts.ts';
 
 export type CaseObjective = {
@@ -23,7 +23,7 @@ export type CaseAttemptFailure = {
 export type CaseEvidence = {
   id: string;
   stepNumber: number;
-  type: "text" | "image";
+  type: 'text' | 'image';
   text?: string;
   mimeType?: string;
   path?: string;

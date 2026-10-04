@@ -7,7 +7,8 @@ export class SessionPool {
   private readonly requirements = new Map<string, RuntimeRequirement>();
   constructor(registry: PlatformRegistry, requirements: RuntimeRequirement[]) {
     this.registry = registry;
-    for (const requirement of requirements) this.requirements.set(requirement.adapterId, requirement);
+    for (const requirement of requirements)
+      this.requirements.set(requirement.adapterId, requirement);
   }
 
   async acquire(adapterId: string): Promise<TestSession> {
@@ -21,11 +22,15 @@ export class SessionPool {
     return session;
   }
 
-  entries(): Array<[string, TestSession]> { return [...this.sessions.entries()]; }
+  entries(): Array<[string, TestSession]> {
+    return [...this.sessions.entries()];
+  }
 
   async close(): Promise<void> {
-    const results = await Promise.allSettled([...this.sessions.values()].map(session => session.close()));
-    const failed = results.find(result => result.status === 'rejected');
+    const results = await Promise.allSettled(
+      [...this.sessions.values()].map((session) => session.close()),
+    );
+    const failed = results.find((result) => result.status === 'rejected');
     if (failed?.status === 'rejected') throw failed.reason;
   }
 }

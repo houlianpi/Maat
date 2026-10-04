@@ -4,7 +4,8 @@ import { WorkModePolicy } from '../src/tui/work-mode.ts';
 
 test('assistance permits shell and file edits', () => {
   const policy = new WorkModePolicy();
-  for (const tool of ['bash', 'edit', 'write', 'read']) assert.equal(policy.beforeTool(tool), undefined);
+  for (const tool of ['bash', 'edit', 'write', 'read'])
+    assert.equal(policy.beforeTool(tool), undefined);
   assert.equal(policy.userBash(), undefined);
 });
 
@@ -12,8 +13,10 @@ test('exploration is guarded even before begin_case', () => {
   for (const entry of ['exe_js', 'begin_case', 'save_case']) {
     const policy = new WorkModePolicy();
     assert.equal(policy.beforeTool(entry), undefined);
-    for (const tool of ['bash', 'powershell', 'edit', 'write']) assert.match(policy.beforeTool(tool)!, /disabled/);
-    for (const tool of ['read', 'grep', 'find', 'ls', 'exe_js', 'save_case']) assert.equal(policy.beforeTool(tool), undefined);
+    for (const tool of ['bash', 'powershell', 'edit', 'write'])
+      assert.match(policy.beforeTool(tool)!, /disabled/);
+    for (const tool of ['read', 'grep', 'find', 'ls', 'exe_js', 'save_case'])
+      assert.equal(policy.beforeTool(tool), undefined);
     assert.equal(policy.userBash()?.result.exitCode, 1);
   }
 });

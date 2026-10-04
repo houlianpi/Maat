@@ -1,7 +1,7 @@
-import { parseArgs } from "node:util";
-import path from "node:path";
+import { parseArgs } from 'node:util';
+import path from 'node:path';
 
-import { parseBrowserName, type BrowserName } from "../browser/browser-options.ts";
+import { parseBrowserName, type BrowserName } from '../browser/browser-options.ts';
 
 export type AgentCliOptions = {
   browser: BrowserName;
@@ -13,24 +13,21 @@ export type AgentCliOptions = {
 };
 
 const macOSDefaultUserDataDirs: Partial<Record<BrowserName, string>> = {
-  chrome: "Library/Application Support/Google/Chrome",
-  "chrome-beta": "Library/Application Support/Google/Chrome Beta",
-  edge: "Library/Application Support/Microsoft Edge",
-  "edge-beta": "Library/Application Support/Microsoft Edge Beta",
+  chrome: 'Library/Application Support/Google/Chrome',
+  'chrome-beta': 'Library/Application Support/Google/Chrome Beta',
+  edge: 'Library/Application Support/Microsoft Edge',
+  'edge-beta': 'Library/Application Support/Microsoft Edge Beta',
 };
 
-function rejectDefaultUserDataDir(
-  browser: BrowserName,
-  userDataDir: string | undefined,
-): void {
-  if (!userDataDir || process.platform !== "darwin") return;
+function rejectDefaultUserDataDir(browser: BrowserName, userDataDir: string | undefined): void {
+  if (!userDataDir || process.platform !== 'darwin') return;
   const relativeDefault = macOSDefaultUserDataDirs[browser];
   if (!relativeDefault) return;
-  const defaultPath = path.resolve(process.env.HOME ?? "", relativeDefault);
+  const defaultPath = path.resolve(process.env.HOME ?? '', relativeDefault);
   if (path.resolve(userDataDir) === defaultPath) {
     throw new Error(
       `Cannot automate the default ${browser} user-data directory because the browser disables remote debugging there. ` +
-        "Use a dedicated automation --user-data-dir and sign in to it once.",
+        'Use a dedicated automation --user-data-dir and sign in to it once.',
     );
   }
 }
@@ -40,32 +37,30 @@ export function parseAgentOptions(args: string[]): AgentCliOptions {
     args,
     allowPositionals: true,
     options: {
-      browser: { type: "string", default: "chrome" },
-      "executable-path": { type: "string" },
-      headless: { type: "boolean" },
-      headed: { type: "boolean" },
-      "profile-directory": { type: "string" },
-      "user-data-dir": { type: "string" },
+      browser: { type: 'string', default: 'chrome' },
+      'executable-path': { type: 'string' },
+      headless: { type: 'boolean' },
+      headed: { type: 'boolean' },
+      'profile-directory': { type: 'string' },
+      'user-data-dir': { type: 'string' },
     },
     strict: true,
   });
 
   if (values.headless && values.headed) {
-    throw new Error("Use only one of --headless and --headed.");
+    throw new Error('Use only one of --headless and --headed.');
   }
 
   const browser = parseBrowserName(values.browser);
-  if (values["executable-path"] && browser !== "chromium") {
-    throw new Error(
-      "--executable-path can only be used with --browser chromium.",
-    );
+  if (values['executable-path'] && browser !== 'chromium') {
+    throw new Error('--executable-path can only be used with --browser chromium.');
   }
-  if (values["profile-directory"] && !values["user-data-dir"]) {
-    throw new Error("--profile-directory requires --user-data-dir.");
+  if (values['profile-directory'] && !values['user-data-dir']) {
+    throw new Error('--profile-directory requires --user-data-dir.');
   }
-  rejectDefaultUserDataDir(browser, values["user-data-dir"]);
+  rejectDefaultUserDataDir(browser, values['user-data-dir']);
 
-  const prompt = positionals.join(" ").trim();
+  const prompt = positionals.join(' ').trim();
   if (!prompt) {
     throw new Error(
       'Usage: npm run agent -- [--browser edge] [--user-data-dir <path>] [--profile-directory Default] [--headless|--headed] "your prompt"',
@@ -74,10 +69,10 @@ export function parseAgentOptions(args: string[]): AgentCliOptions {
 
   return {
     browser,
-    executablePath: values["executable-path"],
+    executablePath: values['executable-path'],
     headless: values.headless ?? false,
-    profileDirectory: values["profile-directory"],
+    profileDirectory: values['profile-directory'],
     prompt,
-    userDataDir: values["user-data-dir"],
+    userDataDir: values['user-data-dir'],
   };
 }

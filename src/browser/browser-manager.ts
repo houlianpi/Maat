@@ -1,8 +1,8 @@
-import path from "node:path";
-import { readFile } from "node:fs/promises";
+import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 
-import { browserChannel, type BrowserName } from "./browser-options.ts";
-import type { JavaScriptSession } from "../worker/javascript-session.ts";
+import { browserChannel, type BrowserName } from './browser-options.ts';
+import type { JavaScriptSession } from '../worker/javascript-session.ts';
 import { createWebExplorationSession } from '../platforms/web/exploration-session.ts';
 
 export type BrowserProfile = {
@@ -22,13 +22,15 @@ type MaatConfig = { profiles?: Record<string, BrowserProfile> };
 export class BrowserManager implements JavaScriptSession {
   private configRoot: string;
   private session: JavaScriptSession | undefined;
-  private config: BrowserConfig = { browser: "chrome", headless: true };
+  private config: BrowserConfig = { browser: 'chrome', headless: true };
 
-  constructor(configRoot = path.resolve("maat-tests/web")) {
+  constructor(configRoot = path.resolve('maat-tests/web')) {
     this.configRoot = configRoot;
   }
 
-  setConfigRoot(root: string): void { this.configRoot = root; }
+  setConfigRoot(root: string): void {
+    this.configRoot = root;
+  }
 
   get currentConfig(): Readonly<BrowserConfig> {
     return this.config;
@@ -41,7 +43,7 @@ export class BrowserManager implements JavaScriptSession {
   async configure(next: Partial<BrowserConfig>): Promise<BrowserConfig> {
     await this.close();
     this.config = { ...this.config, ...next };
-    if (next.profile === "") this.config.profile = undefined;
+    if (next.profile === '') this.config.profile = undefined;
     return this.config;
   }
 
@@ -67,13 +69,11 @@ export class BrowserManager implements JavaScriptSession {
 
   private async readProfile(): Promise<BrowserProfile | undefined> {
     if (!this.config.profile) return undefined;
-    const configPath = path.join(this.configRoot, "maat.config.json");
-    const parsed = JSON.parse(await readFile(configPath, "utf8")) as MaatConfig;
+    const configPath = path.join(this.configRoot, 'maat.config.json');
+    const parsed = JSON.parse(await readFile(configPath, 'utf8')) as MaatConfig;
     const profile = parsed.profiles?.[this.config.profile];
     if (!profile) {
-      throw new Error(
-        `Unknown browser profile "${this.config.profile}" in ${configPath}.`,
-      );
+      throw new Error(`Unknown browser profile "${this.config.profile}" in ${configPath}.`);
     }
     return profile;
   }

@@ -1,10 +1,10 @@
-import assert from "node:assert/strict";
-import test from "node:test";
+import assert from 'node:assert/strict';
+import test from 'node:test';
 
-import { createAgentTrace } from "../src/logging/agent-trace.ts";
+import { createAgentTrace } from '../src/logging/agent-trace.ts';
 
-test("trace labels directions and summarizes images and secrets", () => {
-  let output = "";
+test('trace labels directions and summarizes images and secrets', () => {
+  let output = '';
   const trace = createAgentTrace({
     enabled: true,
     write: (text) => {
@@ -12,12 +12,12 @@ test("trace labels directions and summarizes images and secrets", () => {
     },
   });
 
-  trace.value("HOST -> LLM", "TOOL RESULT", {
+  trace.value('HOST -> LLM', 'TOOL RESULT', {
     content: [
-      { type: "text", text: "visible" },
-      { type: "image", mimeType: "image/png", data: "abcd" },
+      { type: 'text', text: 'visible' },
+      { type: 'image', mimeType: 'image/png', data: 'abcd' },
     ],
-    apiKey: "do-not-print",
+    apiKey: 'do-not-print',
   });
 
   assert.match(output, /HOST -> LLM/);
@@ -28,8 +28,8 @@ test("trace labels directions and summarizes images and secrets", () => {
   assert.doesNotMatch(output, /data: 'abcd'/);
 });
 
-test("trace can be disabled", () => {
-  let output = "";
+test('trace can be disabled', () => {
+  let output = '';
   const trace = createAgentTrace({
     enabled: false,
     write: (text) => {
@@ -37,6 +37,6 @@ test("trace can be disabled", () => {
     },
   });
 
-  trace.text("LLM -> HOST", "ASSISTANT MESSAGE", "hidden");
-  assert.equal(output, "");
+  trace.text('LLM -> HOST', 'ASSISTANT MESSAGE', 'hidden');
+  assert.equal(output, '');
 });

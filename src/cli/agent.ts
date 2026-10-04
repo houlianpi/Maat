@@ -1,5 +1,5 @@
-import { runAgent } from "../agent/run-agent.ts";
-import { parseAgentOptions } from "./agent-options.ts";
+import { runAgent } from '../agent/run-agent.ts';
+import { parseAgentOptions } from './agent-options.ts';
 
 try {
   const options = parseAgentOptions(process.argv.slice(2));

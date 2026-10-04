@@ -44,6 +44,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Formatting
+        run: npm run format:check
+
       - name: Project tests
         run: npm test
 

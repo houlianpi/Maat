@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const packageRoot = fileURLToPath(new URL("..", import.meta.url));
+const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const args = process.argv.slice(2);
 const command = args[0];
 
@@ -28,7 +28,7 @@ Examples:
   maat test --case calculator-basic-addition --headed
 `;
 
-if (command === "help" || command === "--help" || command === "-h") {
+if (command === 'help' || command === '--help' || command === '-h') {
   process.stdout.write(help);
   process.exit(0);
 }
@@ -37,23 +37,23 @@ let script;
 let forwardedArgs;
 switch (command) {
   case undefined:
-  case "tui":
-    script = "src/tui/main.ts";
-    forwardedArgs = args.slice(command === "tui" ? 1 : 0);
+  case 'tui':
+    script = 'src/tui/main.ts';
+    forwardedArgs = args.slice(command === 'tui' ? 1 : 0);
     break;
-  case "agent":
-    script = "src/cli/agent.ts";
+  case 'agent':
+    script = 'src/cli/agent.ts';
     forwardedArgs = args.slice(1);
     break;
-  case "cases":
-  case "test":
-    script = "src/cli/cases.ts";
+  case 'cases':
+  case 'test':
+    script = 'src/cli/cases.ts';
     forwardedArgs = args.slice(1);
     break;
-  case "replay": {
+  case 'replay': {
     const replayPath = args[1];
     if (!replayPath) {
-      process.stderr.write("Usage: maat replay FILE [options]\n");
+      process.stderr.write('Usage: maat replay FILE [options]\n');
       process.exit(1);
     }
     script = replayPath;
@@ -68,25 +68,25 @@ switch (command) {
 const child = spawn(
   process.execPath,
   [
-    "--experimental-strip-types",
-    command === "replay" ? script : path.resolve(packageRoot, script),
+    '--experimental-strip-types',
+    command === 'replay' ? script : path.resolve(packageRoot, script),
     ...forwardedArgs,
   ],
   {
     cwd: process.cwd(),
     env: process.env,
-    stdio: "inherit",
+    stdio: 'inherit',
   },
 );
 
-for (const signal of ["SIGINT", "SIGTERM"]) {
+for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => child.kill(signal));
 }
 
-child.once("error", (error) => {
+child.once('error', (error) => {
   process.stderr.write(`Failed to start Maat: ${error.message}\n`);
   process.exitCode = 1;
 });
-child.once("exit", (code, signal) => {
+child.once('exit', (code, signal) => {
   process.exitCode = code ?? (signal ? 1 : 0);
 });

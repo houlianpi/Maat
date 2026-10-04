@@ -1,21 +1,29 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
-import type { JavaScriptObservation } from "../worker/protocol.ts";
-import { generateReplay, type ReplayStep } from "./replay-generator.ts";
+import type { JavaScriptObservation } from '../worker/protocol.ts';
+import { generateReplay, type ReplayStep } from './replay-generator.ts';
 
-export type RunStatus = "completed" | "failed";
+export type RunStatus = 'completed' | 'failed';
 
 export type RunRecorderOptions = {
   browser?: string;
 };
 
 export type StepRecorder = {
-  recordSuccessfulStep(code: string, observations: JavaScriptObservation[], execution?: StepExecution): Promise<void>;
+  recordSuccessfulStep(
+    code: string,
+    observations: JavaScriptObservation[],
+    execution?: StepExecution,
+  ): Promise<void>;
   recordFailedStep(code: string, error: unknown, execution?: StepExecution): Promise<void>;
 };
-export type StepExecution = { adapterId: string; bindings: string[]; requirement: import('../platforms/contracts.ts').RuntimeRequirement };
+export type StepExecution = {
+  adapterId: string;
+  bindings: string[];
+  requirement: import('../platforms/contracts.ts').RuntimeRequirement;
+};
 
 export type RunRecorder = StepRecorder & {
   readonly runDirectory: string;
@@ -24,28 +32,28 @@ export type RunRecorder = StepRecorder & {
 };
 
 type RecordedObservation =
-  | { type: "text"; text: string }
-  | { type: "image"; mimeType: string; path: string };
+  | { type: 'text'; text: string }
+  | { type: 'image'; mimeType: string; path: string };
 
 function runId(now: Date): string {
-  return `${now.toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
+  return `${now.toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}`;
 }
 
 function imageExtension(mimeType: string): string {
-  return mimeType === "image/jpeg" ? "jpg" : mimeType.split("/")[1];
+  return mimeType === 'image/jpeg' ? 'jpg' : mimeType.split('/')[1];
 }
 
 export async function createRunRecorder(
   prompt: string,
-  rootDirectory = path.resolve("artifacts/runs"),
+  rootDirectory = path.resolve('artifacts/runs'),
   options: RunRecorderOptions = {},
 ): Promise<RunRecorder> {
   const startedAt = new Date();
   const runDirectory = path.join(rootDirectory, runId(startedAt));
-  const stepsDirectory = path.join(runDirectory, "steps");
-  const observationsDirectory = path.join(runDirectory, "observations");
-  const failedStepsDirectory = path.join(runDirectory, "failed-steps");
-  const replayPath = path.join(runDirectory, "replay.ts");
+  const stepsDirectory = path.join(runDirectory, 'steps');
+  const observationsDirectory = path.join(runDirectory, 'observations');
+  const failedStepsDirectory = path.join(runDirectory, 'failed-steps');
+  const replayPath = path.join(runDirectory, 'replay.ts');
   const steps: ReplayStep[] = [];
   let finalized = false;
   const failures: Array<{ codePath: string; error: string }> = [];
@@ -60,25 +68,25 @@ export async function createRunRecorder(
     runDirectory,
     replayPath,
     async recordSuccessfulStep(code, observations) {
-      if (finalized) throw new Error("Run recorder has already finalized.");
+      if (finalized) throw new Error('Run recorder has already finalized.');
       const number = steps.length + 1;
-      const prefix = String(number).padStart(3, "0");
+      const prefix = String(number).padStart(3, '0');
       const recorded: RecordedObservation[] = [];
       let imageNumber = 0;
 
       await writeFile(path.join(stepsDirectory, `${prefix}.js`), `${code.trim()}\n`);
       for (const observation of observations) {
-        if (observation.type === "text") {
+        if (observation.type === 'text') {
           recorded.push(observation);
           continue;
         }
-        const filename = `${prefix}-${String(++imageNumber).padStart(3, "0")}.${imageExtension(observation.mimeType)}`;
+        const filename = `${prefix}-${String(++imageNumber).padStart(3, '0')}.${imageExtension(observation.mimeType)}`;
         await writeFile(
           path.join(observationsDirectory, filename),
-          Buffer.from(observation.data, "base64"),
+          Buffer.from(observation.data, 'base64'),
         );
         recorded.push({
-          type: "image",
+          type: 'image',
           mimeType: observation.mimeType,
           path: `observations/${filename}`,
         });
@@ -90,13 +98,10 @@ export async function createRunRecorder(
       steps.push({ number, code });
     },
     async recordFailedStep(code, error) {
-      if (finalized) throw new Error("Run recorder has already finalized.");
+      if (finalized) throw new Error('Run recorder has already finalized.');
       const number = failures.length + 1;
-      const filename = `${String(number).padStart(3, "0")}.js`;
-      await writeFile(
-        path.join(failedStepsDirectory, filename),
-        `${code.trim()}\n`,
-      );
+      const filename = `${String(number).padStart(3, '0')}.js`;
+      await writeFile(path.join(failedStepsDirectory, filename), `${code.trim()}\n`);
       failures.push({
         codePath: `failed-steps/${filename}`,
         error: error instanceof Error ? error.message : String(error),
@@ -105,30 +110,25 @@ export async function createRunRecorder(
     async finalize(status, error) {
       if (finalized) return failures.length === 0 ? replayPath : undefined;
       finalized = true;
-      const replayable = failures.length === 0 && status === "completed";
+      const replayable = failures.length === 0 && status === 'completed';
       if (replayable) {
-        await writeFile(
-          replayPath,
-          generateReplay(steps, { browser: options.browser }),
-        );
+        await writeFile(replayPath, generateReplay(steps, { browser: options.browser }));
       }
       await writeFile(
-        path.join(runDirectory, "manifest.json"),
+        path.join(runDirectory, 'manifest.json'),
         `${JSON.stringify(
           {
             version: 1,
             startedAt: startedAt.toISOString(),
             completedAt: new Date().toISOString(),
-            status: replayable ? status : "failed",
+            status: replayable ? status : 'failed',
             replayable,
             prompt,
-            browser: options.browser ?? "chromium",
+            browser: options.browser ?? 'chromium',
             stepCount: steps.length,
-            replay: replayable ? "replay.ts" : null,
+            replay: replayable ? 'replay.ts' : null,
             failures,
-            ...(error
-              ? { error: error instanceof Error ? error.message : String(error) }
-              : {}),
+            ...(error ? { error: error instanceof Error ? error.message : String(error) } : {}),
           },
           null,
           2,

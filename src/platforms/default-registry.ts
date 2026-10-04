@@ -8,7 +8,10 @@ import { PlatformRegistry } from './registry.ts';
 import { WebPlatformAdapter } from './web/web-adapter.ts';
 
 /** Composition root for built-in adapters. Maat Core remains implementation-agnostic. */
-export function createDefaultPlatformRegistry(base = path.resolve('maat-tests'), browser?: BrowserManager): PlatformRegistry {
+export function createDefaultPlatformRegistry(
+  base = path.resolve('maat-tests'),
+  browser?: BrowserManager,
+): PlatformRegistry {
   return new PlatformRegistry([
     new WebPlatformAdapter(platformRoot(base, 'web'), browser),
     new AndroidPlatformAdapter(platformRoot(base, 'android')),

@@ -10,6 +10,8 @@
     "agent": "node --experimental-strip-types src/cli/agent.ts",
     "browser:demo": "node --experimental-strip-types examples/browser-demo.ts",
     "cases": "node --experimental-strip-types src/cli/cases.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "maat:test": "node --experimental-strip-types src/cli/cases.ts",
     "replay": "node --experimental-strip-types",
     "test": "node --experimental-strip-types --test test/*.test.ts",
@@ -26,6 +28,7 @@
   },
   "devDependencies": {
     "@types/mocha": "10.0.10",
-    "@types/node": "^24.0.0"
+    "@types/node": "^24.0.0",
+    "prettier": "3.6.2"
   }
 }

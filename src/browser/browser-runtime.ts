@@ -1,9 +1,4 @@
-import {
-  chromium,
-  type Browser,
-  type BrowserContext,
-  type Page,
-} from "playwright";
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 
 export type BrowserRuntimeOptions = {
   executablePath?: string;
@@ -27,21 +22,21 @@ export class BrowserRuntime {
 
   get page(): Page {
     if (!this.activePage) {
-      throw new Error("BrowserRuntime has not been started.");
+      throw new Error('BrowserRuntime has not been started.');
     }
     return this.activePage;
   }
 
   get browser(): Browser {
     if (!this.activeBrowser) {
-      throw new Error("BrowserRuntime has not been started.");
+      throw new Error('BrowserRuntime has not been started.');
     }
     return this.activeBrowser;
   }
 
   get context(): BrowserContext {
     if (!this.activeContext) {
-      throw new Error("BrowserRuntime has not been started.");
+      throw new Error('BrowserRuntime has not been started.');
     }
     return this.activeContext;
   }

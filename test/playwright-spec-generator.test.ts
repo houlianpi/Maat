@@ -10,11 +10,28 @@ import type { CaseDraft } from '../src/cases/types.ts';
 
 test('unified renderer creates one Mocha Case with adapter steps', () => {
   const draft: CaseDraft = {
-    id: 'sample-case', module: 'sample', name: 'Sample Case', description: 'Sample', preconditions: [], actionSteps: [],
-    objectives: [{ id: 'objective-1', description: 'Result is visible' }], tags: ['smoke'], suites: ['regression'], rootDirectory: '/tmp/tests',
+    id: 'sample-case',
+    module: 'sample',
+    name: 'Sample Case',
+    description: 'Sample',
+    preconditions: [],
+    actionSteps: [],
+    objectives: [{ id: 'objective-1', description: 'Result is visible' }],
+    tags: ['smoke'],
+    suites: ['regression'],
+    rootDirectory: '/tmp/tests',
     requirements: [{ adapterId: 'web', setup: { browser: 'chrome' } }],
-    steps: [{ number: 1, adapterId: 'web', bindings: ['page', 'expect'], code: "await expect(page.locator('h1')).toHaveText('Done');", observations: [] }],
-    failures: [], evidence: [],
+    steps: [
+      {
+        number: 1,
+        adapterId: 'web',
+        bindings: ['page', 'expect'],
+        code: "await expect(page.locator('h1')).toHaveText('Done');",
+        observations: [],
+      },
+    ],
+    failures: [],
+    evidence: [],
   };
   const spec = renderSpec(buildSpecModel(draft), '../../src/core/testing/fixture.ts');
   assert.match(spec, /import \{ describe, it \} from 'mocha'/);
@@ -29,11 +46,22 @@ test('runner resolves unique short names and reports module ambiguity', async ()
   const root = await mkdtemp(path.join(tmpdir(), 'maat-case-paths-'));
   const cases = path.join(root, 'cases');
   try {
-    await Promise.all([mkdir(path.join(cases, 'calculator'), { recursive: true }), mkdir(path.join(cases, 'payments'), { recursive: true })]);
+    await Promise.all([
+      mkdir(path.join(cases, 'calculator'), { recursive: true }),
+      mkdir(path.join(cases, 'payments'), { recursive: true }),
+    ]);
     await writeFile(path.join(cases, 'calculator/basic.spec.ts'), '// calculator');
-    assert.equal(await resolveCaseSpec(root, 'basic'), path.join(cases, 'calculator/basic.spec.ts'));
-    assert.equal(await resolveCaseSpec(root, 'calculator/basic'), path.join(cases, 'calculator/basic.spec.ts'));
+    assert.equal(
+      await resolveCaseSpec(root, 'basic'),
+      path.join(cases, 'calculator/basic.spec.ts'),
+    );
+    assert.equal(
+      await resolveCaseSpec(root, 'calculator/basic'),
+      path.join(cases, 'calculator/basic.spec.ts'),
+    );
     await writeFile(path.join(cases, 'payments/basic.spec.ts'), '// payments');
     await assert.rejects(resolveCaseSpec(root, 'basic'), /Ambiguous Case/);
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

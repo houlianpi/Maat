@@ -43,11 +43,19 @@ describe('Web opens desktop confirmation', () => {
     ]);
     let passed = false;
     try {
-      await maat.step('Open web', 'web', async ({ page }) => { await page.goto('https://example.com'); });
-      await maat.step('Confirm desktop', 'macos', async ({ driver }) => { await driver.$('~Confirm').click(); });
-      await maat.step('Verify web', 'web', async ({ page, expect }) => { await expect(page.locator('.status')).toHaveText('Success'); });
+      await maat.step('Open web', 'web', async ({ page }) => {
+        await page.goto('https://example.com');
+      });
+      await maat.step('Confirm desktop', 'macos', async ({ driver }) => {
+        await driver.$('~Confirm').click();
+      });
+      await maat.step('Verify web', 'web', async ({ page, expect }) => {
+        await expect(page.locator('.status')).toHaveText('Success');
+      });
       passed = true;
-    } finally { await maat.close(passed); }
+    } finally {
+      await maat.close(passed);
+    }
   });
 });
 ```
@@ -83,15 +91,15 @@ Ignored local hints live under `maat-tests/<adapter>/native-target.local.json`. 
 
 ## Tools
 
-| Tool | Purpose |
-|---|---|
-| `list_platforms` / `select_platform` | Inspect and select an Adapter |
-| `configure_session` | Supply optional Server/device/App hints |
-| `list_devices` / `find_applications` | Assist Appium Session setup |
-| `begin_case` | Create a Draft with explicit objectives |
-| `exe_js` | Execute JavaScript in the active persistent UI Session |
-| `get_case_status` | Inspect steps, attempts and Evidence |
-| `save_case` | Validate with fresh Sessions and promote one Mocha spec |
+| Tool                                 | Purpose                                                 |
+| ------------------------------------ | ------------------------------------------------------- |
+| `list_platforms` / `select_platform` | Inspect and select an Adapter                           |
+| `configure_session`                  | Supply optional Server/device/App hints                 |
+| `list_devices` / `find_applications` | Assist Appium Session setup                             |
+| `begin_case`                         | Create a Draft with explicit objectives                 |
+| `exe_js`                             | Execute JavaScript in the active persistent UI Session  |
+| `get_case_status`                    | Inspect steps, attempts and Evidence                    |
+| `save_case`                          | Validate with fresh Sessions and promote one Mocha spec |
 
 Assist mode permits Shell/setup work. Case mode blocks Shell and direct file edits while exploration and generation are active.
 

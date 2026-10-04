@@ -27,9 +27,15 @@ maat
 所有 Case 位于 `maat-tests/cases`，可以是纯 Web、纯 Appium 或混合场景：
 
 ```typescript
-await maat.step('打开网页', 'web', async ({ page }) => { /* Playwright */ });
-await maat.step('桌面确认', 'macos', async ({ driver }) => { /* WebdriverIO */ });
-await maat.step('网页验证', 'web', async ({ page, expect }) => { /* 复用原 Page */ });
+await maat.step('打开网页', 'web', async ({ page }) => {
+  /* Playwright */
+});
+await maat.step('桌面确认', 'macos', async ({ driver }) => {
+  /* WebdriverIO */
+});
+await maat.step('网页验证', 'web', async ({ page, expect }) => {
+  /* 复用原 Page */
+});
 ```
 
 SessionPool 只创建 Case 实际引用的 Session。纯 Web Case 不创建也不加载 Appium Session；混合 Case 回到 Web 时复用原来的 Playwright Page。
@@ -63,15 +69,15 @@ Appium 侧，Maat 解析可访问 Server 与设备，然后只创建和删除自
 
 ## 工具
 
-| 工具 | 作用 |
-|---|---|
-| `list_platforms` / `select_platform` | 查看并选择 Adapter |
-| `configure_session` | 提供可选 Server、设备和 App 提示 |
-| `list_devices` / `find_applications` | 辅助 Appium Session 准备 |
-| `begin_case` | 根据明确测试目的创建 Draft |
-| `exe_js` | 在当前持久 UI Session 执行 JavaScript |
-| `get_case_status` | 查看步骤、失败尝试和 Evidence |
-| `save_case` | 全新 Session 验证并保存统一 Mocha Case |
+| 工具                                 | 作用                                   |
+| ------------------------------------ | -------------------------------------- |
+| `list_platforms` / `select_platform` | 查看并选择 Adapter                     |
+| `configure_session`                  | 提供可选 Server、设备和 App 提示       |
+| `list_devices` / `find_applications` | 辅助 Appium Session 准备               |
+| `begin_case`                         | 根据明确测试目的创建 Draft             |
+| `exe_js`                             | 在当前持久 UI Session 执行 JavaScript  |
+| `get_case_status`                    | 查看步骤、失败尝试和 Evidence          |
+| `save_case`                          | 全新 Session 验证并保存统一 Mocha Case |
 
 Assist 模式允许 Shell 和配置排障；Case 模式在探索和生成期间禁止 Shell 与直接文件编辑。
 
