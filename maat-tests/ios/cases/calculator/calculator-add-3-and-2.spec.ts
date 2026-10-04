@@ -1,6 +1,6 @@
 /** Case ID: calculator-add-3-and-2; @maat-adapters ios; Objective: iOS Calculator 3 + 2 = 5. */
 import { describe, it } from 'mocha';
-import { createMaatTest } from '../../../src/hosts/test/fixture.ts';
+import { createMaatTest } from 'maat/test';
 describe('验证 iPhone 计算器 3 + 2 = 5 @ios @calculator @suite:smoke', () => {
   it('calculator-add-3-and-2', async () => {
     const maat = await createMaatTest('calculator-add-3-and-2', [

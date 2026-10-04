@@ -1,6 +1,6 @@
 /** Case ID: calculator-32-plus-30; @maat-adapters web; Objective: 32 + 30 = 62. */
 import { describe, it } from 'mocha';
-import { createMaatTest } from '../../../src/hosts/test/fixture.ts';
+import { createMaatTest } from 'maat/test';
 describe('计算器验证 32 + 30 = 62 @calculator @smoke @suite:smoke', () => {
   it('calculator-32-plus-30', async () => {
     const maat = await createMaatTest('calculator-32-plus-30', [

@@ -1,6 +1,6 @@
 /** Case ID: verify-return-to-work-oct-08; @maat-adapters ios; Objective: verify the holiday ends October 7, 2026. */
 import { describe, it } from 'mocha';
-import { createMaatTest } from '../../../src/hosts/test/fixture.ts';
+import { createMaatTest } from 'maat/test';
 describe('根据国庆假期核对10月8日返岗 @ios @calendar', () => {
   it('verify-return-to-work-oct-08', async () => {
     const maat = await createMaatTest('verify-return-to-work-oct-08', [

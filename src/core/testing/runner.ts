@@ -1,13 +1,13 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import type { CaseSelection } from './case-selection.ts';
 import { findSpecs, resolveCaseSpec } from './case-selection.ts';
 
 export type MaatRunResult = { exitCode: number; runDirectory: string };
-export type MaatRunOptions = { browser?: string; headed?: boolean; adapterId?: string };
+export type MaatRunOptions = { browser?: string; headed?: boolean; workspaceRoot?: string };
 
 export async function runMaatTests(
   root: string,
@@ -21,19 +21,7 @@ export async function runMaatTests(
     : selection.mode === 'case'
       ? [await resolveCaseSpec(root, selection.value)]
       : await findSpecs(path.join(root, 'cases'));
-  if (!spec && options.adapterId)
-    specs = (
-      await Promise.all(
-        specs.map(async (filename) => ({ filename, source: await readFile(filename, 'utf8') })),
-      )
-    )
-      .filter((item) => {
-        const values =
-          /@maat-adapters\s+([^;\n*]+)/.exec(item.source)?.[1]?.trim().split(/\s+/) ?? [];
-        return values.includes(options.adapterId!);
-      })
-      .map((item) => item.filename);
-  if (!spec && specs.length === 0) throw new Error(`No Cases use Adapter: ${options.adapterId}`);
+  if (!spec && specs.length === 0) throw new Error(`No Cases found under ${root}.`);
   const runDirectory = path.resolve('artifacts/maat/runs', randomUUID());
   await mkdir(runDirectory, { recursive: true });
   const grep =
@@ -53,7 +41,7 @@ export async function runMaatTests(
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        MAAT_TESTS_ROOT: root,
+        MAAT_TESTS_ROOT: options.workspaceRoot ?? path.dirname(root),
         MAAT_RUN_DIRECTORY: runDirectory,
         ...(options.browser ? { MAAT_WEB_BROWSER: options.browser } : {}),
         ...(options.headed ? { MAAT_WEB_HEADED: '1' } : {}),

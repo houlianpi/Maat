@@ -104,3 +104,15 @@ test('spec metadata identifies every Adapter used by a mixed Case', () => {
   );
   assert.match(renderSpec(buildSpecModel(draft), './fixture.ts'), /@maat-adapters web macos/);
 });
+
+test('Case owner remains stable while active Adapter changes', async () => {
+  const events: string[] = [];
+  const web = adapter('web', events);
+  const macos = adapter('macos', events);
+  const registry = new PlatformRegistry([web, macos]);
+  await registry.select('macos');
+  const ownerRoot = registry.current.root;
+  await registry.select('web');
+  assert.equal(ownerRoot, '/tmp/macos');
+  assert.equal(registry.current.root, '/tmp/web');
+});

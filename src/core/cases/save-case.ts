@@ -12,12 +12,7 @@ export async function saveCase(draft: CaseDraft, testsRoot: string, signal?: Abo
   await mkdir(directory, { recursive: true });
   const final = path.join(directory, `${draft.id}.spec.ts`);
   const candidate = path.join(directory, `.validate-${randomUUID()}.spec.ts`);
-  let fixtureImport = path
-    .relative(directory, path.resolve('src/hosts/test/fixture.ts'))
-    .split(path.sep)
-    .join('/');
-  if (!fixtureImport.startsWith('.')) fixtureImport = `./${fixtureImport}`;
-  await writeFile(candidate, renderSpec(buildSpecModel(draft), fixtureImport));
+  await writeFile(candidate, renderSpec(buildSpecModel(draft), 'maat/test'));
   try {
     await runMaatTests(testsRoot, { mode: 'all' }, signal, candidate);
     await rename(candidate, final);

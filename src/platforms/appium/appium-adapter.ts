@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { homedir } from 'node:os';
 import {
   readNativeEnvironment,
   splitCapabilities,
@@ -51,6 +52,11 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   private notices: string[] = [];
   private readonly definition: AppiumAdapterDefinition;
   private initialized = false;
+  private get hintsFile(): string {
+    const directory =
+      process.env.MAAT_SESSION_HINTS_DIR ?? path.join(homedir(), '.maat', 'session-hints');
+    return path.join(directory, `${this.id}.json`);
+  }
 
   constructor(definition: AppiumAdapterDefinition, root: string) {
     this.definition = definition;
@@ -67,14 +73,12 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
-    const file = path.join(this.root, 'native-target.local.json');
-    this.environment = await readNativeEnvironment(file).catch((error) => {
+    this.environment = await readNativeEnvironment(this.hintsFile).catch((error) => {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       return { platform: this.id, capabilities: {} };
     });
     if (this.environment.platform !== this.id)
       throw new Error(`Environment platform must be ${this.id}.`);
-    await mkdir(path.join(this.root, 'cases'), { recursive: true });
     this.initialized = true;
   }
 
@@ -153,11 +157,10 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       } else throw error;
     }
     // A successful Session confirms stable hints; transient UUID/App data never enter environment.
-    await writeFile(
-      path.join(this.root, 'native-target.local.json'),
-      JSON.stringify(this.environment, null, 2) + '\n',
-      { mode: 0o600 },
-    );
+    await mkdir(path.dirname(this.hintsFile), { recursive: true });
+    await writeFile(this.hintsFile, JSON.stringify(this.environment, null, 2) + '\n', {
+      mode: 0o600,
+    });
     const notices = this.notices.splice(0);
     return notices.length
       ? [{ type: 'text' as const, text: notices.join('\n') }, ...observations]

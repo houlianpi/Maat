@@ -34,18 +34,17 @@ try {
         ? { mode: 'tag', value: values.tag }
         : { mode: 'all' };
 
-  const project = values.project;
+  const project = values.project ?? 'web';
   const testsRoot = path.resolve(values.root);
-  const projects = new MaatHarness(createDefaultPlatformRegistry(testsRoot), testsRoot);
-  if (project) await projects.select(project);
+  const harness = new MaatHarness(createDefaultPlatformRegistry(testsRoot), testsRoot);
+  await harness.select(project);
   try {
-    process.exitCode = await projects.run(selection, {
+    process.exitCode = await harness.run(selection, {
       browser: values.browser,
       headed: values.headed,
-      adapterId: project,
     });
   } finally {
-    await projects.close();
+    await harness.close();
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

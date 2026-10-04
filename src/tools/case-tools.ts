@@ -15,7 +15,7 @@ export function createCaseTools(caseManager: CaseDraftManager, projects: MaatHar
       module: Type.Optional(
         Type.String({
           description:
-            'Optional business module under maat-tests/<platform>/cases, for example calculator or payments/refunds. The platform root is fixed by select_platform.',
+            'Optional business module under maat-tests/<owner-platform>/cases, for example calculator or payments/refunds. The owner platform is the selected platform.',
         }),
       ),
       name: Type.String(),

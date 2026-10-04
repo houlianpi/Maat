@@ -36,10 +36,12 @@ test('one Mocha Case reuses Web around an Appium step', async () => {
   const appium = await mockAppium();
   await mkdir('artifacts/mixed-tests', { recursive: true });
   const root = await mkdtemp(path.resolve('artifacts/mixed-tests/root-'));
+  const hints = await mkdtemp(path.resolve('artifacts/mixed-tests/hints-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
   try {
-    await mkdir(path.join(root, 'android'), { recursive: true });
+    process.env.MAAT_SESSION_HINTS_DIR = hints;
     await writeFile(
-      path.join(root, 'android/native-target.local.json'),
+      path.join(hints, 'android.json'),
       JSON.stringify({
         platform: 'android',
         serverUrl: appium.url,
@@ -88,7 +90,10 @@ test('one Mocha Case reuses Web around an Appium step', async () => {
     assert.match(source, /maat\.step\("Recorded step 003", "web"/);
     assert.equal(appium.creations(), 1);
   } finally {
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
     appium.server.close();
     await rm(root, { recursive: true, force: true });
+    await rm(hints, { recursive: true, force: true });
   }
 });

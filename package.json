@@ -6,6 +6,9 @@
   "bin": {
     "maat": "./bin/maat.mjs"
   },
+  "exports": {
+    "./test": "./src/hosts/test/fixture.ts"
+  },
   "scripts": {
     "agent": "node --experimental-strip-types src/cli/agent.ts",
     "cases": "node --experimental-strip-types src/cli/cases.ts",

@@ -3,4 +3,3 @@ dist/
 artifacts/
 .env
 *.log
-**/native-target.local.json

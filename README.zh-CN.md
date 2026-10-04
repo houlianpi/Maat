@@ -24,7 +24,7 @@ maat
 
 ## 统一 Case
 
-所有 Case 位于 `maat-tests/cases`，可以是纯 Web、纯 Appium 或混合场景：
+Case 位于 `maat-tests/<所属平台>/cases/<业务模块>`。纯 Web 归属 `web`；Android/iOS 归属各自移动平台；Web + macOS/Windows 混合 Case 归属对应 OS。
 
 ```typescript
 await maat.step('打开网页', 'web', async ({ page }) => {
@@ -65,7 +65,7 @@ flowchart LR
 
 Appium 侧，Maat 解析可访问 Server 与设备，然后只创建和删除自己拥有的 Session。Driver 安装、Server 启动、ADB/Xcode、签名、模拟器和系统权限由用户或 Agent 使用 Shell 准备。详见 [Appium Session](docs/native-testing.md)。
 
-本机提示配置位于忽略的 `maat-tests/<adapter>/native-target.local.json`，不会持久化 UUID、App 标识、platformName 或 automationName。
+可选 Appium Session 提示位于测试目录之外的 `~/.maat/session-hints/<adapter>.json`。`maat-tests` 只保存 Case。
 
 ## 工具
 

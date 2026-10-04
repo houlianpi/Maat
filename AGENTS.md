@@ -64,7 +64,7 @@ Run the exploration and mixed-Case tests when Session lifecycle code changes.
 - Exploration and non-interactive Agent runs may produce Replay files from successfully executed `exe_js` code. Preserve step order and the active Adapter Session lifecycle.
 - If any launch or `exe_js` execution fails in a Replay run, mark the whole run non-replayable. Formal Cases use the selected Adapter runner.
 - Generate `expect` assertions only for outcomes stated in the user's test objective, expected result, or acceptance criteria. Do not assert every operational prerequisite.
-- A saved Case has one source of truth: a Mocha `<case-id>.spec.ts` under `maat-tests/cases`. Steps record Adapter IDs in execution order; pure Web and mixed Web/Appium use the same format.
+- A saved Case has one source of truth under `maat-tests/<owner-platform>/cases/<business-module>`. Steps record Adapter IDs in order; macOS/Windows-owned Cases may mix Web steps.
 - Formal Evidence and the Maat HTML report live under `artifacts/maat/runs/<run-id>`. Web trace may be added as Adapter Evidence.
 
 ## Scope and safety
@@ -74,6 +74,6 @@ Run the exploration and mixed-Case tests when Session lifecycle code changes.
 - Preserve timeout, abort, code-size, output-size, protocol validation, and forced-cleanup tests when changing the worker.
 - Keep the persistent browser lifecycle independent from the Pi session lifecycle. The integration layer owns and closes both.
 - Maat Core depends only on PlatformAdapter and PlatformRegistry. Platform conditionals, Session discovery, framework globals, save/validation, runner, status, and platform-specific tools belong in adapters. `exe_js` is the single JavaScript execution tool; future language executors such as `exe_py` remain separate tools.
-- Cases live under `maat-tests/cases/<business-module>/<case-id>.spec.ts`; Adapter environment hints live under `maat-tests/<adapter>/`. Never put device IDs or signing into Case source.
+- `maat-tests` contains Cases only. Optional local Appium Session hints live under `~/.maat/session-hints/`, never in the repository. Never put device IDs or signing into Case source.
 - Maat does not install drivers or start/stop Appium Server. Agent/Shell/user setup provides a reachable Server; Maat creates and deletes only its own Sessions. Retain app data by default; resetting requires explicit user intent.
 - TUI assist mode permits Pi shell/read/edit/write for auxiliary work. Case exploration/generation enters case mode, blocking shell (including manual `!`/`!!`) and direct edit/write tools. Read-only inspection remains available. Failed saves retain the guard; successful saves return to assist. `/mode assist` explicitly pauses the workflow without clearing its draft; model-requested transitions to assist require user confirmation. This is a tool workflow guard, not an OS sandbox.

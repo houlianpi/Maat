@@ -1,6 +1,6 @@
 /** Case ID: calculator-basic-addition; @maat-adapters web; Objective: 12 + 30 = 42. */
 import { describe, it } from 'mocha';
-import { createMaatTest } from '../../../src/hosts/test/fixture.ts';
+import { createMaatTest } from 'maat/test';
 describe('基础加法计算 @calculator @smoke @suite:smoke', () => {
   it('calculator-basic-addition', async () => {
     const maat = await createMaatTest('calculator-basic-addition', [

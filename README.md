@@ -29,11 +29,11 @@ Describe the UI, actions, and explicit business outcome. Maat uses `exe_js` agai
 
 ## One Case format
 
-All Cases live under `maat-tests/cases`. A Case may be pure Web, pure Appium, or mixed:
+Cases live under `maat-tests/<owner-platform>/cases/<business-module>`. Pure Web belongs to `web`; Android and iOS belong to their mobile platform; Web + macOS/Windows mixed Cases belong to the OS platform.
 
 ```typescript
 import { describe, it } from 'mocha';
-import { createMaatTest } from '../../../src/hosts/test/fixture.ts';
+import { createMaatTest } from 'maat/test';
 
 describe('Web opens desktop confirmation', () => {
   it('mixed-confirmation', async () => {
@@ -87,7 +87,7 @@ Built-in Adapters: Web, Android, iOS, macOS. Core depends only on `PlatformAdapt
 
 For Appium, Maat resolves a reachable Server and device, then creates and deletes its own Session. Driver installation, Server startup, ADB/Xcode, signing, simulators and OS permissions are prepared by the user or Agent through Shell. See [Appium Sessions](docs/native-testing.md).
 
-Ignored local hints live under `maat-tests/<adapter>/native-target.local.json`. They do not persist UUID, app identity, platformName or automationName.
+Optional Appium Session hints live outside the test tree under `~/.maat/session-hints/<adapter>.json`. The `maat-tests` tree contains Cases only.
 
 ## Tools
 

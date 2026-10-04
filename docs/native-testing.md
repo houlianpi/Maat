@@ -14,15 +14,15 @@ The main tools are list_platforms, select_platform, configure_session, list_devi
 
 Appium adapters expose driver, browser, expect, console, display and evidence inside exe_js. Each selected Adapter keeps an independent persistent Exploration Worker and Session. Switching Adapter preserves previous Sessions, enabling Web to macOS to Web flows.
 
-## Local environment hints
+## Optional Session hints
 
-The ignored maat-tests/<adapter>/native-target.local.json file is a hint. It may contain a Server URL, stable device kind/name, signing, timeout and data-retention capabilities. UUID, app identity, platformName and automationName are not persisted.
+Maat does not require Appium configuration in the test repository. Optional local hints may be cached at `~/.maat/session-hints/<adapter>.json`; CLI users may instead provide Session inputs through their environment or setup workflow.
 
 Stale Server/device hints are reported and replaced when a single working alternative exists. Multiple devices require selection. App identity is optional for a base exploration Session but required before saving a replayable Case.
 
 ## One Case format
 
-All formal Cases are Mocha TypeScript files under maat-tests/cases. A Case may be Web-only, Appium-only, or mixed. The SessionPool creates only referenced Sessions, reuses them for later steps, and closes all of them when the Case completes.
+Formal Cases live under `maat-tests/<owner-platform>/cases`. macOS and Windows Case files may mix their OS Adapter with Web. The SessionPool creates only referenced Sessions, reuses them for later steps, and closes all of them when the Case completes.
 
 ## Evidence and reports
 

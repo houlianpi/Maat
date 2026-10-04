@@ -169,10 +169,13 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
   const mock = await mockAppium();
   await mkdir('artifacts/native-tests', { recursive: true });
   const base = await mkdtemp(path.resolve('artifacts/native-tests/layout-'));
+  const hints = await mkdtemp(path.resolve('artifacts/native-tests/hints-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
   const projects = new MaatHarness(createDefaultPlatformRegistry(base), base);
   const cases = new CaseDraftManager();
   const root = path.join(base, 'android');
   try {
+    process.env.MAAT_SESSION_HINTS_DIR = hints;
     await projects.select('android');
     await projects.configureSession({
       serverUrl: mock.url,
@@ -197,7 +200,7 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
       name: 'Welcome',
       description: 'Welcome is shown',
       objectives: ['Welcome'],
-      rootDirectory: base,
+      rootDirectory: root,
     });
     const code = `await expect(driver.$('~welcome')).toHaveText('Welcome');`;
     await cases.recordSuccessfulStep(code, await projects.execute(code), {
@@ -211,7 +214,7 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
     assert.match(spec, /createMaatTest/);
     assert.equal(mock.created(), 2);
     assert.equal(mock.deleted(), 1);
-    assert.equal(saved.testPath, path.join(base, 'cases/account/login/welcome.spec.ts'));
+    assert.equal(saved.testPath, path.join(root, 'cases/account/login/welcome.spec.ts'));
     assert.match(spec, /maat\.step\("Recorded step 001", "android"/);
     assert.doesNotMatch(spec, /node:fs|mkdirSync|writeFileSync|randomUUID|path.resolve/);
     assert.equal(mock.server.listening, true);
@@ -228,9 +231,12 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
     const runs = path.resolve('artifacts/maat/runs');
     assert.ok((await readdir(runs)).length > 0);
   } finally {
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
     await projects.close();
     mock.server.close();
     await rm(base, { recursive: true, force: true });
+    await rm(hints, { recursive: true, force: true });
   }
 });
 
@@ -255,7 +261,7 @@ test('platform layout is enforced by schema and manager, not model naming', asyn
   );
   assert.ok(
     createMaatResourceOptions([]).systemPrompt.includes(
-      'maat-tests/<platform>/cases/<module>/<case-id>.spec.ts',
+      'maat-tests/<owner-platform>/cases/<module>/<case-id>.spec.ts',
     ),
   );
 });

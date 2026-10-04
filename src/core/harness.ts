@@ -7,18 +7,18 @@ import { PlatformRegistry } from './platforms/registry.ts';
 
 export class MaatHarness {
   readonly registry: PlatformRegistry;
-  readonly root: string;
+  readonly workspaceRoot: string;
 
   constructor(registry: PlatformRegistry, root: string) {
     this.registry = registry;
-    this.root = root;
+    this.workspaceRoot = root;
   }
 
   get adapter(): PlatformAdapter {
     return this.registry.current;
   }
   get current() {
-    return { name: this.adapter.id, platform: this.adapter.id, root: this.root };
+    return { name: this.adapter.id, platform: this.adapter.id, root: this.adapter.root };
   }
 
   async select(platform: string) {
@@ -32,16 +32,21 @@ export class MaatHarness {
     return this.adapter.execute(code, signal);
   }
   save(draft: CaseDraft, signal?: AbortSignal) {
-    if (draft.rootDirectory !== this.root)
-      throw new Error('Draft belongs to a different Maat test root.');
-    return saveCase(draft, this.root, signal);
+    const owner = this.registry.list().find((adapter) => adapter.root === draft.rootDirectory);
+    if (!owner) throw new Error('Draft belongs to an unregistered platform root.');
+    return saveCase(draft, owner.root, signal);
   }
   async run(
     selection: CaseSelection,
-    options?: { browser?: string; headed?: boolean; adapterId?: string },
+    options?: { browser?: string; headed?: boolean },
     signal?: AbortSignal,
   ) {
-    return (await runMaatTests(this.root, selection, signal, undefined, options)).exitCode;
+    return (
+      await runMaatTests(this.adapter.root, selection, signal, undefined, {
+        ...options,
+        workspaceRoot: this.workspaceRoot,
+      })
+    ).exitCode;
   }
 
   async configureSession(
