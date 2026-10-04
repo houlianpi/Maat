@@ -1,8 +1,8 @@
 import path from 'node:path';
 import { createDefaultPlatformRegistry } from '../../platforms/default-registry.ts';
-import type { RuntimeRequirement } from '../../platforms/contracts.ts';
-import { EvidenceStore } from './evidence.ts';
-import { SessionPool } from './session-pool.ts';
+import type { RuntimeRequirement } from '../../core/platforms/contracts.ts';
+import { EvidenceStore } from '../../core/testing/evidence.ts';
+import { SessionPool } from '../../core/testing/session-pool.ts';
 import type { Browser, BrowserContext, Page } from 'playwright';
 import type { expect as playwrightExpect } from 'playwright/test';
 import type { Browser as WebdriverBrowser } from 'webdriverio';

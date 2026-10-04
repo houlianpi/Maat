@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
-import { CaseManager } from '../src/cases/case-manager.ts';
+import { CaseDraftManager } from '../src/core/cases/draft-manager.ts';
 import { saveCase } from '../src/core/cases/save-case.ts';
 import { runMaatTests } from '../src/core/testing/runner.ts';
 
@@ -14,7 +14,7 @@ async function createRoot() {
 
 test('Case saves intent, adapter steps and code in one Mocha spec', async () => {
   const root = await createRoot();
-  const cases = new CaseManager();
+  const cases = new CaseDraftManager();
   try {
     const draft = cases.begin({
       id: 'Checkout Counter',
@@ -50,7 +50,7 @@ test('Case saves intent, adapter steps and code in one Mocha spec', async () => 
 
 test('Case stores exploration Evidence and failed Attempts outside source', async () => {
   const root = await createRoot();
-  const cases = new CaseManager();
+  const cases = new CaseDraftManager();
   try {
     cases.begin({
       id: 'evidence-case',
@@ -77,7 +77,7 @@ test('Case stores exploration Evidence and failed Attempts outside source', asyn
 
 test('clean validation failure prevents Case promotion', async () => {
   const root = await createRoot();
-  const cases = new CaseManager();
+  const cases = new CaseDraftManager();
   try {
     const draft = cases.begin({
       id: 'failing-case',

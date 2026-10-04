@@ -8,11 +8,15 @@ import {
   type NativePlatform,
 } from './schema.ts';
 import { NativeManager } from './runtime/manager.ts';
-import type { PlatformAdapter } from '../contracts.ts';
+import type { PlatformAdapter } from '../../core/platforms/contracts.ts';
 import { resolveAppiumSession } from './session-resolver.ts';
 import { discoverDevices } from '../../setup/devices.ts';
 import { discoverApplications } from '../../setup/applications.ts';
-import type { RuntimeRequirement, SessionSetup, SetupInspection } from '../contracts.ts';
+import type {
+  RuntimeRequirement,
+  SessionSetup,
+  SetupInspection,
+} from '../../core/platforms/contracts.ts';
 import { createAppiumTestSession } from './test-session.ts';
 
 export type AppiumAdapterDefinition = {

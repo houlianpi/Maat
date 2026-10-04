@@ -1,9 +1,10 @@
 import path from 'node:path';
 
-export function platformRoot(base: string, platform: string): string {
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(platform))
-    throw new Error('Platform ID must be a lowercase slug.');
-  return path.resolve(base, platform);
+export function adapterRoot(base: string, adapterId: string): string {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(adapterId)) {
+    throw new Error('Adapter ID must be a lowercase slug.');
+  }
+  return path.resolve(base, adapterId);
 }
 
 export function casePath(root: string, id: string, module?: string): string {

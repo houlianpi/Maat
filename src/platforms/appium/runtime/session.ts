@@ -1,7 +1,7 @@
 import { remote } from 'webdriverio';
 import { capabilities, connection, type ResolvedNativeSession } from '../schema.ts';
 import { createExplorationWorker } from '../../../core/exploration/worker-client.ts';
-import type { JavaScriptSession } from '../../../worker/javascript-session.ts';
+import type { JavaScriptSession } from '../../../core/exploration/runtime.ts';
 
 export async function startNativeSession(
   target: ResolvedNativeSession,

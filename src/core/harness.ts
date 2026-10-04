@@ -1,11 +1,11 @@
-import type { CaseSelection } from '../cases/case-runner.ts';
-import type { CaseDraft } from '../cases/types.ts';
-import { saveCase } from '../core/cases/save-case.ts';
-import { runMaatTests } from '../core/testing/runner.ts';
-import type { PlatformAdapter } from '../platforms/contracts.ts';
-import { PlatformRegistry } from '../platforms/registry.ts';
+import type { CaseSelection } from './testing/case-selection.ts';
+import type { CaseDraft } from './cases/types.ts';
+import { saveCase } from './cases/save-case.ts';
+import { runMaatTests } from './testing/runner.ts';
+import type { PlatformAdapter } from './platforms/contracts.ts';
+import { PlatformRegistry } from './platforms/registry.ts';
 
-export class ProjectManager {
+export class MaatHarness {
   readonly registry: PlatformRegistry;
   readonly root: string;
 

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createExecJsTool } from '../src/tools/exec-js-tool.ts';
-import type { StepRecorder } from '../src/recording/run-recorder.ts';
-import type { JavaScriptSession } from '../src/worker/javascript-session.ts';
+import type { StepRecorder } from '../src/core/cases/step-recorder.ts';
+import type { JavaScriptSession } from '../src/core/exploration/runtime.ts';
 
 test('exe_js exposes the JavaScript execution contract', async () => {
   const session: JavaScriptSession = {

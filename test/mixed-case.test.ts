@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
-import { CaseManager } from '../src/cases/case-manager.ts';
+import { CaseDraftManager } from '../src/core/cases/draft-manager.ts';
 import { saveCase } from '../src/core/cases/save-case.ts';
 
 async function mockAppium() {
@@ -46,7 +46,7 @@ test('one Mocha Case reuses Web around an Appium step', async () => {
         capabilities: { 'appium:deviceName': 'mock' },
       }),
     );
-    const manager = new CaseManager();
+    const manager = new CaseDraftManager();
     const draft = manager.begin({
       id: 'mixed-flow',
       name: 'Mixed flow',

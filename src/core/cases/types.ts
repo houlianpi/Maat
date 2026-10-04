@@ -1,4 +1,4 @@
-import type { JavaScriptObservation } from '../worker/protocol.ts';
+import type { JavaScriptObservation } from '../exploration/protocol.ts';
 import type { RuntimeRequirement } from '../platforms/contracts.ts';
 
 export type CaseObjective = {

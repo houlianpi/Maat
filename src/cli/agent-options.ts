@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import path from 'node:path';
 
-import { parseBrowserName, type BrowserName } from '../browser/browser-options.ts';
+import { parseBrowserName, type BrowserName } from '../platforms/web/config.ts';
 
 export type AgentCliOptions = {
   browser: BrowserName;

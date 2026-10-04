@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { findBrowserExecutable } from '../src/browser/browser-executable.ts';
-import { launchJavaScriptSession } from '../src/worker/javascript-session.ts';
+import { findBrowserExecutable } from '../src/setup/browser-discovery.ts';
+import { createWebExplorationSession as launchJavaScriptSession } from '../src/platforms/web/exploration-session.ts';
 
 async function launch(executionTimeoutMs = 5_000) {
   return launchJavaScriptSession({

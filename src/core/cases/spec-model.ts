@@ -1,4 +1,4 @@
-import type { CaseDraft } from '../../cases/types.ts';
+import type { CaseDraft } from './types.ts';
 
 export type SpecStep = {
   number: number;

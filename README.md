@@ -33,7 +33,7 @@ All Cases live under `maat-tests/cases`. A Case may be pure Web, pure Appium, or
 
 ```typescript
 import { describe, it } from 'mocha';
-import { createMaatTest } from '../../../src/core/testing/fixture.ts';
+import { createMaatTest } from '../../../src/hosts/test/fixture.ts';
 
 describe('Web opens desktop confirmation', () => {
   it('mixed-confirmation', async () => {
@@ -128,12 +128,12 @@ Exploration Evidence and failed attempts live under `artifacts/cases/<case-id>`.
 
 ```text
 src/
-├── core/          shared Worker Harness, Case renderer/saver, Runner, SessionPool, Evidence
-├── platforms/     Web, Android, iOS, macOS and shared Appium Session implementation
-├── setup/         optional device and application discovery
-├── cases/         Draft state and selection utilities
-├── tui/           Pi interactive host
-└── tools/         Agent tool adapters
+├── core/          framework-agnostic Case, Worker, Runner, SessionPool, Evidence, contracts
+├── platforms/     Web, Android, iOS, macOS and shared Appium implementations
+├── hosts/         Pi Agent, Pi TUI and formal Mocha test host
+├── tools/         Agent-facing tools
+├── setup/         optional browser/device/application discovery
+└── cli/           thin command entry points
 ```
 
 The Worker is a killable process boundary with timeout, Abort, code/output limits and sensitive environment filtering. It is not an OS or container sandbox.

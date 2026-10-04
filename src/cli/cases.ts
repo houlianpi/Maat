@@ -1,8 +1,8 @@
 import { parseArgs } from 'node:util';
 
-import type { CaseSelection } from '../cases/case-runner.ts';
+import type { CaseSelection } from '../core/testing/case-selection.ts';
 import path from 'node:path';
-import { ProjectManager } from '../projects/project-manager.ts';
+import { MaatHarness } from '../core/harness.ts';
 import { createDefaultPlatformRegistry } from '../platforms/default-registry.ts';
 
 try {
@@ -36,7 +36,7 @@ try {
 
   const project = values.project;
   const testsRoot = path.resolve(values.root);
-  const projects = new ProjectManager(createDefaultPlatformRegistry(testsRoot), testsRoot);
+  const projects = new MaatHarness(createDefaultPlatformRegistry(testsRoot), testsRoot);
   if (project) await projects.select(project);
   try {
     process.exitCode = await projects.run(selection, {

@@ -1,9 +1,8 @@
 import { Type } from '@earendil-works/pi-ai';
 import { defineTool } from '@earendil-works/pi-coding-agent';
 
-import type { StepRecorder } from '../recording/run-recorder.ts';
-import type { JavaScriptSession } from '../worker/javascript-session.ts';
-import type { StepExecution } from '../recording/run-recorder.ts';
+import type { StepExecution, StepRecorder } from '../core/cases/step-recorder.ts';
+import type { JavaScriptSession } from '../core/exploration/runtime.ts';
 
 export function createExecJsTool(
   session: JavaScriptSession,

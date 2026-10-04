@@ -5,7 +5,7 @@ import {
   type NativeAppTarget,
   type ResolvedNativeSession,
 } from './schema.ts';
-import type { TestSession } from '../contracts.ts';
+import type { TestSession } from '../../core/platforms/contracts.ts';
 
 export async function createAppiumTestSession(
   resolved: ResolvedNativeSession,

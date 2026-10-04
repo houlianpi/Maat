@@ -1,10 +1,10 @@
 import path from 'node:path';
-import type { BrowserConfig } from '../../browser/browser-manager.ts';
-import { BrowserManager } from '../../browser/browser-manager.ts';
-import type { PlatformAdapter } from '../contracts.ts';
+import type { BrowserConfig } from './exploration-manager.ts';
+import { WebExplorationManager } from './exploration-manager.ts';
+import type { PlatformAdapter } from '../../core/platforms/contracts.ts';
 import { Type } from '@earendil-works/pi-ai';
 import { defineTool } from '@earendil-works/pi-coding-agent';
-import { browserNames, type BrowserName } from '../../browser/browser-options.ts';
+import { browserNames, type BrowserName } from './config.ts';
 import { createWebTestSession } from './test-session.ts';
 
 export class WebPlatformAdapter implements PlatformAdapter {
@@ -26,11 +26,11 @@ export class WebPlatformAdapter implements PlatformAdapter {
       'Assert only explicit test objectives.',
     ],
   };
-  readonly browser: BrowserManager;
+  readonly browser: WebExplorationManager;
 
-  constructor(root = path.resolve('maat-tests/web'), browser?: BrowserManager) {
+  constructor(root = path.resolve('maat-tests/web'), browser?: WebExplorationManager) {
     this.root = root;
-    this.browser = browser ?? new BrowserManager(root);
+    this.browser = browser ?? new WebExplorationManager(root);
   }
 
   async initialize(): Promise<void> {

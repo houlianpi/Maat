@@ -1,7 +1,7 @@
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { isRecord, maxCodeBytes, parseObservations } from '../../worker/protocol.ts';
-import type { JavaScriptSession } from '../../worker/javascript-session.ts';
+import { isRecord, maxCodeBytes, parseObservations } from './protocol.ts';
+import type { JavaScriptSession } from './runtime.ts';
 
 export async function createExplorationWorker(
   module: URL,

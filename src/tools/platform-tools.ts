@@ -1,10 +1,10 @@
 import { Type } from '@earendil-works/pi-ai';
 import { defineTool } from '@earendil-works/pi-coding-agent';
-import type { CaseManager } from '../cases/case-manager.ts';
+import type { CaseDraftManager } from '../core/cases/draft-manager.ts';
 import { nativeDeviceKinds } from '../platforms/appium/schema.ts';
-import type { ProjectManager } from './project-manager.ts';
+import type { MaatHarness } from '../core/harness.ts';
 
-export function createProjectTools(projects: ProjectManager, cases: CaseManager) {
+export function createPlatformTools(projects: MaatHarness, cases: CaseDraftManager) {
   return [
     defineTool({
       name: 'select_platform',

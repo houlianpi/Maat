@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
-import { browserChannel, type BrowserName } from '../../browser/browser-options.ts';
-import type { TestSession } from '../contracts.ts';
+import { browserChannel, type BrowserName } from './config.ts';
+import type { TestSession } from '../../core/platforms/contracts.ts';
 
 export async function createWebTestSession(
   setup: Record<string, unknown> = {},

@@ -1,4 +1,4 @@
-import { runAgent } from '../agent/run-agent.ts';
+import { runAgent } from '../hosts/agent/run-agent.ts';
 import { parseAgentOptions } from './agent-options.ts';
 
 try {

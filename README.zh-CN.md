@@ -106,12 +106,12 @@ cases/<case-id>/*.png
 
 ```text
 src/
-├── core/          统一 Worker、Case Renderer/Saver、Runner、SessionPool、Evidence
-├── platforms/     Web、Android、iOS、macOS 与共享 Appium Session 实现
-├── setup/         可选设备/App 发现能力
-├── cases/         Draft 状态与 Case 选择
-├── tui/           Pi 交互宿主
-└── tools/         Agent 工具适配
+├── core/          与框架无关的 Case、Worker、Runner、SessionPool、Evidence、契约
+├── platforms/     Web、Android、iOS、macOS 与共享 Appium 实现
+├── hosts/         Pi Agent、Pi TUI 与正式 Mocha 测试宿主
+├── tools/         Agent 工具
+├── setup/         可选浏览器/设备/App 发现能力
+└── cli/           薄命令入口
 ```
 
 Worker 是具备超时、Abort、代码/输出限制和敏感环境过滤的可终止进程边界，不是 OS 或容器安全沙箱。

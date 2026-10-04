@@ -14,16 +14,15 @@ import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
-import { BrowserManager } from '../browser/browser-manager.ts';
-import { CaseManager } from '../cases/case-manager.ts';
-import { createCaseTools } from '../cases/case-tools.ts';
-import { createExecJsTool } from '../tools/exec-js-tool.ts';
-import { ProjectManager } from '../projects/project-manager.ts';
-import { createProjectTools } from '../projects/project-tools.ts';
-import { createDefaultPlatformRegistry } from '../platforms/default-registry.ts';
+import { CaseDraftManager } from '../../core/cases/draft-manager.ts';
+import { createCaseTools } from '../../tools/case-tools.ts';
+import { createExecJsTool } from '../../tools/exec-js-tool.ts';
+import { MaatHarness } from '../../core/harness.ts';
+import { createPlatformTools } from '../../tools/platform-tools.ts';
+import { createDefaultPlatformRegistry } from '../../platforms/default-registry.ts';
 import { createMaatExtension } from './maat-extension.ts';
 import { createWorkModeExtension } from './work-mode.ts';
-import { createMaatResourceOptions, createMaatSettings } from './maat-runtime-config.ts';
+import { createMaatResourceOptions, createMaatSettings } from './runtime-config.ts';
 
 const cwd = process.cwd();
 const maatDir = path.join(homedir(), '.maat');
@@ -32,13 +31,9 @@ const piAgentDir = getAgentDir();
 await mkdir(sessionDir, { recursive: true });
 process.env.PI_SKIP_VERSION_CHECK = '1';
 
-const browserManager = new BrowserManager(path.resolve('maat-tests/web'));
-const caseManager = new CaseManager();
+const caseManager = new CaseDraftManager();
 const testsRoot = path.resolve('maat-tests');
-const projects = new ProjectManager(
-  createDefaultPlatformRegistry(testsRoot, browserManager),
-  testsRoot,
-);
+const projects = new MaatHarness(createDefaultPlatformRegistry(testsRoot), testsRoot);
 const caseTools = createCaseTools(caseManager, projects);
 const customTools = [
   createExecJsTool(
@@ -59,7 +54,7 @@ const customTools = [
     }),
   ),
   ...caseTools,
-  ...createProjectTools(projects, caseManager),
+  ...createPlatformTools(projects, caseManager),
   ...projects.registry.list().flatMap((adapter) => adapter.tools?.() ?? []),
 ];
 const piSettings = SettingsManager.create(cwd, getAgentDir()).getGlobalSettings();

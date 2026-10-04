@@ -1,9 +1,9 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 
-import { browserChannel, type BrowserName } from './browser-options.ts';
-import type { JavaScriptSession } from '../worker/javascript-session.ts';
-import { createWebExplorationSession } from '../platforms/web/exploration-session.ts';
+import { browserChannel, type BrowserName } from './config.ts';
+import type { JavaScriptSession } from '../../core/exploration/runtime.ts';
+import { createWebExplorationSession } from './exploration-session.ts';
 
 export type BrowserProfile = {
   browser: BrowserName;
@@ -19,7 +19,7 @@ export type BrowserConfig = {
 
 type MaatConfig = { profiles?: Record<string, BrowserProfile> };
 
-export class BrowserManager implements JavaScriptSession {
+export class WebExplorationManager implements JavaScriptSession {
   private configRoot: string;
   private session: JavaScriptSession | undefined;
   private config: BrowserConfig = { browser: 'chrome', headless: true };

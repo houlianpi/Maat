@@ -6,13 +6,12 @@ import path from 'node:path';
 import { startNativeSession } from '../src/platforms/appium/runtime/session.ts';
 import { capabilities, connection, splitCapabilities } from '../src/platforms/appium/schema.ts';
 import { matchDevices, parseAndroidDevices, parseIosDevices } from '../src/setup/devices.ts';
-import { CaseManager } from '../src/cases/case-manager.ts';
-import { ProjectManager } from '../src/projects/project-manager.ts';
-import { BrowserManager } from '../src/browser/browser-manager.ts';
-import { platformRoot, casePath } from '../src/projects/layout.ts';
-import { createProjectTools } from '../src/projects/project-tools.ts';
-import { createCaseTools } from '../src/cases/case-tools.ts';
-import { createMaatResourceOptions } from '../src/tui/maat-runtime-config.ts';
+import { CaseDraftManager } from '../src/core/cases/draft-manager.ts';
+import { MaatHarness } from '../src/core/harness.ts';
+import { adapterRoot as platformRoot, casePath } from '../src/core/cases/paths.ts';
+import { createPlatformTools } from '../src/tools/platform-tools.ts';
+import { createCaseTools } from '../src/tools/case-tools.ts';
+import { createMaatResourceOptions } from '../src/hosts/tui/runtime-config.ts';
 import { AppiumPlatformAdapter } from '../src/platforms/appium/appium-adapter.ts';
 import { createDefaultPlatformRegistry } from '../src/platforms/default-registry.ts';
 
@@ -170,9 +169,8 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
   const mock = await mockAppium();
   await mkdir('artifacts/native-tests', { recursive: true });
   const base = await mkdtemp(path.resolve('artifacts/native-tests/layout-'));
-  const browser = new BrowserManager();
-  const projects = new ProjectManager(createDefaultPlatformRegistry(base, browser), base);
-  const cases = new CaseManager();
+  const projects = new MaatHarness(createDefaultPlatformRegistry(base), base);
+  const cases = new CaseDraftManager();
   const root = path.join(base, 'android');
   try {
     await projects.select('android');
@@ -180,7 +178,7 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
       serverUrl: mock.url,
       capabilities: { 'appium:deviceName': 'mock', 'appium:appPackage': 'example.welcome' },
     });
-    const configure = createProjectTools(projects, cases).find(
+    const configure = createPlatformTools(projects, cases).find(
       (tool) => tool.name === 'configure_session',
     )!;
     await configure.execute(
@@ -231,15 +229,13 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
     assert.ok((await readdir(runs)).length > 0);
   } finally {
     await projects.close();
-    await browser.close();
     mock.server.close();
     await rm(base, { recursive: true, force: true });
   }
 });
 
 test('platform layout is enforced by schema and manager, not model naming', async () => {
-  const projects = new ProjectManager(createDefaultPlatformRegistry(), path.resolve('maat-tests'));
-  const browser = new BrowserManager();
+  const projects = new MaatHarness(createDefaultPlatformRegistry(), path.resolve('maat-tests'));
   await assert.rejects(projects.select('iphone-calculator'), /Unknown platform/);
   assert.equal(projects.current.platform, 'web');
   for (const platform of ['web', 'android', 'ios', 'macos'])
@@ -247,12 +243,12 @@ test('platform layout is enforced by schema and manager, not model naming', asyn
   assert.throws(() => platformRoot('maat-tests', '../escape'));
   assert.throws(() => casePath('/root/ios', '../escape'));
   assert.throws(() => casePath('/root/ios', 'case', '../escape'));
-  const tools = createProjectTools(projects, new CaseManager());
+  const tools = createPlatformTools(projects, new CaseDraftManager());
   assert.equal(
     tools.find((tool) => tool.name === 'select_platform')!.parameters.properties.platform.type,
     'string',
   );
-  const caseTools = createCaseTools(new CaseManager(), projects);
+  const caseTools = createCaseTools(new CaseDraftManager(), projects);
   assert.equal(
     caseTools.find((tool) => tool.name === 'begin_case')!.parameters.properties.rootDirectory,
     undefined,

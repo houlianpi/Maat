@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import type { CaseSelection } from '../../cases/case-runner.ts';
-import { findSpecs, resolveCaseSpec } from '../../cases/case-runner.ts';
+import type { CaseSelection } from './case-selection.ts';
+import { findSpecs, resolveCaseSpec } from './case-selection.ts';
 
 export type MaatRunResult = { exitCode: number; runDirectory: string };
 export type MaatRunOptions = { browser?: string; headed?: boolean; adapterId?: string };
@@ -45,7 +45,7 @@ export async function runMaatTests(
   const input = { specs, grep, runDirectory };
   const args = [
     '--experimental-strip-types',
-    fileURLToPath(new URL('./run-mocha.ts', import.meta.url)),
+    fileURLToPath(new URL('../../hosts/test/run-mocha.ts', import.meta.url)),
     JSON.stringify(input),
   ];
   return new Promise((resolve, reject) => {

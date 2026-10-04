@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { WorkModePolicy } from '../src/tui/work-mode.ts';
+import { WorkModePolicy } from '../src/hosts/tui/work-mode.ts';
 
 test('assistance permits shell and file edits', () => {
   const policy = new WorkModePolicy();

@@ -1,5 +1,5 @@
-import type { RuntimeRequirement, TestSession } from '../../platforms/contracts.ts';
-import type { PlatformRegistry } from '../../platforms/registry.ts';
+import type { RuntimeRequirement, TestSession } from '../platforms/contracts.ts';
+import type { PlatformRegistry } from '../platforms/registry.ts';
 
 export class SessionPool {
   private readonly registry: PlatformRegistry;

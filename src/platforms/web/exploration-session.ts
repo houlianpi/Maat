@@ -1,4 +1,4 @@
-import type { JavaScriptSessionOptions } from '../../worker/javascript-session.ts';
+import type { JavaScriptSessionOptions } from '../../core/exploration/runtime.ts';
 import { createExplorationWorker } from '../../core/exploration/worker-client.ts';
 
 export function createWebExplorationSession(options: JavaScriptSessionOptions = {}) {

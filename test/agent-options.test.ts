@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { browserChannel } from '../src/browser/browser-options.ts';
+import { browserChannel } from '../src/platforms/web/config.ts';
 import { parseAgentOptions } from '../src/cli/agent-options.ts';
 
 test('agent CLI maps Edge to the Playwright msedge channel', () => {

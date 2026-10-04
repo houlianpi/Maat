@@ -1,11 +1,11 @@
 import { createAgentSession, SessionManager } from '@earendil-works/pi-coding-agent';
 
-import { browserChannel, type BrowserName } from '../browser/browser-options.ts';
-import { createAgentTrace } from '../logging/agent-trace.ts';
-import { createRunRecorder } from '../recording/run-recorder.ts';
-import { createExecJsTool } from '../tools/exec-js-tool.ts';
-import type { JavaScriptSession } from '../worker/javascript-session.ts';
-import { createWebExplorationSession } from '../platforms/web/exploration-session.ts';
+import { browserChannel, type BrowserName } from '../../platforms/web/config.ts';
+import { createAgentTrace } from './trace.ts';
+import { createRunRecorder } from './run-recorder.ts';
+import { createExecJsTool } from '../../tools/exec-js-tool.ts';
+import type { JavaScriptSession } from '../../core/exploration/runtime.ts';
+import { createWebExplorationSession } from '../../platforms/web/exploration-session.ts';
 
 function shortToolCallId(id: string): string {
   return id.split('|', 1)[0].slice(0, 24);

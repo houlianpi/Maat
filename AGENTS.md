@@ -6,16 +6,12 @@ Maat is a TypeScript project for conversational UI verification. Exploration use
 
 ```text
 src/
-  agent/       Pi session orchestration; no CLI argument parsing
-  browser/     Persistent Playwright lifecycle and browser helpers
-  cli/         Executable entry points; parse input and set exit codes
-  tools/       Pi custom-tool adapters (add when the first tool exists)
-  worker/      Untrusted-code process boundary (add with worker isolation)
-  cases/       Natural-language Case metadata, clean validation, persistence, and batch execution
-  tui/         Pi InteractiveMode host and long-lived conversational state
-  core/         Shared exploration Worker, Case renderer/saver, Mocha runner, SessionPool, and Evidence
-  platforms/    PlatformAdapter registry plus Web, Android, iOS, macOS, and shared Appium Session code
-  setup/        Optional device and application discovery used by Agent setup tools
+  core/         Framework-agnostic Case, exploration, platform contracts, runner, SessionPool, Evidence
+  platforms/    Web, Android, iOS, macOS and shared Appium implementations
+  hosts/        Pi noninteractive Agent, Pi TUI, and formal Mocha test host
+  tools/        Agent-facing Case, platform, and JavaScript tools
+  setup/        Optional browser/device/application discovery
+  cli/          Thin command entry points; parsing and exit codes only
 examples/      Small, manually runnable demonstrations
 test/          Automated tests, mirroring the source domains
 artifacts/     Generated screenshots and run records; never source code
@@ -24,13 +20,13 @@ bin/           Thin package executables; dispatch only, with no business logic
 
 - Organize by runtime responsibility, not by generic categories such as `utils` or `types`.
 - Do not create a directory until code for that responsibility exists.
-- Keep dependencies pointing inward: `cli -> agent/tools -> browser`; browser code must not import Pi or CLI modules.
+- Dependencies point inward: `cli/hosts/tools/platforms -> core`. Core never imports Hosts or concrete Platforms. Setup may depend on platform schemas but never on Hosts.
 - Avoid barrel `index.ts` files while modules are few. Import the defining module directly.
 
 ## TypeScript conventions
 
 - Use ESM and strict TypeScript. Local imports include the `.ts` extension because this project runs source directly with Node's type stripping.
-- Prefer `type` imports and `type` aliases for data shapes. Use classes only for stateful lifecycle owners such as `BrowserRuntime`.
+- Prefer `type` imports and type aliases for data shapes. Use classes only for stateful lifecycle owners such as SessionPool or Adapter managers.
 - Prefer `unknown` at trust boundaries and validate before use. Do not introduce `any` without a documented interoperability reason.
 - Keep public APIs small. Internal Playwright handles stay private unless a caller genuinely needs them.
 - Name files in kebab-case, types/classes in PascalCase, and values/functions in camelCase.
@@ -53,7 +49,7 @@ npm run typecheck
 npm test
 ```
 
-Run `npm run browser:demo` when browser lifecycle code changes.
+Run the exploration and mixed-Case tests when Session lifecycle code changes.
 
 ## Dependencies and generated files
 

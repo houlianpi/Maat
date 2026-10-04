@@ -2,27 +2,14 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-import type { JavaScriptObservation } from '../worker/protocol.ts';
+import type { JavaScriptObservation } from '../../core/exploration/protocol.ts';
+import type { StepExecution, StepRecorder } from '../../core/cases/step-recorder.ts';
 import { generateReplay, type ReplayStep } from './replay-generator.ts';
 
 export type RunStatus = 'completed' | 'failed';
 
 export type RunRecorderOptions = {
   browser?: string;
-};
-
-export type StepRecorder = {
-  recordSuccessfulStep(
-    code: string,
-    observations: JavaScriptObservation[],
-    execution?: StepExecution,
-  ): Promise<void>;
-  recordFailedStep(code: string, error: unknown, execution?: StepExecution): Promise<void>;
-};
-export type StepExecution = {
-  adapterId: string;
-  bindings: string[];
-  requirement: import('../platforms/contracts.ts').RuntimeRequirement;
 };
 
 export type RunRecorder = StepRecorder & {

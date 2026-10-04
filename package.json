@@ -8,14 +8,13 @@
   },
   "scripts": {
     "agent": "node --experimental-strip-types src/cli/agent.ts",
-    "browser:demo": "node --experimental-strip-types examples/browser-demo.ts",
     "cases": "node --experimental-strip-types src/cli/cases.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "maat:test": "node --experimental-strip-types src/cli/cases.ts",
     "replay": "node --experimental-strip-types",
     "test": "node --experimental-strip-types --test test/*.test.ts",
-    "tui": "node --experimental-strip-types src/tui/main.ts",
+    "tui": "node --experimental-strip-types src/hosts/tui/main.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

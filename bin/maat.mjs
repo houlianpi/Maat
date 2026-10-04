@@ -38,7 +38,7 @@ let forwardedArgs;
 switch (command) {
   case undefined:
   case 'tui':
-    script = 'src/tui/main.ts';
+    script = 'src/hosts/tui/main.ts';
     forwardedArgs = args.slice(command === 'tui' ? 1 : 0);
     break;
   case 'agent':

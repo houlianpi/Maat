@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { CaseManager } from '../src/cases/case-manager.ts';
-import { maatStatusLines } from '../src/tui/maat-extension.ts';
-import { createMaatResourceOptions, createMaatSettings } from '../src/tui/maat-runtime-config.ts';
+import { CaseDraftManager } from '../src/core/cases/draft-manager.ts';
+import { maatStatusLines } from '../src/hosts/tui/maat-extension.ts';
+import { createMaatResourceOptions, createMaatSettings } from '../src/hosts/tui/runtime-config.ts';
 
 test('Maat isolates Pi resources while copying initial model preferences', () => {
   const settings = createMaatSettings({
@@ -28,7 +28,7 @@ test('Maat isolates Pi resources while copying initial model preferences', () =>
 });
 
 test('Maat status lines show browser, Case, and Evidence state', () => {
-  const caseManager = new CaseManager();
+  const caseManager = new CaseDraftManager();
   caseManager.begin({
     id: 'login-case',
     name: 'Login Case',

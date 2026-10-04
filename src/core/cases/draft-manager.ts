@@ -1,9 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import type { StepRecorder } from '../recording/run-recorder.ts';
-import type { JavaScriptObservation } from '../worker/protocol.ts';
-import type { StepExecution } from '../recording/run-recorder.ts';
+import type { StepExecution, StepRecorder } from './step-recorder.ts';
+import type { JavaScriptObservation } from '../exploration/protocol.ts';
 import type { CaseDraft, CaseEvidence } from './types.ts';
 
 export type BeginCaseInput = {
@@ -38,7 +37,7 @@ function normalizeModule(value: string | undefined): string | undefined {
   return segments.join('/');
 }
 
-export class CaseManager implements StepRecorder {
+export class CaseDraftManager implements StepRecorder {
   private draft: CaseDraft | undefined;
 
   clear(): void {

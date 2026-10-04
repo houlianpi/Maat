@@ -1,7 +1,7 @@
 import { formatWithOptions } from 'node:util';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { maxCodeBytes, maxOutputBytes, type JavaScriptObservation } from '../../worker/protocol.ts';
+import { maxCodeBytes, maxOutputBytes, type JavaScriptObservation } from './protocol.ts';
 import type { ExplorationRuntime, ExplorationRuntimeModule } from './runtime.ts';
 
 let runtime: ExplorationRuntime | undefined;

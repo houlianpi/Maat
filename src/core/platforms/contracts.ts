@@ -1,4 +1,4 @@
-import type { JavaScriptObservation } from '../worker/protocol.ts';
+import type { JavaScriptObservation } from '../exploration/protocol.ts';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 
 export type PlatformStatus = {

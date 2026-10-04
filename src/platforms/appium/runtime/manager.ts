@@ -6,7 +6,7 @@ import {
   type ResolvedNativeSession,
 } from '../schema.ts';
 import { resolveDevice } from '../../../setup/devices.ts';
-import type { JavaScriptSession } from '../../../worker/javascript-session.ts';
+import type { JavaScriptSession } from '../../../core/exploration/runtime.ts';
 
 export class NativeManager implements JavaScriptSession {
   private session?: JavaScriptSession;

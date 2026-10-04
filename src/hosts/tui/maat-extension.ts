@@ -4,10 +4,10 @@ import type {
   InlineExtension,
 } from '@earendil-works/pi-coding-agent';
 
-import type { CaseManager } from '../cases/case-manager.ts';
-import type { PlatformStatus } from '../platforms/contracts.ts';
+import type { CaseDraftManager } from '../../core/cases/draft-manager.ts';
+import type { PlatformStatus } from '../../core/platforms/contracts.ts';
 
-export function maatStatusLines(platform: PlatformStatus, caseManager: CaseManager): string[] {
+export function maatStatusLines(platform: PlatformStatus, caseManager: CaseDraftManager): string[] {
   const draft = caseManager.current;
   const platformLine = [`Platform ${platform.label}`, platform.detail, platform.session]
     .filter(Boolean)
@@ -22,7 +22,7 @@ export function maatStatusLines(platform: PlatformStatus, caseManager: CaseManag
 }
 
 export function createMaatExtension(
-  caseManager: CaseManager,
+  caseManager: CaseDraftManager,
   platformStatus: () => PlatformStatus,
 ): InlineExtension {
   const factory = (pi: ExtensionAPI) => {

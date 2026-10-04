@@ -1,10 +1,10 @@
 import { Type } from '@earendil-works/pi-ai';
 import { defineTool } from '@earendil-works/pi-coding-agent';
 
-import type { CaseManager } from './case-manager.ts';
-import type { ProjectManager } from '../projects/project-manager.ts';
+import type { CaseDraftManager } from '../core/cases/draft-manager.ts';
+import type { MaatHarness } from '../core/harness.ts';
 
-export function createCaseTools(caseManager: CaseManager, projects: ProjectManager) {
+export function createCaseTools(caseManager: CaseDraftManager, projects: MaatHarness) {
   const beginCase = defineTool({
     name: 'begin_case',
     label: 'Begin Case',

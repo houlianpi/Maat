@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { PlatformAdapter } from '../src/platforms/contracts.ts';
-import { PlatformRegistry } from '../src/platforms/registry.ts';
+import type { PlatformAdapter } from '../src/core/platforms/contracts.ts';
+import { PlatformRegistry } from '../src/core/platforms/registry.ts';
 import {
   resolveAppiumSession,
   SessionSetupError,
@@ -9,7 +9,7 @@ import {
 } from '../src/platforms/appium/session-resolver.ts';
 import { renderSpec } from '../src/core/cases/spec-renderer.ts';
 import { buildSpecModel } from '../src/core/cases/spec-model.ts';
-import { CaseManager } from '../src/cases/case-manager.ts';
+import { CaseDraftManager } from '../src/core/cases/draft-manager.ts';
 
 function adapter(id: string, events: string[]): PlatformAdapter {
   return {
@@ -92,7 +92,7 @@ test('Appium resolver requires user selection when multiple devices remain', asy
 });
 
 test('spec metadata identifies every Adapter used by a mixed Case', () => {
-  const draft = new CaseManager().begin({
+  const draft = new CaseDraftManager().begin({
     id: 'mixed',
     name: 'Mixed',
     description: 'Mixed',

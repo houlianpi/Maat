@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { resolveCaseSpec } from '../src/cases/case-runner.ts';
+import { resolveCaseSpec } from '../src/core/testing/case-selection.ts';
 import { buildSpecModel } from '../src/core/cases/spec-model.ts';
 import { renderSpec } from '../src/core/cases/spec-renderer.ts';
-import type { CaseDraft } from '../src/cases/types.ts';
+import type { CaseDraft } from '../src/core/cases/types.ts';
 
 test('unified renderer creates one Mocha Case with adapter steps', () => {
   const draft: CaseDraft = {
@@ -33,7 +33,7 @@ test('unified renderer creates one Mocha Case with adapter steps', () => {
     failures: [],
     evidence: [],
   };
-  const spec = renderSpec(buildSpecModel(draft), '../../src/core/testing/fixture.ts');
+  const spec = renderSpec(buildSpecModel(draft), '../../src/hosts/test/fixture.ts');
   assert.match(spec, /import \{ describe, it \} from 'mocha'/);
   assert.match(spec, /Case ID: sample-case/);
   assert.match(spec, /@suite:regression/);
