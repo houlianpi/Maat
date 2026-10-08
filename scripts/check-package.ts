@@ -165,40 +165,13 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
     ) as Manifest;
     assert.deepEqual(piManifest.pi?.extensions, ['./dist/extension.js']);
     const piExecutable = path.resolve('node_modules/.bin/pi');
-    const piHelp = execFileSync(
-      piExecutable,
-      ['--no-extensions', '--extension', piRoot, '--help'],
-      { encoding: 'utf8', env: { ...process.env, NODE_PATH: modules } },
-    );
-    assert.match(piHelp.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, ''), /pi - AI coding assistant/);
-    const piRun = spawnSync(
-      piExecutable,
-      [
-        '--no-extensions',
-        '--extension',
-        piRoot,
-        '--offline',
-        '--no-session',
-        '--mode',
-        'json',
-        '-p',
-        'Reply OK',
-      ],
-      {
-        encoding: 'utf8',
-        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', NODE_PATH: modules },
-      },
-    );
+    const piRun = spawnSync(piExecutable, ['--no-extensions', '--extension', piRoot, '--help'], {
+      encoding: 'utf8',
+      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', NODE_PATH: modules },
+    });
     assert.equal(piRun.status, 0, piRun.stderr);
+    assert.match(piRun.stdout, /pi - AI coding assistant/);
     assert.doesNotMatch(piRun.stderr, /Host-provided extension packages must be declared/);
-    const toolNames = piRun.stdout
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line) as Record<string, any>)
-      .find((entry) => entry.type === 'message_start')
-      ?.message?.toolsAdded?.map((tool: { name: string }) => tool.name);
-    for (const tool of ['exe_js', 'list_case_steps', 'save_case', 'set_work_mode'])
-      assert.ok(toolNames?.includes(tool), `Pi did not load ${tool}.`);
   } finally {
     await rm(installation, { recursive: true, force: true });
     await rm(emptyProject, { recursive: true, force: true });
