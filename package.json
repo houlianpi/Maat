@@ -1,6 +1,6 @@
 {
   "name": "@houlianpi/maat",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Conversational UI verification for Pi, Playwright, and Appium",
   "license": "MIT",
   "keywords": [
