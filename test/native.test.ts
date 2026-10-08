@@ -236,17 +236,6 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
       bindings: ['driver', 'browser', 'expect', 'display', 'evidence'],
       requirement: projects.platforms.current().runtimeRequirement(),
     });
-    const saved = await projects.cases.save();
-    const { readFile } = await import('node:fs/promises');
-    const spec = await readFile(saved.testPath, 'utf8');
-    assert.match(spec, /createMaatTest/);
-    assert.equal(mock.created(), 2);
-    assert.equal(mock.deleted(), 1);
-    assert.equal(saved.testPath, path.join(root, 'cases/account/login/welcome.spec.ts'));
-    assert.match(spec, /maat\.step\("Recorded step 001", "android"/);
-    assert.doesNotMatch(spec, /node:fs|mkdirSync|writeFileSync|randomUUID|path.resolve/);
-    assert.equal(mock.server.listening, true);
-    assert.ok(!spec.includes(mock.url));
     draft.steps.push({
       number: 2,
       adapterId: 'android',
@@ -255,6 +244,21 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
       code: `await expect(1).toBe(2);`,
     });
     await assert.rejects(projects.cases.save(), /Clean validation failed/);
+    assert.equal(adapter.runtime.isRunning, true);
+    assert.equal(mock.deleted(), 1);
+    draft.steps.pop();
+    const saved = await projects.cases.save();
+    const { readFile } = await import('node:fs/promises');
+    const spec = await readFile(saved.testPath, 'utf8');
+    assert.match(spec, /createMaatTest/);
+    assert.equal(mock.created(), 3);
+    assert.equal(mock.deleted(), 3);
+    assert.equal(adapter.runtime.isRunning, false);
+    assert.equal(saved.testPath, path.join(root, 'cases/account/login/welcome.spec.ts'));
+    assert.match(spec, /maat\.step\("Recorded step 001", "android"/);
+    assert.doesNotMatch(spec, /node:fs|mkdirSync|writeFileSync|randomUUID|path.resolve/);
+    assert.equal(mock.server.listening, true);
+    assert.ok(!spec.includes(mock.url));
     assert.equal(await readFile(saved.testPath, 'utf8'), spec);
     const runs = path.resolve('artifacts/maat/runs');
     assert.ok((await readdir(runs)).length > 0);

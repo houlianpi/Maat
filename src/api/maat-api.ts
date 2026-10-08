@@ -71,7 +71,11 @@ export class MaatApi {
       if (!draft) throw new Error('No active Case. Call begin first.');
       const owner = this.registry.list().find((adapter) => adapter.root === draft.rootDirectory);
       if (!owner) throw new Error('Draft belongs to an unregistered platform root.');
-      return saveCase(draft, owner.root, signal);
+      const result = await saveCase(draft, owner.root, signal);
+      // A promoted Case no longer needs its exploratory Sessions. Failed validation keeps them
+      // alive so the Agent can inspect and repair the same UI state.
+      await this.registry.close();
+      return result;
     },
   };
 

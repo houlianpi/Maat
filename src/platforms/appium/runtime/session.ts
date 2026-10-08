@@ -8,6 +8,7 @@ export async function startNativeSession(
   timeoutMs = 60_000,
 ): Promise<JavaScriptSession> {
   const desired = capabilities(target);
+  const appId = target.app?.['appium:appPackage'] ?? target.app?.['appium:bundleId'];
   if (target.environment.serverUrl) connection(target.environment.serverUrl);
   if (!target.environment.serverUrl)
     throw new Error('Resolved Appium Session requires a serverUrl.');
@@ -30,7 +31,7 @@ export async function startNativeSession(
       new URL('../exploration-runtime.ts', import.meta.url),
       {
         ...endpoint,
-        maatAppId: target.app?.['appium:appPackage'] ?? target.app?.['appium:bundleId'],
+        maatAppId: appId,
         sessionId: driver.sessionId,
         capabilities: driver.capabilities,
         logLevel: 'silent',
@@ -49,7 +50,11 @@ export async function startNativeSession(
       try {
         await worker.close();
       } finally {
-        await driver.deleteSession();
+        try {
+          if (appId) await driver.terminateApp(appId);
+        } finally {
+          await driver.deleteSession();
+        }
       }
     },
   };
