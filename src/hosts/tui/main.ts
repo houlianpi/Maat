@@ -14,12 +14,8 @@ import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 
-import { CaseDraftManager } from '../../core/cases/draft-manager.ts';
-import { createCaseTools } from '../../tools/case-tools.ts';
-import { createExecJsTool } from '../../tools/exec-js-tool.ts';
-import { MaatHarness } from '../../core/harness.ts';
-import { createPlatformTools } from '../../tools/platform-tools.ts';
-import { createDefaultPlatformRegistry } from '../../platforms/default-registry.ts';
+import { createMaat } from '../../api/create-maat.ts';
+import { createMaatPiTools } from '../pi/tools.ts';
 import { createMaatExtension } from './maat-extension.ts';
 import { createWorkModeExtension } from './work-mode.ts';
 import { createMaatResourceOptions, createMaatSettings } from './runtime-config.ts';
@@ -31,32 +27,8 @@ const piAgentDir = getAgentDir();
 await mkdir(sessionDir, { recursive: true });
 process.env.PI_SKIP_VERSION_CHECK = '1';
 
-const caseManager = new CaseDraftManager();
-const testsRoot = path.resolve('maat-tests');
-const projects = new MaatHarness(createDefaultPlatformRegistry(testsRoot), testsRoot);
-const caseTools = createCaseTools(caseManager, projects);
-const customTools = [
-  createExecJsTool(
-    {
-      close: () => projects.adapter.close(),
-      execute: (code, signal) => projects.execute(code, signal),
-    },
-    caseManager,
-    {
-      description:
-        'Execute JavaScript against the active Platform Adapter. Call list_platforms after switching to see the available runtime globals.',
-      guidelines: ['Use only globals exposed by the active adapter codeContext.'],
-    },
-    () => ({
-      adapterId: projects.adapter.id,
-      bindings: projects.adapter.codeContext.globals.map((item) => item.name),
-      requirement: projects.adapter.runtimeRequirement(),
-    }),
-  ),
-  ...caseTools,
-  ...createPlatformTools(projects, caseManager),
-  ...projects.registry.list().flatMap((adapter) => adapter.tools?.() ?? []),
-];
+const maat = createMaat({ workspaceRoot: cwd });
+const customTools = createMaatPiTools(maat);
 const piSettings = SettingsManager.create(cwd, getAgentDir()).getGlobalSettings();
 const maatSettings = SettingsManager.create(cwd, maatDir, {
   projectTrusted: false,
@@ -84,7 +56,7 @@ const modelRuntime = await ModelRuntime.create({
   authPath: path.join(piAgentDir, 'auth.json'),
   modelsPath: path.join(piAgentDir, 'models.json'),
 });
-const maatExtension = createMaatExtension(caseManager, () => projects.status());
+const maatExtension = createMaatExtension(maat.drafts, () => maat.platforms.status());
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({
   cwd: runtimeCwd,
@@ -104,7 +76,7 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
         hidden: true,
         factory: (pi) => {
           pi.on('session_shutdown', async () => {
-            await projects.close();
+            await maat.close();
           });
         },
       },
@@ -147,7 +119,7 @@ try {
   await tui.run();
 } finally {
   try {
-    await projects.close();
+    await maat.close();
   } finally {
     await runtime.dispose();
   }

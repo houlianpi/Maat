@@ -1,10 +1,10 @@
+import { readFile } from 'node:fs/promises';
 import { Type } from '@earendil-works/pi-ai';
 import { defineTool } from '@earendil-works/pi-coding-agent';
 
-import type { CaseDraftManager } from '../core/cases/draft-manager.ts';
-import type { MaatHarness } from '../core/harness.ts';
+import type { MaatApi } from '../api/maat-api.ts';
 
-export function createCaseTools(caseManager: CaseDraftManager, projects: MaatHarness) {
+export function createCaseTools(maat: MaatApi) {
   const beginCase = defineTool({
     name: 'begin_case',
     label: 'Begin Case',
@@ -30,9 +30,7 @@ export function createCaseTools(caseManager: CaseDraftManager, projects: MaatHar
       content: [
         {
           type: 'text',
-          text: JSON.stringify(
-            caseManager.begin({ ...params, rootDirectory: projects.current.root }),
-          ),
+          text: JSON.stringify(maat.cases.begin(params)),
         },
       ],
       details: {},
@@ -46,7 +44,7 @@ export function createCaseTools(caseManager: CaseDraftManager, projects: MaatHar
       'Return the active Case objectives, candidate steps, failures, and Evidence count.',
     parameters: Type.Object({}),
     execute: async () => ({
-      content: [{ type: 'text', text: JSON.stringify(caseManager.status()) }],
+      content: [{ type: 'text', text: JSON.stringify(maat.cases.status()) }],
       details: {},
     }),
   });
@@ -58,9 +56,9 @@ export function createCaseTools(caseManager: CaseDraftManager, projects: MaatHar
       'Validate the complete Case with fresh Adapter Sessions, then save one Mocha TypeScript spec. A Case may contain Web and Appium steps. Do not change user expectations to make a test pass.',
     parameters: Type.Object({}),
     execute: async (_id, _params, signal) => {
-      const draft = caseManager.current;
+      const draft = maat.cases.current();
       if (!draft) throw new Error('No active Case. Call begin_case first.');
-      const result = await projects.save(draft, signal);
+      const result = await maat.cases.save(signal);
       return {
         content: [{ type: 'text', text: JSON.stringify(result) }],
         details: result,
@@ -74,7 +72,7 @@ export function createCaseTools(caseManager: CaseDraftManager, projects: MaatHar
     description: 'List text and screenshot Evidence captured for the active Case.',
     parameters: Type.Object({}),
     execute: async () => ({
-      content: [{ type: 'text', text: JSON.stringify(caseManager.listEvidence()) }],
+      content: [{ type: 'text', text: JSON.stringify(maat.evidence.list()) }],
       details: {},
     }),
   });
@@ -86,7 +84,7 @@ export function createCaseTools(caseManager: CaseDraftManager, projects: MaatHar
       'Return one Evidence item. Screenshot Evidence is rendered inline by Pi TUI when the terminal supports images.',
     parameters: Type.Object({ id: Type.String() }),
     execute: async (_id, params) => {
-      const evidence = caseManager.getEvidence(params.id);
+      const evidence = maat.evidence.get(params.id);
       if (!evidence) throw new Error(`Unknown Evidence id: ${params.id}`);
       if (evidence.type === 'text') {
         return {
@@ -113,4 +111,3 @@ export function createCaseTools(caseManager: CaseDraftManager, projects: MaatHar
 
   return [beginCase, getCaseStatus, saveCase, listEvidence, showEvidence];
 }
-import { readFile } from 'node:fs/promises';

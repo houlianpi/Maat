@@ -1,10 +1,10 @@
 import { Type } from '@earendil-works/pi-ai';
 import { defineTool } from '@earendil-works/pi-coding-agent';
-import type { CaseDraftManager } from '../core/cases/draft-manager.ts';
+import type { MaatApi } from '../api/maat-api.ts';
 import { nativeDeviceKinds } from '../platforms/appium/schema.ts';
-import type { MaatHarness } from '../core/harness.ts';
+import { browserNames } from '../platforms/web/config.ts';
 
-export function createPlatformTools(projects: MaatHarness, cases: CaseDraftManager) {
+export function createPlatformTools(maat: MaatApi) {
   return [
     defineTool({
       name: 'select_platform',
@@ -14,7 +14,7 @@ export function createPlatformTools(projects: MaatHarness, cases: CaseDraftManag
         'Select the active UI platform adapter. Available adapters are returned dynamically by Maat.',
       parameters: Type.Object({ platform: Type.String() }),
       async execute(_id, input) {
-        const state = await projects.select(input.platform);
+        const state = await maat.platforms.select(input.platform);
         return { content: [{ type: 'text', text: JSON.stringify(state) }], details: state };
       },
     }),
@@ -24,7 +24,7 @@ export function createPlatformTools(projects: MaatHarness, cases: CaseDraftManag
       description: 'List registered platform adapters and their JavaScript execution context.',
       parameters: Type.Object({}),
       async execute() {
-        const platforms = projects.registry.list().map((adapter) => ({
+        const platforms = maat.platforms.list().map((adapter) => ({
           id: adapter.id,
           label: adapter.label,
           codeContext: adapter.codeContext,
@@ -50,7 +50,7 @@ export function createPlatformTools(projects: MaatHarness, cases: CaseDraftManag
         allowDataReset: Type.Optional(Type.Boolean()),
       }),
       async execute(_id, input) {
-        await projects.configureSession(input);
+        await maat.platforms.configureSession(input);
         return {
           content: [
             {
@@ -58,7 +58,7 @@ export function createPlatformTools(projects: MaatHarness, cases: CaseDraftManag
               text: 'Session hints accepted. Maat will validate them while creating the Session.',
             },
           ],
-          details: projects.status(),
+          details: maat.platforms.status(),
         };
       },
     }),
@@ -68,7 +68,7 @@ export function createPlatformTools(projects: MaatHarness, cases: CaseDraftManag
       description: 'Discover online devices for the active Appium platform.',
       parameters: Type.Object({}),
       async execute() {
-        const devices = await projects.inspectSetup({ kind: 'devices' });
+        const devices = await maat.platforms.inspectSetup({ kind: 'devices' });
         return { content: [{ type: 'text', text: JSON.stringify(devices) }], details: devices };
       },
     }),
@@ -78,8 +78,48 @@ export function createPlatformTools(projects: MaatHarness, cases: CaseDraftManag
       description: 'Find applications on the selected Appium device.',
       parameters: Type.Object({ query: Type.String() }),
       async execute(_id, input) {
-        const apps = await projects.inspectSetup({ kind: 'applications', query: input.query });
+        const apps = await maat.platforms.inspectSetup({
+          kind: 'applications',
+          query: input.query,
+        });
         return { content: [{ type: 'text', text: JSON.stringify(apps) }], details: apps };
+      },
+    }),
+    defineTool({
+      name: 'configure_browser',
+      label: 'Configure Browser',
+      description: 'Configure browser, headed mode, or logical profile for the Web adapter.',
+      parameters: Type.Object({
+        browser: Type.Optional(Type.Union(browserNames.map((name) => Type.Literal(name)))),
+        headless: Type.Optional(Type.Boolean()),
+        profile: Type.Optional(Type.String()),
+      }),
+      async execute(_id, input) {
+        if (maat.platforms.current().id !== 'web') {
+          throw new Error('configure_browser requires the Web platform.');
+        }
+        const configuration = await maat.platforms.configure(input);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(configuration) }],
+          details: configuration,
+        };
+      },
+    }),
+    defineTool({
+      name: 'get_browser_config',
+      label: 'Get Browser Config',
+      description: 'Return the Web adapter browser configuration.',
+      parameters: Type.Object({}),
+      async execute() {
+        const adapter = maat.platforms.current();
+        if (adapter.id !== 'web' || !('config' in adapter)) {
+          throw new Error('get_browser_config requires the Web platform.');
+        }
+        const configuration = adapter.config;
+        return {
+          content: [{ type: 'text', text: JSON.stringify(configuration) }],
+          details: configuration,
+        };
       },
     }),
   ];

@@ -14,7 +14,10 @@ export type BrowserProfile = {
 export type BrowserConfig = {
   browser: BrowserName;
   headless: boolean;
+  executablePath?: string;
+  profileDirectory?: string;
   profile?: string;
+  userDataDir?: string;
 };
 
 type MaatConfig = { profiles?: Record<string, BrowserProfile> };
@@ -83,9 +86,10 @@ export class WebExplorationManager implements JavaScriptSession {
     const browser = profile?.browser ?? this.config.browser;
     return createWebExplorationSession({
       channel: browserChannel(browser),
+      executablePath: this.config.executablePath,
       headless: this.config.headless,
-      profileDirectory: profile?.profileDirectory,
-      userDataDir: profile?.userDataDir,
+      profileDirectory: profile?.profileDirectory ?? this.config.profileDirectory,
+      userDataDir: profile?.userDataDir ?? this.config.userDataDir,
     });
   }
 }

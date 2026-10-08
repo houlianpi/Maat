@@ -7,7 +7,7 @@ import { startNativeSession } from '../src/platforms/appium/runtime/session.ts';
 import { capabilities, connection, splitCapabilities } from '../src/platforms/appium/schema.ts';
 import { matchDevices, parseAndroidDevices, parseIosDevices } from '../src/setup/devices.ts';
 import { CaseDraftManager } from '../src/core/cases/draft-manager.ts';
-import { MaatHarness } from '../src/core/harness.ts';
+import { MaatApi } from '../src/api/maat-api.ts';
 import { adapterRoot as platformRoot, casePath } from '../src/core/cases/paths.ts';
 import { createPlatformTools } from '../src/tools/platform-tools.ts';
 import { createCaseTools } from '../src/tools/case-tools.ts';
@@ -171,17 +171,17 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
   const base = await mkdtemp(path.resolve('artifacts/native-tests/layout-'));
   const hints = await mkdtemp(path.resolve('artifacts/native-tests/hints-'));
   const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
-  const projects = new MaatHarness(createDefaultPlatformRegistry(base), base);
-  const cases = new CaseDraftManager();
+  const projects = new MaatApi(createDefaultPlatformRegistry(base), base);
+  const cases = projects.drafts;
   const root = path.join(base, 'android');
   try {
     process.env.MAAT_SESSION_HINTS_DIR = hints;
-    await projects.select('android');
-    await projects.configureSession({
+    await projects.platforms.select('android');
+    await projects.platforms.configureSession({
       serverUrl: mock.url,
       capabilities: { 'appium:deviceName': 'mock', 'appium:appPackage': 'example.welcome' },
     });
-    const configure = createPlatformTools(projects, cases).find(
+    const configure = createPlatformTools(projects).find(
       (tool) => tool.name === 'configure_session',
     )!;
     await configure.execute(
@@ -191,9 +191,10 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
       undefined,
       {} as never,
     );
-    assert.ok(projects.adapter instanceof AppiumPlatformAdapter);
-    assert.equal(projects.adapter.sessionHints?.serverUrl, mock.url);
-    assert.equal(projects.adapter.sessionHints?.capabilities['appium:deviceName'], 'mock');
+    assert.ok(projects.platforms.current() instanceof AppiumPlatformAdapter);
+    const adapter = projects.platforms.current() as AppiumPlatformAdapter;
+    assert.equal(adapter.sessionHints?.serverUrl, mock.url);
+    assert.equal(adapter.sessionHints?.capabilities['appium:deviceName'], 'mock');
     const draft = cases.begin({
       id: 'welcome',
       module: 'account/login',
@@ -203,12 +204,12 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
       rootDirectory: root,
     });
     const code = `await expect(driver.$('~welcome')).toHaveText('Welcome');`;
-    await cases.recordSuccessfulStep(code, await projects.execute(code), {
+    await cases.recordSuccessfulStep(code, await projects.exploration.executeJavaScript(code), {
       adapterId: 'android',
       bindings: ['driver', 'browser', 'expect', 'display', 'evidence'],
-      requirement: projects.adapter.runtimeRequirement(),
+      requirement: projects.platforms.current().runtimeRequirement(),
     });
-    const saved = await projects.save(draft);
+    const saved = await projects.cases.save();
     const { readFile } = await import('node:fs/promises');
     const spec = await readFile(saved.testPath, 'utf8');
     assert.match(spec, /createMaatTest/);
@@ -226,7 +227,7 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
       observations: [],
       code: `await expect(1).toBe(2);`,
     });
-    await assert.rejects(projects.save(draft), /Clean validation failed/);
+    await assert.rejects(projects.cases.save(), /Clean validation failed/);
     assert.equal(await readFile(saved.testPath, 'utf8'), spec);
     const runs = path.resolve('artifacts/maat/runs');
     assert.ok((await readdir(runs)).length > 0);
@@ -241,20 +242,20 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
 });
 
 test('platform layout is enforced by schema and manager, not model naming', async () => {
-  const projects = new MaatHarness(createDefaultPlatformRegistry(), path.resolve('maat-tests'));
-  await assert.rejects(projects.select('iphone-calculator'), /Unknown platform/);
-  assert.equal(projects.current.platform, 'web');
+  const projects = new MaatApi(createDefaultPlatformRegistry(), path.resolve('maat-tests'));
+  await assert.rejects(projects.platforms.select('iphone-calculator'), /Unknown platform/);
+  assert.equal(projects.platforms.current().id, 'web');
   for (const platform of ['web', 'android', 'ios', 'macos'])
     assert.equal(platformRoot('maat-tests', platform), path.resolve('maat-tests', platform));
   assert.throws(() => platformRoot('maat-tests', '../escape'));
   assert.throws(() => casePath('/root/ios', '../escape'));
   assert.throws(() => casePath('/root/ios', 'case', '../escape'));
-  const tools = createPlatformTools(projects, new CaseDraftManager());
+  const tools = createPlatformTools(projects);
   assert.equal(
     tools.find((tool) => tool.name === 'select_platform')!.parameters.properties.platform.type,
     'string',
   );
-  const caseTools = createCaseTools(new CaseDraftManager(), projects);
+  const caseTools = createCaseTools(projects);
   assert.equal(
     caseTools.find((tool) => tool.name === 'begin_case')!.parameters.properties.rootDirectory,
     undefined,

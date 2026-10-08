@@ -12,7 +12,7 @@ export async function saveCase(draft: CaseDraft, testsRoot: string, signal?: Abo
   await mkdir(directory, { recursive: true });
   const final = path.join(directory, `${draft.id}.spec.ts`);
   const candidate = path.join(directory, `.validate-${randomUUID()}.spec.ts`);
-  await writeFile(candidate, renderSpec(buildSpecModel(draft), 'maat/test'));
+  await writeFile(candidate, renderSpec(buildSpecModel(draft), '@houlianpi/maat/test'));
   try {
     await runMaatTests(testsRoot, { mode: 'all' }, signal, candidate);
     await rename(candidate, final);

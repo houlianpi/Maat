@@ -1,5 +1,4 @@
 import type { JavaScriptObservation } from '../exploration/protocol.ts';
-import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 
 export type PlatformStatus = {
   id: string;
@@ -34,9 +33,8 @@ export interface PlatformAdapter {
   readonly label: string;
   readonly root: string;
   readonly codeContext: CodeContext;
-  tools?(): ToolDefinition[];
-
   initialize(): Promise<void>;
+  configure?(configuration: Record<string, unknown>): Promise<unknown>;
   configureSession?(setup: SessionSetup): Promise<void>;
   inspectSetup?(request: SetupInspection): Promise<unknown>;
   execute(code: string, signal?: AbortSignal): Promise<JavaScriptObservation[]>;

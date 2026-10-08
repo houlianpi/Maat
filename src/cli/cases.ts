@@ -2,8 +2,7 @@ import { parseArgs } from 'node:util';
 
 import type { CaseSelection } from '../core/testing/case-selection.ts';
 import path from 'node:path';
-import { MaatHarness } from '../core/harness.ts';
-import { createDefaultPlatformRegistry } from '../platforms/default-registry.ts';
+import { createMaat } from '../api/create-maat.ts';
 
 try {
   const { values } = parseArgs({
@@ -36,15 +35,16 @@ try {
 
   const project = values.project ?? 'web';
   const testsRoot = path.resolve(values.root);
-  const harness = new MaatHarness(createDefaultPlatformRegistry(testsRoot), testsRoot);
-  await harness.select(project);
+  const maat = createMaat({ workspaceRoot: process.cwd(), testsRoot });
+  await maat.platforms.select(project);
   try {
-    process.exitCode = await harness.run(selection, {
-      browser: values.browser,
-      headed: values.headed,
+    const result = await maat.tests.run(selection, {
+      ...(values.browser ? { browser: values.browser } : {}),
+      ...(values.headed ? { headed: values.headed } : {}),
     });
+    process.exitCode = result.exitCode;
   } finally {
-    await harness.close();
+    await maat.close();
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

@@ -20,6 +20,16 @@ npm link
 maat
 ```
 
+也可以把 Maat 加载到现有 Pi coding-agent 会话中，而不替换 Pi 原本的 UI 与对话：
+
+```bash
+pi -e ./src/hosts/pi/extension.ts
+# 正式发布后：pi install npm:@houlianpi/maat
+```
+
+Pi Extension 会增加 Maat 的平台、探索、Case、Evidence 工具和 `/maat-status` 命令。所有
+Host 共用同一个与宿主无关的 `MaatApi`；Core 与 Platform Adapter 不依赖 Pi SDK。
+
 描述目标 UI、操作和明确的业务预期。Maat 使用统一的 `exe_js`：Web Adapter 暴露 Playwright `page/context/browser`；Android、iOS、macOS Adapter 暴露由 Appium Session 支持的 WebdriverIO `driver/browser`。
 
 ## 统一 Case
@@ -106,9 +116,10 @@ cases/<case-id>/*.png
 
 ```text
 src/
+├── api/           稳定、与 Host 无关的 MaatApi 组合入口
 ├── core/          与框架无关的 Case、Worker、Runner、SessionPool、Evidence、契约
 ├── platforms/     Web、Android、iOS、macOS 与共享 Appium 实现
-├── hosts/         Pi Agent、Pi TUI 与正式 Mocha 测试宿主
+├── hosts/         独立 Pi Agent/TUI、可安装 Pi Extension 与 Mocha 测试宿主
 ├── tools/         Agent 工具
 ├── setup/         可选浏览器/设备/App 发现能力
 └── cli/           薄命令入口

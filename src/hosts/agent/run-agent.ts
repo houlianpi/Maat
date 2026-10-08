@@ -1,11 +1,10 @@
 import { createAgentSession, SessionManager } from '@earendil-works/pi-coding-agent';
 
-import { browserChannel, type BrowserName } from '../../platforms/web/config.ts';
+import type { BrowserName } from '../../platforms/web/config.ts';
+import { createMaat } from '../../api/create-maat.ts';
 import { createAgentTrace } from './trace.ts';
 import { createRunRecorder } from './run-recorder.ts';
 import { createExecJsTool } from '../../tools/exec-js-tool.ts';
-import type { JavaScriptSession } from '../../core/exploration/runtime.ts';
-import { createWebExplorationSession } from '../../platforms/web/exploration-session.ts';
 
 function shortToolCallId(id: string): string {
   return id.split('|', 1)[0].slice(0, 24);
@@ -23,28 +22,37 @@ export async function runAgent(prompt: string, options: RunAgentOptions = {}): P
   const trace = createAgentTrace();
   const browser = options.browser ?? 'chrome';
   const recorder = await createRunRecorder(prompt, undefined, { browser });
-  let javascriptSession: JavaScriptSession | undefined;
+  const maat = createMaat({ workspaceRoot: process.cwd() });
+  let initialized = false;
   let runError: unknown;
   try {
-    javascriptSession = await createWebExplorationSession({
-      channel: browserChannel(browser),
-      executablePath: options.executablePath,
+    await maat.platforms.configure({
+      browser,
       headless: options.headless ?? false,
+      executablePath: options.executablePath,
       profileDirectory: options.profileDirectory,
       userDataDir: options.userDataDir,
     });
+    initialized = true;
     const { session } = await createAgentSession({
       cwd: process.cwd(),
       tools: ['exe_js'],
       customTools: [
-        createExecJsTool(javascriptSession, recorder, {
-          description:
-            'Execute asynchronous JavaScript against one persistent Playwright page. The globals page, context, browser, expect, console and display are available.',
-          guidelines: [
-            'Use Playwright locators.',
-            'Use display(await page.screenshot()) for visual Evidence.',
-          ],
-        }),
+        createExecJsTool(
+          {
+            close: () => maat.platforms.current().close(),
+            execute: (code, signal) => maat.exploration.executeJavaScript(code, signal),
+          },
+          recorder,
+          {
+            description:
+              'Execute asynchronous JavaScript against one persistent Playwright page. The globals page, context, browser, expect, console and display are available.',
+            guidelines: [
+              'Use Playwright locators.',
+              'Use display(await page.screenshot()) for visual Evidence.',
+            ],
+          },
+        ),
       ],
       sessionManager: SessionManager.inMemory(),
     });
@@ -124,12 +132,12 @@ export async function runAgent(prompt: string, options: RunAgentOptions = {}): P
     }
   } catch (error) {
     runError = error;
-    if (!javascriptSession) {
+    if (!initialized) {
       await recorder.recordFailedStep('// Browser failed to launch.', error);
     }
     throw error;
   } finally {
-    await javascriptSession?.close();
+    await maat.close();
     const replayPath = await recorder.finalize(runError ? 'failed' : 'completed', runError);
     process.stderr.write(
       replayPath

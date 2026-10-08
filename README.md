@@ -25,6 +25,18 @@ npm link
 maat
 ```
 
+Use Maat inside an existing Pi coding-agent session without replacing Pi's normal UI or
+conversation:
+
+```bash
+pi -e ./src/hosts/pi/extension.ts
+# Once published: pi install npm:@houlianpi/maat
+```
+
+The Pi Extension adds Maat's platform, exploration, Case, and Evidence tools plus
+`/maat-status`. All hosts share the same host-neutral `MaatApi`; Core and Platform Adapters do
+not depend on the Pi SDK.
+
 Describe the UI, actions, and explicit business outcome. Maat uses `exe_js` against the active Adapter. Web exposes Playwright `page/context/browser`; Android, iOS and macOS expose WebdriverIO `driver/browser` backed by an Appium Session.
 
 ## One Case format
@@ -33,7 +45,7 @@ Cases live under `maat-tests/<owner-platform>/cases/<business-module>`. Pure Web
 
 ```typescript
 import { describe, it } from 'mocha';
-import { createMaatTest } from 'maat/test';
+import { createMaatTest } from '@houlianpi/maat/test';
 
 describe('Web opens desktop confirmation', () => {
   it('mixed-confirmation', async () => {
@@ -128,9 +140,10 @@ Exploration Evidence and failed attempts live under `artifacts/cases/<case-id>`.
 
 ```text
 src/
+├── api/           stable host-neutral MaatApi composition surface
 ├── core/          framework-agnostic Case, Worker, Runner, SessionPool, Evidence, contracts
 ├── platforms/     Web, Android, iOS, macOS and shared Appium implementations
-├── hosts/         Pi Agent, Pi TUI and formal Mocha test host
+├── hosts/         standalone Pi Agent/TUI, installable Pi Extension and Mocha test host
 ├── tools/         Agent-facing tools
 ├── setup/         optional browser/device/application discovery
 └── cli/           thin command entry points

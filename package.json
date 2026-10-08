@@ -1,13 +1,40 @@
 {
-  "name": "maat",
+  "name": "@houlianpi/maat",
   "version": "0.1.0",
-  "private": true,
+  "description": "Conversational UI verification for Pi, Playwright, and Appium",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "ui-testing",
+    "playwright",
+    "appium"
+  ],
+  "files": [
+    "bin",
+    "docs",
+    "src",
+    "README.md",
+    "README.zh-CN.md",
+    "AGENTS.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/houlianpi/Maat.git"
+  },
   "type": "module",
   "bin": {
     "maat": "./bin/maat.mjs"
   },
   "exports": {
+    ".": "./src/api/create-maat.ts",
+    "./api": "./src/api/maat-api.ts",
+    "./pi": "./src/hosts/pi/extension.ts",
     "./test": "./src/hosts/test/fixture.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./src/hosts/pi/extension.ts"
+    ]
   },
   "scripts": {
     "agent": "node --experimental-strip-types src/cli/agent.ts",

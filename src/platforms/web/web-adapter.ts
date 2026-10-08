@@ -2,9 +2,7 @@ import path from 'node:path';
 import type { BrowserConfig } from './exploration-manager.ts';
 import { WebExplorationManager } from './exploration-manager.ts';
 import type { PlatformAdapter } from '../../core/platforms/contracts.ts';
-import { Type } from '@earendil-works/pi-ai';
-import { defineTool } from '@earendil-works/pi-coding-agent';
-import { browserNames, type BrowserName } from './config.ts';
+import type { BrowserName } from './config.ts';
 import { createWebTestSession } from './test-session.ts';
 
 export class WebPlatformAdapter implements PlatformAdapter {
@@ -36,43 +34,19 @@ export class WebPlatformAdapter implements PlatformAdapter {
   async initialize(): Promise<void> {
     this.browser.setConfigRoot(this.root);
   }
-  tools() {
-    return [
-      defineTool({
-        name: 'configure_browser',
-        label: 'Configure Browser',
-        description: 'Configure browser, headed mode, or logical profile for the Web adapter.',
-        parameters: Type.Object({
-          browser: Type.Optional(Type.Union(browserNames.map((name) => Type.Literal(name)))),
-          headless: Type.Optional(Type.Boolean()),
-          profile: Type.Optional(Type.String()),
-        }),
-        execute: async (_id, input) => {
-          const result = await this.configure({
-            ...(input.browser ? { browser: input.browser as BrowserName } : {}),
-            ...(input.headless !== undefined ? { headless: input.headless } : {}),
-            ...(input.profile !== undefined ? { profile: input.profile } : {}),
-          });
-          return {
-            content: [{ type: 'text' as const, text: JSON.stringify(result) }],
-            details: result,
-          };
-        },
-      }),
-      defineTool({
-        name: 'get_browser_config',
-        label: 'Get Browser Config',
-        description: 'Return Web adapter browser configuration.',
-        parameters: Type.Object({}),
-        execute: async () => ({
-          content: [{ type: 'text' as const, text: JSON.stringify(this.config) }],
-          details: this.config,
-        }),
-      }),
-    ];
-  }
-  configure(config: Partial<BrowserConfig>) {
-    return this.browser.configure(config);
+  configure(config: Record<string, unknown>) {
+    return this.browser.configure({
+      ...(typeof config.browser === 'string' ? { browser: config.browser as BrowserName } : {}),
+      ...(typeof config.headless === 'boolean' ? { headless: config.headless } : {}),
+      ...(typeof config.executablePath === 'string'
+        ? { executablePath: config.executablePath }
+        : {}),
+      ...(typeof config.profileDirectory === 'string'
+        ? { profileDirectory: config.profileDirectory }
+        : {}),
+      ...(typeof config.profile === 'string' ? { profile: config.profile } : {}),
+      ...(typeof config.userDataDir === 'string' ? { userDataDir: config.userDataDir } : {}),
+    });
   }
   get config() {
     return this.browser.currentConfig;

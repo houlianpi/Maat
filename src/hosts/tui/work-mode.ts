@@ -1,5 +1,9 @@
 import { Type } from '@earendil-works/pi-ai';
-import type { ExtensionContext, InlineExtension } from '@earendil-works/pi-coding-agent';
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  InlineExtension,
+} from '@earendil-works/pi-coding-agent';
 
 export type WorkMode = 'assist' | 'case';
 const protectedTools = new Set(['bash', 'powershell', 'edit', 'write']);
@@ -130,4 +134,10 @@ export function createWorkModeExtension(): InlineExtension {
       });
     },
   };
+}
+
+export function registerWorkModeExtension(pi: ExtensionAPI): void {
+  const extension = createWorkModeExtension();
+  if (typeof extension === 'function') extension(pi);
+  else extension.factory(pi);
 }
