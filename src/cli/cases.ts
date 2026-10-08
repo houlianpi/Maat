@@ -8,6 +8,7 @@ try {
   const { values } = parseArgs({
     options: {
       all: { type: 'boolean' },
+      'app-id': { type: 'string' },
       browser: { type: 'string' },
       project: { type: 'string' },
       case: { type: 'string' },
@@ -39,6 +40,7 @@ try {
   await maat.platforms.select(project);
   try {
     const result = await maat.tests.run(selection, {
+      ...(values['app-id'] ? { appId: values['app-id'] } : {}),
       ...(values.browser ? { browser: values.browser } : {}),
       ...(values.headed ? { headed: values.headed } : {}),
     });

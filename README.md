@@ -124,6 +124,15 @@ maat test --tag calculator
 maat test --all
 ```
 
+Cases that target interchangeable native App variants accept the App identifier at runtime. The
+same Android Edge Case can run against Stable or Canary, and package-qualified resource IDs are
+derived from that same value:
+
+```bash
+maat test --project android --case edge-exit-browser-cancel --app-id com.microsoft.emmx
+maat test --project android --case edge-exit-browser-cancel --app-id com.microsoft.emmx.canary
+```
+
 Formal output is grouped under `artifacts/maat/runs/<run-id>`:
 
 ```text

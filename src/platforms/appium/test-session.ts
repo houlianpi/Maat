@@ -20,13 +20,38 @@ export async function createAppiumTestSession(
     connectionRetryCount: 0,
     connectionRetryTimeout: 180_000,
   });
+  const appId =
+    typeof app?.['appium:appPackage'] === 'string'
+      ? app['appium:appPackage']
+      : typeof app?.['appium:bundleId'] === 'string'
+        ? app['appium:bundleId']
+        : undefined;
   return {
-    context: { driver, browser: driver, expect },
+    context: {
+      driver,
+      browser: driver,
+      expect,
+      ...(appId
+        ? {
+            app: {
+              id: appId,
+              resourceId: (name: string) => `id=${appId}:id/${name}`,
+            },
+          }
+        : {}),
+    },
+    async setup() {
+      if (appId) await driver.activateApp(appId);
+    },
     async screenshot() {
       return { data: await driver.takeScreenshot(), mimeType: 'image/png' };
     },
-    async close() {
-      await driver.deleteSession();
+    async teardown() {
+      try {
+        if (appId) await driver.terminateApp(appId);
+      } finally {
+        await driver.deleteSession();
+      }
     },
   };
 }

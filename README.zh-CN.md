@@ -100,6 +100,14 @@ maat test --tag calculator
 maat test --all
 ```
 
+对于可以替换不同 App 版本的原生 Case，App 标识在运行时传入。同一个 Android Edge Case
+可以运行 Stable 或 Canary，带包名前缀的 resource-id 也会使用同一个运行时值构造：
+
+```bash
+maat test --project android --case edge-exit-browser-cancel --app-id com.microsoft.emmx
+maat test --project android --case edge-exit-browser-cancel --app-id com.microsoft.emmx.canary
+```
+
 正式输出统一位于 `artifacts/maat/runs/<run-id>`：
 
 ```text

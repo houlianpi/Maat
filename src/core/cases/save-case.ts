@@ -13,8 +13,13 @@ export async function saveCase(draft: CaseDraft, testsRoot: string, signal?: Abo
   const final = path.join(directory, `${draft.id}.spec.ts`);
   const candidate = path.join(directory, `.validate-${randomUUID()}.spec.ts`);
   await writeFile(candidate, renderSpec(buildSpecModel(draft), '@houlianpi/maat/test'));
+  const appId = draft.requirements
+    ?.map((requirement) => requirement.setup?.app)
+    .filter((app): app is Record<string, unknown> => Boolean(app) && typeof app === 'object')
+    .map((app) => app['appium:appPackage'] ?? app['appium:bundleId'])
+    .find((value): value is string => typeof value === 'string');
   try {
-    await runMaatTests(testsRoot, { mode: 'all' }, signal, candidate);
+    await runMaatTests(testsRoot, { mode: 'all' }, signal, candidate, { appId });
     await rename(candidate, final);
   } finally {
     await unlink(candidate).catch((error) => {

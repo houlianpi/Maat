@@ -37,10 +37,15 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       { name: 'driver', description: 'WebdriverIO client attached to the Appium Session' },
       { name: 'browser', description: 'Alias of driver' },
       { name: 'expect', description: 'expect-webdriverio' },
+      {
+        name: 'app',
+        description: 'Runtime App target with id and package-aware resourceId(name)',
+      },
       { name: 'display', description: 'Return screenshot Evidence' },
     ],
     guidelines: [
       'Use WebdriverIO APIs.',
+      'Use app.resourceId(name) for Android resource IDs; never hardcode an App package prefix.',
       'Await every operation.',
       'Assert only explicit test objectives.',
     ],
@@ -174,7 +179,21 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     if (!this.environment) await this.initialize();
     const resolved = await resolveAppiumSession(this.environment!);
     const definition = this.definition;
-    const app = requirement.setup?.app as NativeAppTarget | undefined;
+    const declaredApp = requirement.setup?.app;
+    const runtimeAppId = process.env.MAAT_APP_ID?.trim();
+    const app =
+      declaredApp === 'runtime'
+        ? runtimeAppId
+          ? this.id === 'android'
+            ? ({ 'appium:appPackage': runtimeAppId } satisfies NativeAppTarget)
+            : ({ 'appium:bundleId': runtimeAppId } satisfies NativeAppTarget)
+          : undefined
+        : (declaredApp as NativeAppTarget | undefined);
+    if (declaredApp === 'runtime' && !app) {
+      throw new Error(
+        `Case requires a runtime App target. Pass --app-id for ${this.label} or set MAAT_APP_ID.`,
+      );
+    }
     return createAppiumTestSession(
       {
         ...resolved,

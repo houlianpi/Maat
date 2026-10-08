@@ -30,6 +30,7 @@ export async function startNativeSession(
       new URL('../exploration-runtime.ts', import.meta.url),
       {
         ...endpoint,
+        maatAppId: target.app?.['appium:appPackage'] ?? target.app?.['appium:bundleId'],
         sessionId: driver.sessionId,
         capabilities: driver.capabilities,
         logLevel: 'silent',

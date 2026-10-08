@@ -14,6 +14,7 @@ import { createCaseTools } from '../src/tools/case-tools.ts';
 import { createMaatResourceOptions } from '../src/hosts/tui/runtime-config.ts';
 import { AppiumPlatformAdapter } from '../src/platforms/appium/appium-adapter.ts';
 import { createDefaultPlatformRegistry } from '../src/platforms/default-registry.ts';
+import { createAppiumTestSession } from '../src/platforms/appium/test-session.ts';
 
 async function mockAppium() {
   let deletes = 0;
@@ -93,6 +94,32 @@ test('iOS discovery keeps simulators listed after offline devices', () => {
       { name: 'iPhone 17', kind: 'simulator' },
     ],
   );
+});
+
+test('runtime Android App target drives lifecycle and resource-id namespace', async () => {
+  const mock = await mockAppium();
+  const session = await createAppiumTestSession(
+    {
+      environment: { platform: 'android', serverUrl: mock.url, capabilities: {} },
+      capabilities: {},
+    },
+    { 'appium:appPackage': 'com.microsoft.emmx.canary' },
+  );
+  try {
+    assert.equal((session.context.app as { id: string }).id, 'com.microsoft.emmx.canary');
+    assert.equal(
+      (session.context.app as { resourceId(name: string): string }).resourceId(
+        'edge_ntp_scrollview',
+      ),
+      'id=com.microsoft.emmx.canary:id/edge_ntp_scrollview',
+    );
+    await session.setup();
+  } finally {
+    await session.teardown();
+    mock.server.close();
+  }
+  assert.equal(mock.sessionCapabilities[0]?.['appium:appPackage'], 'com.microsoft.emmx.canary');
+  assert.equal(mock.deleted(), 1);
 });
 
 test('WDIO worker executes TypeScript and assertions, owns only its remote session', async () => {

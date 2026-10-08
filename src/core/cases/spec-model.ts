@@ -32,7 +32,18 @@ export function buildSpecModel(draft: CaseDraft): SpecModel {
     objectives: draft.objectives.map((item) => item.description),
     tags: draft.tags,
     suites: draft.suites,
-    requirements: draft.requirements ?? [],
+    requirements: (draft.requirements ?? []).map((requirement) => {
+      const declaredApp = requirement.setup?.app;
+      if (
+        declaredApp &&
+        typeof declaredApp === 'object' &&
+        (typeof (declaredApp as Record<string, unknown>)['appium:appPackage'] === 'string' ||
+          typeof (declaredApp as Record<string, unknown>)['appium:bundleId'] === 'string')
+      ) {
+        return { ...requirement, setup: { ...requirement.setup, app: 'runtime' } };
+      }
+      return requirement;
+    }),
     steps: draft.steps.map((step) => ({
       number: step.number,
       name: `Recorded step ${String(step.number).padStart(3, '0')}`,

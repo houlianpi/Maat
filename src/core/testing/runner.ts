@@ -7,7 +7,12 @@ import type { CaseSelection } from './case-selection.ts';
 import { findSpecs, resolveCaseSpec } from './case-selection.ts';
 
 export type MaatRunResult = { exitCode: number; runDirectory: string };
-export type MaatRunOptions = { browser?: string; headed?: boolean; workspaceRoot?: string };
+export type MaatRunOptions = {
+  appId?: string;
+  browser?: string;
+  headed?: boolean;
+  workspaceRoot?: string;
+};
 
 export async function runMaatTests(
   root: string,
@@ -43,6 +48,7 @@ export async function runMaatTests(
         ...process.env,
         MAAT_TESTS_ROOT: options.workspaceRoot ?? path.dirname(root),
         MAAT_RUN_DIRECTORY: runDirectory,
+        ...(options.appId ? { MAAT_APP_ID: options.appId } : {}),
         ...(options.browser ? { MAAT_WEB_BROWSER: options.browser } : {}),
         ...(options.headed ? { MAAT_WEB_HEADED: '1' } : {}),
       },

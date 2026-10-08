@@ -11,6 +11,18 @@ export class SessionPool {
       this.requirements.set(requirement.adapterId, requirement);
   }
 
+  async setup(): Promise<void> {
+    try {
+      for (const adapterId of this.requirements.keys()) {
+        const session = await this.acquire(adapterId);
+        await session.setup();
+      }
+    } catch (error) {
+      await this.teardown().catch(() => {});
+      throw error;
+    }
+  }
+
   async acquire(adapterId: string): Promise<TestSession> {
     const existing = this.sessions.get(adapterId);
     if (existing) return existing;
@@ -26,10 +38,11 @@ export class SessionPool {
     return [...this.sessions.entries()];
   }
 
-  async close(): Promise<void> {
+  async teardown(): Promise<void> {
     const results = await Promise.allSettled(
-      [...this.sessions.values()].map((session) => session.close()),
+      [...this.sessions.values()].map((session) => session.teardown()),
     );
+    this.sessions.clear();
     const failed = results.find((result) => result.status === 'rejected');
     if (failed?.status === 'rejected') throw failed.reason;
   }

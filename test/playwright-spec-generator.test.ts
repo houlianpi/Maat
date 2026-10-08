@@ -34,10 +34,16 @@ test('unified renderer creates one Mocha Case with adapter steps', () => {
     evidence: [],
   };
   const spec = renderSpec(buildSpecModel(draft), '../../src/hosts/test/fixture.ts');
-  assert.match(spec, /import \{ describe, it \} from 'mocha'/);
+  assert.match(spec, /import \{ afterEach, beforeEach, describe, it \} from 'mocha'/);
   assert.match(spec, /Case ID: sample-case/);
   assert.match(spec, /@suite:regression/);
   assert.match(spec, /createMaatTest/);
+  assert.match(spec, /beforeEach\(async \(\) =>/);
+  assert.match(spec, /await maat\.setup\(\)/);
+  assert.match(spec, /afterEach\(async function/);
+  assert.match(spec, /await maat\.teardown\(\{ passed:/);
+  assert.doesNotMatch(spec, /try \{|finally \{|maat\.close/);
+  assert.match(spec, /\n    await maat\.step\("Recorded step 001"/);
   assert.match(spec, /maat\.step\("Recorded step 001", "web"/);
   assert.match(spec, /async \(\{ page, expect \}\)/);
 });
@@ -64,4 +70,40 @@ test('runner resolves unique short names and reports module ambiguity', async ()
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('native renderer keeps the concrete App target out of reusable Case source', () => {
+  const draft: CaseDraft = {
+    id: 'runtime-app',
+    name: 'Runtime App',
+    description: 'Runs against variants of one Android App',
+    preconditions: [],
+    actionSteps: [],
+    objectives: [{ id: 'objective-1', description: 'The target opens' }],
+    tags: [],
+    suites: [],
+    rootDirectory: '/tmp/tests',
+    requirements: [
+      {
+        adapterId: 'android',
+        setup: { app: { 'appium:appPackage': 'com.microsoft.emmx' } },
+      },
+    ],
+    steps: [
+      {
+        number: 1,
+        adapterId: 'android',
+        bindings: ['driver', 'app'],
+        code: `await driver.$(app.resourceId('toolbar')).click();`,
+        observations: [],
+      },
+    ],
+    failures: [],
+    evidence: [],
+  };
+
+  const spec = renderSpec(buildSpecModel(draft), '@houlianpi/maat/test');
+  assert.match(spec, /"app": "runtime"/);
+  assert.match(spec, /app\.resourceId\('toolbar'\)/);
+  assert.doesNotMatch(spec, /com\.microsoft\.emmx/);
 });

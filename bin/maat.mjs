@@ -24,6 +24,8 @@ Examples:
   maat agent --browser edge --headed "Test Edge"
   maat test --suite smoke
   maat test --project android --suite smoke
+  maat test --project android --case edge-exit-browser-cancel --app-id com.microsoft.emmx
+  maat test --project android --case edge-exit-browser-cancel --app-id com.microsoft.emmx.canary
   maat test --project web --browser edge --suite smoke
   maat test --case calculator-basic-addition --headed
 `;

@@ -10,6 +10,10 @@ import type { expect as webdriverExpect } from 'expect-webdriverio';
 
 type EvidenceContext = { screenshot(name?: string): Promise<void> };
 type Display = (value: string | Uint8Array, name?: string) => Promise<void>;
+export type AppTargetContext = {
+  id: string;
+  resourceId(name: string): string;
+};
 export type WebTestContext = {
   page: Page;
   context: BrowserContext;
@@ -24,9 +28,11 @@ export type AppiumTestContext = {
   expect: typeof webdriverExpect;
   display: Display;
   evidence: EvidenceContext;
+  app: AppTargetContext;
 };
 
 export type MaatTest = {
+  setup(): Promise<void>;
   step(
     name: string,
     adapterId: 'web',
@@ -42,7 +48,7 @@ export type MaatTest = {
     adapterId: string,
     body: (context: Record<string, unknown>) => Promise<void>,
   ): Promise<void>;
-  close(passed: boolean): Promise<void>;
+  teardown(result: { passed: boolean }): Promise<void>;
 };
 
 export async function createMaatTest(
@@ -56,6 +62,9 @@ export async function createMaatTest(
   const registry = createDefaultPlatformRegistry(root);
   const sessions = new SessionPool(registry, requirements);
   const evidence = new EvidenceStore(path.join(runDirectory, 'cases', caseId));
+  let started = false;
+  let finished = false;
+  let setupFailure: unknown;
   const step = async (
     name: string,
     adapterId: string,
@@ -83,26 +92,48 @@ export async function createMaatTest(
       throw error;
     }
   };
-  return {
-    step: step as unknown as MaatTest['step'],
-    async close(passed) {
+  const teardown = async ({ passed }: { passed: boolean }) => {
+    if (finished) return;
+    finished = true;
+    if (setupFailure) return;
+    try {
+      for (const [adapterId, session] of sessions.entries()) {
+        const shot = await session.screenshot().catch(() => undefined);
+        if (shot)
+          await evidence.image(
+            'final-state',
+            adapterId,
+            passed ? 'final-state' : 'failure-final-state',
+            shot.data,
+            shot.mimeType,
+          );
+      }
+      await evidence.finish(passed);
+    } finally {
       try {
-        for (const [adapterId, session] of sessions.entries()) {
-          const shot = await session.screenshot().catch(() => undefined);
-          if (shot)
-            await evidence.image(
-              'final-state',
-              adapterId,
-              passed ? 'final-state' : 'failure-final-state',
-              shot.data,
-              shot.mimeType,
-            );
-        }
-        await evidence.finish(passed);
+        await sessions.teardown();
       } finally {
-        await sessions.close();
         await registry.close();
       }
+    }
+  };
+  return {
+    async setup() {
+      if (started) return;
+      started = true;
+      try {
+        await sessions.setup();
+      } catch (error) {
+        setupFailure = error;
+        try {
+          await evidence.finish(false);
+        } finally {
+          await registry.close();
+        }
+        throw error;
+      }
     },
+    step: step as unknown as MaatTest['step'],
+    teardown,
   };
 }

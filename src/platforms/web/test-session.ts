@@ -14,13 +14,14 @@ export async function createWebTestSession(
   const page = await context.newPage();
   return {
     context: { page, context, browser, expect },
+    async setup() {},
     async screenshot() {
       return {
         data: (await page.screenshot({ fullPage: true })).toString('base64'),
         mimeType: 'image/png',
       };
     },
-    async close() {
+    async teardown() {
       try {
         await context.close();
       } finally {

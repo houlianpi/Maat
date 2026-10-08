@@ -23,8 +23,9 @@ export type SetupInspection = { kind: 'devices' | 'applications'; query?: string
 export type RuntimeRequirement = { adapterId: string; setup?: Record<string, unknown> };
 export type TestSession = {
   readonly context: Record<string, unknown>;
+  setup(): Promise<void>;
   screenshot(): Promise<{ data: string; mimeType: string }>;
-  close(): Promise<void>;
+  teardown(): Promise<void>;
 };
 
 /** The only platform lifecycle Maat Core depends on. */
