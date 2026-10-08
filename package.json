@@ -27,7 +27,7 @@
   },
   "type": "module",
   "bin": {
-    "maat": "./bin/maat.mjs"
+    "maat": "bin/maat.mjs"
   },
   "exports": {
     ".": "./src/api/create-maat.ts",

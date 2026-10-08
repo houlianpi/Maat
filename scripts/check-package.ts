@@ -5,6 +5,7 @@ import path from 'node:path';
 
 type PackResult = { filename: string; files: Array<{ path: string }> };
 type Manifest = {
+  bin?: Record<string, string>;
   name?: string;
   version?: string;
   private?: boolean;
@@ -25,6 +26,14 @@ const [packed] = JSON.parse(
 assert.ok(packed, 'npm pack returned no package.');
 
 try {
+  const packedManifest = JSON.parse(
+    execFileSync('tar', ['-xOf', packed.filename, 'package/package.json'], { encoding: 'utf8' }),
+  ) as Manifest;
+  assert.equal(
+    packedManifest.bin?.maat,
+    'bin/maat.mjs',
+    'Published package must expose the maat executable.',
+  );
   const files = new Set(packed.files.map((file) => file.path));
   for (const required of [
     'package.json',
