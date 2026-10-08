@@ -11,6 +11,8 @@ type Manifest = {
   private?: boolean;
   exports?: Record<string, string>;
   pi?: { extensions?: string[] };
+  dependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
 };
 
 const manifest = JSON.parse(await readFile('package.json', 'utf8')) as Manifest;
@@ -19,10 +21,15 @@ assert.match(manifest.version ?? '', /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
 assert.notEqual(manifest.private, true);
 assert.equal(manifest.exports?.['./pi'], './src/hosts/pi/extension.ts');
 assert.deepEqual(manifest.pi?.extensions, ['./src/hosts/pi/extension.ts']);
+assert.equal(manifest.dependencies?.['@wdio/globals'], '9.31.3');
+assert.equal(manifest.dependencies?.['@wdio/logger'], '9.29.1');
+assert.equal(manifest.dependencies?.['@earendil-works/pi-coding-agent'], undefined);
+assert.equal(manifest.peerDependencies?.['@earendil-works/pi-coding-agent'], '*');
 
-const [packed] = JSON.parse(
+const packOutput = JSON.parse(
   execFileSync('npm', ['pack', '--json', '--ignore-scripts'], { encoding: 'utf8' }),
-) as PackResult[];
+) as PackResult[] | Record<string, PackResult>;
+const packed = Array.isArray(packOutput) ? packOutput[0] : Object.values(packOutput)[0];
 assert.ok(packed, 'npm pack returned no package.');
 
 try {
@@ -34,6 +41,9 @@ try {
     'bin/maat.mjs',
     'Published package must expose the maat executable.',
   );
+  assert.equal(packedManifest.dependencies?.['@wdio/globals'], '9.31.3');
+  assert.equal(packedManifest.dependencies?.['@wdio/logger'], '9.29.1');
+  assert.equal(packedManifest.peerDependencies?.['@earendil-works/pi-coding-agent'], '*');
   const files = new Set(packed.files.map((file) => file.path));
   for (const required of [
     'package.json',

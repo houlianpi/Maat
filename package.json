@@ -53,14 +53,21 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.87.0",
+    "@wdio/globals": "9.31.3",
+    "@wdio/logger": "9.29.1",
     "expect-webdriverio": "6.1.0",
     "mocha": "10.8.2",
     "playwright": "1.58.2",
     "typescript": "5.9.3",
     "webdriverio": "9.32.0"
   },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.87.0",
     "@types/mocha": "10.0.10",
     "@types/node": "^24.0.0",
     "prettier": "3.6.2"

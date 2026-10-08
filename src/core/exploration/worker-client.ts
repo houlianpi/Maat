@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { isRecord, maxCodeBytes, parseObservations } from './protocol.ts';
 import type { JavaScriptSession } from './runtime.ts';
 
+const maxWorkerStderrBytes = 16 * 1024;
+
 export async function createExplorationWorker(
   module: URL,
   options: unknown,
@@ -26,8 +28,21 @@ export async function createExplorationWorker(
   let closed = false;
   let closing: Promise<void> | undefined;
   let terminalError: Error | undefined;
+  let workerStderr = '';
+  child.stderr?.on('data', (chunk: Buffer | string) => {
+    workerStderr = (workerStderr + chunk.toString()).slice(-maxWorkerStderrBytes);
+  });
   const exited = new Promise<void>((resolve) => {
-    child.once('exit', () => resolve());
+    child.once('exit', (code, signal) => {
+      resolve();
+      if (closing || closed) return;
+      const detail = workerStderr.trim();
+      terminate(
+        new Error(
+          `Exploration Worker exited before responding (code ${code ?? 'unknown'}, signal ${signal ?? 'none'}).${detail ? `\n${detail}` : ''}`,
+        ),
+      );
+    });
     child.once('error', () => resolve());
   });
   const killGroup = () => {
@@ -99,7 +114,20 @@ export async function createExplorationWorker(
       });
     });
   }
-  await request('initialize', { module: module.href, options }, undefined, initializationTimeoutMs);
+  try {
+    await request(
+      'initialize',
+      { module: module.href, options },
+      undefined,
+      initializationTimeoutMs,
+    );
+  } catch (error) {
+    closed = true;
+    if (child.exitCode === null && child.signalCode === null) killGroup();
+    await exited;
+    child.stderr?.destroy();
+    throw error;
+  }
   return {
     async execute(code, signal) {
       if (!code.trim() || Buffer.byteLength(code) > maxCodeBytes)

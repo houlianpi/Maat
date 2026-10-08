@@ -54,14 +54,20 @@ export function capabilities(target: NativeEnvironment | ResolvedNativeSession) 
   };
   const pair = drivers[environment.platform];
   if (!pair) throw new Error('Unsupported native platform.');
-  const caps: Record<string, unknown> = {
+  const rawCapabilities: Record<string, unknown> = {
     ...target.capabilities,
     ...('app' in target ? target.app : {}),
   };
-  if (caps.platformName && caps.platformName !== pair[0])
+  if (rawCapabilities.platformName && rawCapabilities.platformName !== pair[0])
     throw new Error('platformName conflicts with project platform.');
-  if (caps['appium:automationName'] && caps['appium:automationName'] !== pair[1])
+  if (rawCapabilities.automationName && rawCapabilities.automationName !== pair[1])
     throw new Error('automationName conflicts with project platform.');
+  if (
+    rawCapabilities['appium:automationName'] &&
+    rawCapabilities['appium:automationName'] !== pair[1]
+  )
+    throw new Error('automationName conflicts with project platform.');
+  const { platformName: _platformName, automationName: _automationName, ...caps } = rawCapabilities;
   return {
     'appium:noReset': true,
     'appium:fullReset': false,
@@ -116,7 +122,12 @@ export function splitCapabilities(input: Record<string, unknown>): {
       ([key, value]) => appKeys.has(key) && typeof value === 'string' && value.trim(),
     ),
   ) as NativeAppTarget;
-  const derived = new Set(['appium:udid', 'platformName', 'appium:automationName']);
+  const derived = new Set([
+    'appium:udid',
+    'platformName',
+    'automationName',
+    'appium:automationName',
+  ]);
   const environment = Object.fromEntries(
     Object.entries(input).filter(([key]) => !appKeys.has(key) && !derived.has(key)),
   );

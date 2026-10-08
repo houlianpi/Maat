@@ -19,8 +19,10 @@ import { createAppiumTestSession } from '../src/platforms/appium/test-session.ts
 async function mockAppium() {
   let deletes = 0;
   let creations = 0;
+  const requests: string[] = [];
   const sessionCapabilities: Record<string, unknown>[] = [];
   const server = createServer(async (req, res) => {
+    requests.push(`${req.method} ${req.url}`);
     let raw = '';
     for await (const chunk of req) raw += chunk;
     const body = raw ? JSON.parse(raw) : {};
@@ -48,6 +50,7 @@ async function mockAppium() {
     deleted: () => deletes,
     created: () => creations,
     sessionCapabilities,
+    requests,
   };
 }
 
@@ -70,8 +73,14 @@ test('native target persists stable environment and resolves changing device UUI
     'appium:udid': 'old-uuid',
     'appium:bundleId': 'com.example.old',
     'appium:xcodeOrgId': 'TEAM',
+    platformName: 'Mac',
+    automationName: 'Mac2',
+    'appium:automationName': 'Mac2',
   });
   assert.equal(split.environment['appium:udid'], undefined);
+  assert.equal(split.environment.platformName, undefined);
+  assert.equal(split.environment.automationName, undefined);
+  assert.equal(split.environment['appium:automationName'], undefined);
   assert.equal(split.app['appium:bundleId'], 'com.example.old');
   assert.equal(split.environment['appium:xcodeOrgId'], 'TEAM');
   assert.equal(
@@ -80,6 +89,24 @@ test('native target persists stable environment and resolves changing device UUI
       name: 'iPhone 17',
     })[0]?.id,
     'new-uuid',
+  );
+});
+
+test('derived native capabilities never leak unprefixed WebDriver fields', () => {
+  const result = capabilities({
+    environment: { platform: 'macos', capabilities: {} },
+    capabilities: { platformName: 'Mac', automationName: 'Mac2' },
+  });
+  assert.equal(result.platformName, 'Mac');
+  assert.equal('automationName' in result, false);
+  assert.equal(result['appium:automationName'], 'Mac2');
+  assert.throws(
+    () =>
+      capabilities({
+        environment: { platform: 'macos', capabilities: {} },
+        capabilities: { automationName: 'XCUITest' },
+      }),
+    /automationName conflicts/,
   );
 });
 
@@ -119,6 +146,33 @@ test('runtime Android App target drives lifecycle and resource-id namespace', as
     mock.server.close();
   }
   assert.equal(mock.sessionCapabilities[0]?.['appium:appPackage'], 'com.microsoft.emmx.canary');
+  assert.equal(mock.deleted(), 1);
+});
+
+test('macOS App target relies on Session capabilities instead of unsupported app lifecycle APIs', async () => {
+  const mock = await mockAppium();
+  const session = await createAppiumTestSession(
+    {
+      environment: { platform: 'macos', serverUrl: mock.url, capabilities: {} },
+      capabilities: {},
+    },
+    { 'appium:bundleId': 'com.apple.calculator' },
+  );
+  try {
+    await session.setup();
+  } finally {
+    await session.teardown();
+    mock.server.close();
+  }
+  assert.equal(mock.sessionCapabilities[0]?.['appium:bundleId'], 'com.apple.calculator');
+  assert.equal(
+    mock.requests.some((request) => request.includes('activate_app')),
+    false,
+  );
+  assert.equal(
+    mock.requests.some((request) => request.includes('terminate_app')),
+    false,
+  );
   assert.equal(mock.deleted(), 1);
 });
 

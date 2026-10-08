@@ -9,6 +9,7 @@ export async function startNativeSession(
 ): Promise<JavaScriptSession> {
   const desired = capabilities(target);
   const appId = target.app?.['appium:appPackage'] ?? target.app?.['appium:bundleId'];
+  const supportsAppLifecycle = target.environment.platform !== 'macos';
   if (target.environment.serverUrl) connection(target.environment.serverUrl);
   if (!target.environment.serverUrl)
     throw new Error('Resolved Appium Session requires a serverUrl.');
@@ -51,7 +52,7 @@ export async function startNativeSession(
         await worker.close();
       } finally {
         try {
-          if (appId) await driver.terminateApp(appId);
+          if (appId && supportsAppLifecycle) await driver.terminateApp(appId);
         } finally {
           await driver.deleteSession();
         }

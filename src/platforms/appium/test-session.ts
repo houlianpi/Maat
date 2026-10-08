@@ -26,6 +26,7 @@ export async function createAppiumTestSession(
       : typeof app?.['appium:bundleId'] === 'string'
         ? app['appium:bundleId']
         : undefined;
+  const supportsAppLifecycle = resolved.environment.platform !== 'macos';
   return {
     context: {
       driver,
@@ -41,14 +42,14 @@ export async function createAppiumTestSession(
         : {}),
     },
     async setup() {
-      if (appId) await driver.activateApp(appId);
+      if (appId && supportsAppLifecycle) await driver.activateApp(appId);
     },
     async screenshot() {
       return { data: await driver.takeScreenshot(), mimeType: 'image/png' };
     },
     async teardown() {
       try {
-        if (appId) await driver.terminateApp(appId);
+        if (appId && supportsAppLifecycle) await driver.terminateApp(appId);
       } finally {
         await driver.deleteSession();
       }

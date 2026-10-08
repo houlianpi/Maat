@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { createExplorationWorker } from '../src/core/exploration/worker-client.ts';
 import { findBrowserExecutable } from '../src/setup/browser-discovery.ts';
 import { createWebExplorationSession as launchJavaScriptSession } from '../src/platforms/web/exploration-session.ts';
 
@@ -131,6 +132,25 @@ test('abort terminates an active execution', async () => {
 
   await assert.rejects(executing, /aborted/);
   await session.close();
+});
+
+test('worker reports an early process exit with bounded stderr instead of timing out', async () => {
+  const startedAt = Date.now();
+  await assert.rejects(
+    createExplorationWorker(
+      new URL('./fixtures/exploration-worker-exit.ts', import.meta.url),
+      {},
+      5_000,
+      5_000,
+    ),
+    (error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      return (
+        message.includes('code 23') && message.includes('fixture runtime failed during import')
+      );
+    },
+  );
+  assert.ok(Date.now() - startedAt < 4_000);
 });
 
 test('persistent profile keeps browser state between sessions', async () => {
