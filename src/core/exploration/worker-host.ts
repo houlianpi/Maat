@@ -1,7 +1,13 @@
 import { formatWithOptions } from 'node:util';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { maxCodeBytes, maxOutputBytes, type JavaScriptObservation } from './protocol.ts';
+import {
+  imageMimeType,
+  isCanonicalBase64,
+  maxCodeBytes,
+  maxOutputBytes,
+  type JavaScriptObservation,
+} from './protocol.ts';
 import type { ExplorationRuntime, ExplorationRuntimeModule } from './runtime.ts';
 
 let runtime: ExplorationRuntime | undefined;
@@ -53,15 +59,30 @@ process.on(
           if (bytes > maxOutputBytes) throw new Error('Exploration output exceeds 12 MiB.');
           output.push(item);
         };
-        const display = (value: string | Uint8Array) =>
+        const display = (value: string | Uint8Array) => {
+          if (typeof value === 'string') {
+            const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+={0,2})$/.exec(
+              value,
+            );
+            const data = match?.[2] ?? value;
+            if ((!match && !isCanonicalBase64(value)) || !data) {
+              throw new Error(
+                'display() accepts image bytes, base64 screenshot data, or a PNG/JPEG/WebP base64 data URL. Use console.log() for text.',
+              );
+            }
+            const mimeType = imageMimeType(data);
+            if (match?.[1] && mimeType !== match[1])
+              throw new Error('Image data URL MIME type does not match its payload.');
+            append({ type: 'image', mimeType, data });
+            return;
+          }
+          const data = Buffer.from(value).toString('base64');
           append({
             type: 'image',
-            mimeType: 'image/png',
-            data:
-              typeof value === 'string'
-                ? value.replace(/^data:image\/[^;]+;base64,/, '')
-                : Buffer.from(value).toString('base64'),
+            mimeType: imageMimeType(value),
+            data,
           });
+        };
         const evidence = {
           screenshot: async () => {
             const shot = await runtime!.screenshot();

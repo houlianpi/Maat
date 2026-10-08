@@ -4,6 +4,8 @@ import { isRecord, maxCodeBytes, parseObservations } from './protocol.ts';
 import type { JavaScriptSession } from './runtime.ts';
 
 const maxWorkerStderrBytes = 16 * 1024;
+const gracefulCloseTimeoutMs = 500;
+const forcedCloseTimeoutMs = 2_000;
 
 export async function createExplorationWorker(
   module: URL,
@@ -147,9 +149,17 @@ export async function createExplorationWorker(
       closed = true;
       closing = (async () => {
         if (!alreadyClosed && child.connected) child.send({ id: ++id, operation: 'close' });
-        await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 500))]);
+        await Promise.race([
+          exited,
+          new Promise((resolve) => setTimeout(resolve, gracefulCloseTimeoutMs)),
+        ]);
         if (child.exitCode === null && child.signalCode === null) killGroup();
-        await exited;
+        await Promise.race([
+          exited,
+          new Promise((resolve) => setTimeout(resolve, forcedCloseTimeoutMs)),
+        ]);
+        if (child.connected) child.disconnect();
+        child.removeAllListeners();
         child.stderr?.destroy();
       })();
       return closing;

@@ -26,6 +26,45 @@ export type Connection = Pick<
   'hostname' | 'port' | 'path' | 'protocol'
 >;
 
+const legacyAppCapabilities: Record<string, keyof NativeAppTarget> = {
+  bundleId: 'appium:bundleId',
+  appPackage: 'appium:appPackage',
+  appActivity: 'appium:appActivity',
+  app: 'appium:app',
+};
+const standardWebDriverCapabilities = new Set([
+  'acceptInsecureCerts',
+  'browserName',
+  'browserVersion',
+  'pageLoadStrategy',
+  'platformName',
+  'proxy',
+  'setWindowRect',
+  'timeouts',
+  'unhandledPromptBehavior',
+  'webSocketUrl',
+]);
+
+function normalizeCapabilities(input: Record<string, unknown>): Record<string, unknown> {
+  const normalized = { ...input };
+  for (const [legacy, standard] of Object.entries(legacyAppCapabilities)) {
+    if (normalized[legacy] !== undefined) {
+      normalized[standard] ??= normalized[legacy];
+      delete normalized[legacy];
+    }
+  }
+  const unsupported = Object.keys(normalized).filter(
+    (key) =>
+      !key.includes(':') && !standardWebDriverCapabilities.has(key) && key !== 'automationName',
+  );
+  if (unsupported.length) {
+    throw new Error(
+      `Unsupported unprefixed Appium capabilities: ${unsupported.join(', ')}. Use W3C vendor-prefixed names such as appium:${unsupported[0]}.`,
+    );
+  }
+  return normalized;
+}
+
 export function connection(url: string): Connection {
   const parsed = new URL(url);
   if (
@@ -54,10 +93,10 @@ export function capabilities(target: NativeEnvironment | ResolvedNativeSession) 
   };
   const pair = drivers[environment.platform];
   if (!pair) throw new Error('Unsupported native platform.');
-  const rawCapabilities: Record<string, unknown> = {
+  const rawCapabilities: Record<string, unknown> = normalizeCapabilities({
     ...target.capabilities,
     ...('app' in target ? target.app : {}),
-  };
+  });
   if (rawCapabilities.platformName && rawCapabilities.platformName !== pair[0])
     throw new Error('platformName conflicts with project platform.');
   if (rawCapabilities.automationName && rawCapabilities.automationName !== pair[1])
@@ -111,6 +150,7 @@ export function splitCapabilities(input: Record<string, unknown>): {
   environment: Record<string, unknown>;
   app: NativeAppTarget;
 } {
+  input = normalizeCapabilities(input);
   const appKeys = new Set([
     'appium:bundleId',
     'appium:appPackage',

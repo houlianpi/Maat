@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { createExplorationWorker } from '../src/core/exploration/worker-client.ts';
+import { parseObservations } from '../src/core/exploration/protocol.ts';
 import { findBrowserExecutable } from '../src/setup/browser-discovery.ts';
 import { createWebExplorationSession as launchJavaScriptSession } from '../src/platforms/web/exploration-session.ts';
 
@@ -59,6 +60,39 @@ test('worker returns values and screenshots', async () => {
   }
 });
 
+test('display rejects text and non-image bytes without returning a corrupt observation', async () => {
+  const session = await launch();
+  try {
+    await assert.rejects(
+      session.execute(`display('not an image');`),
+      /Use console\.log\(\) for text/,
+    );
+    await assert.rejects(
+      session.execute(`display(Buffer.from('not an image'));`),
+      /valid PNG, JPEG, or WebP payload/,
+    );
+    assert.deepEqual(await session.execute(`console.log('session remains usable');`), [
+      { type: 'text', text: 'session remains usable' },
+    ]);
+  } finally {
+    await session.close();
+  }
+});
+
+test('parent rejects forged image observations', () => {
+  assert.throws(
+    () => parseObservations([{ type: 'image', mimeType: 'image/png', data: '1 + 6 = 7' }]),
+    /unsupported observation/,
+  );
+  assert.throws(
+    () =>
+      parseObservations([
+        { type: 'image', mimeType: 'image/jpeg', data: 'iVBORw0KGgoAAAANSUhEUg==' },
+      ]),
+    /does not match its MIME type/,
+  );
+});
+
 test('worker exposes Playwright expect assertions', async () => {
   const session = await launch();
 
@@ -108,7 +142,7 @@ test('output limit rejects the execution without crashing the parent', async () 
 
   try {
     await assert.rejects(
-      session.execute(`display('a'.repeat(13 * 1024 * 1024));`),
+      session.execute(`console.log('a'.repeat(13 * 1024 * 1024));`),
       /output exceeds 12 MiB/,
     );
   } finally {
@@ -132,6 +166,14 @@ test('abort terminates an active execution', async () => {
 
   await assert.rejects(executing, /aborted/);
   await session.close();
+});
+
+test('closing an already terminated worker remains bounded and idempotent', async () => {
+  const session = await launch(200);
+  await assert.rejects(session.execute(`await new Promise(() => {});`), /exceeded 200ms/);
+  const startedAt = Date.now();
+  await Promise.all([session.close(), session.close()]);
+  assert.ok(Date.now() - startedAt < 3_000);
 });
 
 test('worker reports an early process exit with bounded stderr instead of timing out', async () => {

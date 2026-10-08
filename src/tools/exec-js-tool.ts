@@ -15,11 +15,12 @@ export function createExecJsTool(
     label: 'Execute JavaScript',
     description:
       context?.description ??
-      'Execute asynchronous JavaScript against the active persistent UI Session. Use console.log() for text observations and display() for images.',
+      'Execute asynchronous JavaScript against the active persistent UI Session. Use console.log() for text observations and display() only for image bytes or image data URLs.',
     promptSnippet: 'Execute JavaScript in the active persistent UI Session',
     promptGuidelines: [
       'Use exe_js for all UI interaction.',
       'Session state persists across exe_js calls.',
+      'Use console.log() for text. display() accepts only image bytes or PNG/JPEG/WebP base64 data URLs.',
       "Infer assertions only from the user's explicit test objective, expected result, or acceptance criteria.",
       "Use the active framework's expect assertions for business outcomes so a failed expectation fails exe_js.",
       'Do not add redundant assertions for navigation, element lookup, or other prerequisites already enforced by Playwright operations.',

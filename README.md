@@ -17,25 +17,32 @@ Maat is a conversational UI testing Harness. The Agent explores real interfaces,
 
 ## Quick start
 
+Install Maat as a Pi package:
+
 ```bash
-git clone https://github.com/houlianpi/Maat.git
-cd Maat
-npm install
-npm link
+pi install npm:@houlianpi/maat
+pi
+# In Pi: /maat-status
+```
+
+This keeps Pi's normal UI and conversation and adds Maat's platform, exploration, Case and
+Evidence tools. Update an existing installation with:
+
+```bash
+pi update npm:@houlianpi/maat
+```
+
+To run the standalone Maat TUI or Agent, install the npm executable normally:
+
+```bash
+npm install --global @houlianpi/maat
 maat
+maat agent --browser chromium --headless "Test the checkout flow"
 ```
 
-Use Maat inside an existing Pi coding-agent session without replacing Pi's normal UI or
-conversation:
-
-```bash
-pi -e ./src/hosts/pi/extension.ts
-# Once published: pi install npm:@houlianpi/maat
-```
-
-The Pi Extension adds Maat's platform, exploration, Case, and Evidence tools plus
-`/maat-status`. All hosts share the same host-neutral `MaatApi`; Core and Platform Adapters do
-not depend on the Pi SDK.
+Published packages contain compiled JavaScript under `dist`; Node.js never type-strips TypeScript
+inside `node_modules`. The Pi Extension adds `/maat-status`. All hosts share the same host-neutral
+`MaatApi`; Core and Platform Adapters do not depend on the Pi SDK.
 
 Describe the UI, actions, and explicit business outcome. Maat uses `exe_js` against the active Adapter. Web exposes Playwright `page/context/browser`; Android, iOS and macOS expose WebdriverIO `driver/browser` backed by an Appium Session.
 
@@ -54,6 +61,7 @@ describe('Web opens desktop confirmation', () => {
       { adapterId: 'macos', setup: { app: { 'appium:bundleId': 'com.example.desktop' } } },
     ]);
     let passed = false;
+    await maat.setup();
     try {
       await maat.step('Open web', 'web', async ({ page }) => {
         await page.goto('https://example.com');
@@ -66,7 +74,7 @@ describe('Web opens desktop confirmation', () => {
       });
       passed = true;
     } finally {
-      await maat.close(passed);
+      await maat.teardown({ passed });
     }
   });
 });
@@ -91,13 +99,26 @@ flowchart LR
   Runner --> Report[Evidence + HTML report]
 ```
 
-Exploration uses one common Worker Host/Client and independent Worker instances per active Adapter. Formal Cases execute compiled TypeScript directly and do not use exploration Workers.
+Exploration uses one common Worker Host/Client and independent Worker instances per active Adapter. Formal Cases execute saved TypeScript through the Maat runner and do not use exploration Workers.
 
 ## Adapters and Session setup
 
 Built-in Adapters: Web, Android, iOS, macOS. Core depends only on `PlatformAdapter` and `PlatformRegistry`; adding another Adapter does not change Case, Runner, Renderer, SessionPool or Evidence.
 
 For Appium, Maat resolves a reachable Server and device, then creates and deletes its own Session. Driver installation, Server startup, ADB/Xcode, signing, simulators and OS permissions are prepared by the user or Agent through Shell. See [Appium Sessions](docs/native-testing.md).
+
+For a local macOS Mac2 session:
+
+```bash
+npm install --global appium
+appium driver install mac2
+appium driver doctor mac2
+appium --address 127.0.0.1 --port 4723
+```
+
+Use the capability returned by `find_applications`, for example
+`{ "appium:bundleId": "com.apple.calculator" }`. Maat also normalizes the legacy bare
+`bundleId`, but new integrations should use W3C vendor-prefixed Appium names.
 
 Optional Appium Session hints live outside the test tree under `~/.maat/session-hints/<adapter>.json`. The `maat-tests` tree contains Cases only.
 
@@ -114,6 +135,16 @@ Optional Appium Session hints live outside the test tree under `~/.maat/session-
 | `save_case`                          | Validate with fresh Sessions and promote one Mocha spec |
 
 Assist mode permits Shell/setup work. Case mode blocks Shell and direct file edits while exploration and generation are active.
+
+Inside `exe_js`, use `console.log()` for text and `display()` only for PNG/JPEG/WebP image bytes
+or base64 data URLs. Prefer `await evidence.screenshot('result')` for screenshots. Invalid image
+values fail the tool call and are never written into the Pi transcript. macOS accessibility values
+may contain Unicode format controls; normalize user-visible text before assertions when needed:
+
+```javascript
+const value = await result.getAttribute('value');
+expect(value.replace(/\p{Cf}/gu, '').trim()).toBe('7');
+```
 
 ## Run and report
 
@@ -164,10 +195,15 @@ The Worker is a killable process boundary with timeout, Abort, code/output limit
 
 ```bash
 npm install
+npm run build
 npm run typecheck
 npm test
+npm run package:check
 maat test --suite smoke --browser chromium
 ```
+
+`package:check` builds, packs and installs the tarball in a temporary directory, then smoke-tests
+the installed CLI and Worker. This catches failures that do not reproduce from a source checkout.
 
 ## npm releases
 
@@ -175,10 +211,10 @@ Publishing is handled by `.github/workflows/publish.yml`. A non-prerelease GitHu
 tag exactly matches `v<package.json version>` runs formatting, type checking, all project tests,
 and an npm tarball inspection before publishing the public scoped package with provenance.
 
-For the first publication of `@houlianpi/maat`, create the `npm` GitHub Environment and add a
-short-lived granular `NPM_TOKEN` secret with publish access. After the package exists, configure
-npm Trusted Publishing for repository `houlianpi/Maat` and workflow `publish.yml`, then remove the
-secret. Keep required reviewers on the `npm` Environment if releases need approval.
+Publishing uses npm Trusted Publishing for repository `houlianpi/Maat`, workflow `publish.yml` and
+GitHub Environment `npm`. Do not add an `NPM_TOKEN`: a token overrides OIDC publishing and may
+trigger an interactive OTP failure. Keep required reviewers on the Environment if releases need
+approval.
 
 Release sequence:
 

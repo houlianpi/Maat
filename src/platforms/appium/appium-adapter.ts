@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { homedir } from 'node:os';
 import {
+  capabilities,
   readNativeEnvironment,
   splitCapabilities,
   type NativeAppTarget,
@@ -88,6 +89,7 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   }
 
   async configureSession(input: SessionSetup): Promise<void> {
+    if (!this.environment) await this.initialize();
     const split = splitCapabilities(input.capabilities ?? {});
     if (
       (split.environment['appium:noReset'] === false ||
@@ -99,13 +101,21 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     delete split.environment.platformName;
     delete split.environment['appium:automationName'];
     const base = this.environment ?? { platform: this.id, capabilities: {} };
-    this.environment = {
+    const sanitizedBase = splitCapabilities(base.capabilities).environment;
+    const nextEnvironment: NativeEnvironment = {
       platform: this.id,
       serverUrl: input.serverUrl ?? base.serverUrl,
       device: (input.device as NativeEnvironment['device']) ?? base.device,
-      capabilities: { ...base.capabilities, ...split.environment },
+      capabilities: { ...sanitizedBase, ...split.environment },
     };
-    this.app = Object.keys(split.app).length ? split.app : this.app;
+    const nextApp = Object.keys(split.app).length ? split.app : this.app;
+    capabilities({
+      environment: nextEnvironment,
+      capabilities: nextEnvironment.capabilities,
+      app: nextApp,
+    });
+    this.environment = nextEnvironment;
+    this.app = nextApp;
     this.issue = undefined;
     await this.runtime.close();
   }
@@ -113,7 +123,9 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   async inspectSetup(request: SetupInspection): Promise<unknown> {
     if (request.kind === 'devices') return discoverDevices(this.id);
     if (!this.environment) await this.initialize();
-    return discoverApplications(this.environment!, request.query ?? '');
+    const apps = await discoverApplications(this.environment!, request.query ?? '');
+    const appCapability = this.id === 'android' ? 'appium:appPackage' : 'appium:bundleId';
+    return apps.map((app) => ({ ...app, capabilities: { [appCapability]: app.id } }));
   }
 
   private async prepare(): Promise<void> {

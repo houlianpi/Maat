@@ -110,6 +110,33 @@ test('derived native capabilities never leak unprefixed WebDriver fields', () =>
   );
 });
 
+test('legacy App capability names normalize and invalid configuration is recoverable', async () => {
+  const root = await mkdtemp(path.resolve('artifacts/native-tests/config-'));
+  const adapter = new AppiumPlatformAdapter(
+    { id: 'macos', label: 'macOS', platformName: 'Mac', automationName: 'Mac2' },
+    root,
+  );
+  try {
+    await adapter.configureSession({ capabilities: { bundleId: 'com.example.old' } });
+    assert.deepEqual(adapter.appTarget, { 'appium:bundleId': 'com.example.old' });
+    assert.deepEqual(adapter.sessionHints?.capabilities, {});
+    await assert.rejects(
+      adapter.configureSession({ capabilities: { unknownCapability: true } }),
+      /Unsupported unprefixed Appium capabilities: unknownCapability/,
+    );
+    assert.deepEqual(adapter.appTarget, { 'appium:bundleId': 'com.example.old' });
+    assert.deepEqual(adapter.sessionHints?.capabilities, {});
+    await adapter.configureSession({
+      capabilities: { 'appium:bundleId': 'com.apple.calculator' },
+    });
+    assert.deepEqual(adapter.appTarget, { 'appium:bundleId': 'com.apple.calculator' });
+    assert.deepEqual(adapter.sessionHints?.capabilities, {});
+  } finally {
+    await adapter.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('iOS discovery keeps simulators listed after offline devices', () => {
   const devices = parseIosDevices(
     `== Devices ==\nPhone (26.7) (00000000-0000000000000001)\n== Devices Offline ==\nOld Phone (26.6) (00000000-0000000000000002)\n== Simulators ==\niPhone 17 Simulator (27.0) (00000000-0000-0000-0000-000000000003)`,

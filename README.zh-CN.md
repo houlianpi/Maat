@@ -12,23 +12,31 @@ Maat 是一个对话式 UI 测试 Harness。Agent 探索真实界面、执行 Ja
 
 ## 快速开始
 
+作为 Pi Package 安装：
+
 ```bash
-git clone https://github.com/houlianpi/Maat.git
-cd Maat
-npm install
-npm link
+pi install npm:@houlianpi/maat
+pi
+# 在 Pi 中运行：/maat-status
+```
+
+这会保留 Pi 原本的 UI 与会话，并增加 Maat 的平台、探索、Case 和 Evidence 工具。更新已安装版本：
+
+```bash
+pi update npm:@houlianpi/maat
+```
+
+独立运行 Maat TUI 或 Agent：
+
+```bash
+npm install --global @houlianpi/maat
 maat
+maat agent --browser chromium --headless "测试结账流程"
 ```
 
-也可以把 Maat 加载到现有 Pi coding-agent 会话中，而不替换 Pi 原本的 UI 与对话：
-
-```bash
-pi -e ./src/hosts/pi/extension.ts
-# 正式发布后：pi install npm:@houlianpi/maat
-```
-
-Pi Extension 会增加 Maat 的平台、探索、Case、Evidence 工具和 `/maat-status` 命令。所有
-Host 共用同一个与宿主无关的 `MaatApi`；Core 与 Platform Adapter 不依赖 Pi SDK。
+发布包只包含 `dist` 下的编译后 JavaScript，Node.js 不会在 `node_modules` 中直接转换
+TypeScript。Pi Extension 还提供 `/maat-status`。所有 Host 共用同一个与宿主无关的
+`MaatApi`；Core 与 Platform Adapter 不依赖 Pi SDK。
 
 描述目标 UI、操作和明确的业务预期。Maat 使用统一的 `exe_js`：Web Adapter 暴露 Playwright `page/context/browser`；Android、iOS、macOS Adapter 暴露由 Appium Session 支持的 WebdriverIO `driver/browser`。
 
@@ -67,13 +75,26 @@ flowchart LR
   Runner --> Report[Evidence + HTML Report]
 ```
 
-探索阶段只有一套 Worker Host/Client，每个活跃 Adapter 使用独立 Worker 实例。正式 Case 直接执行已保存 TypeScript，不使用探索 Worker。
+探索阶段只有一套 Worker Host/Client，每个活跃 Adapter 使用独立 Worker 实例。正式 Case 由 Maat Runner 执行已保存的 TypeScript，不使用探索 Worker。
 
 ## Adapter 与 Appium
 
 内置 Web、Android、iOS、macOS Adapter。Core 只依赖 `PlatformAdapter` 与 `PlatformRegistry`；新增 Adapter 不修改 Case、Renderer、Runner、SessionPool 或 Evidence。
 
 Appium 侧，Maat 解析可访问 Server 与设备，然后只创建和删除自己拥有的 Session。Driver 安装、Server 启动、ADB/Xcode、签名、模拟器和系统权限由用户或 Agent 使用 Shell 准备。详见 [Appium Session](docs/native-testing.md)。
+
+本机 macOS Mac2 环境：
+
+```bash
+npm install --global appium
+appium driver install mac2
+appium driver doctor mac2
+appium --address 127.0.0.1 --port 4723
+```
+
+使用 `find_applications` 返回的 capability，例如
+`{ "appium:bundleId": "com.apple.calculator" }`。Maat 也会兼容旧的裸 `bundleId`，
+但新配置应使用符合 W3C 的 Appium vendor prefix。
 
 可选 Appium Session 提示位于测试目录之外的 `~/.maat/session-hints/<adapter>.json`。`maat-tests` 只保存 Case。
 
@@ -90,6 +111,15 @@ Appium 侧，Maat 解析可访问 Server 与设备，然后只创建和删除自
 | `save_case`                          | 全新 Session 验证并保存统一 Mocha Case |
 
 Assist 模式允许 Shell 和配置排障；Case 模式在探索和生成期间禁止 Shell 与直接文件编辑。
+
+在 `exe_js` 中，文字使用 `console.log()`；`display()` 只接受 PNG/JPEG/WebP 图片字节或
+base64 data URL。截图优先使用 `await evidence.screenshot('result')`。非法图片会让当前工具调用
+失败，不会写入 Pi transcript。macOS 辅助功能文本可能包含 Unicode 格式控制符，断言可先规范化：
+
+```javascript
+const value = await result.getAttribute('value');
+expect(value.replace(/\p{Cf}/gu, '').trim()).toBe('7');
+```
 
 ## 运行与报告
 
@@ -139,10 +169,15 @@ Worker 是具备超时、Abort、代码/输出限制和敏感环境过滤的可�
 
 ```bash
 npm install
+npm run build
 npm run typecheck
 npm test
+npm run package:check
 maat test --suite smoke --browser chromium
 ```
+
+`package:check` 会构建、打包并在临时目录安装 tarball，然后验证安装后的 CLI 与 Worker，
+用于发现只在 npm 安装包中出现、源码 checkout 无法复现的问题。
 
 ## npm 发布
 
@@ -150,10 +185,9 @@ maat test --suite smoke --browser chromium
 `v<package.json version>` 后，流水线会先执行格式检查、类型检查、全部项目测试和 npm
 tarball 内容检查，再以公开 scoped package 和 provenance 的方式发布。
 
-首次发布 `@houlianpi/maat` 时，在 GitHub 创建 `npm` Environment，并临时配置具有发布权限的
-granular `NPM_TOKEN` secret。包创建成功后，在 npm 为仓库 `houlianpi/Maat`、工作流
-`publish.yml` 配置 Trusted Publishing，然后删除该 secret。需要人工批准发布时，可给 `npm`
-Environment 配置 required reviewers。
+发布使用 npm Trusted Publishing：仓库 `houlianpi/Maat`、工作流 `publish.yml`、GitHub
+Environment `npm`。不要配置 `NPM_TOKEN`；token 会覆盖 OIDC，并可能触发交互式 OTP 失败。
+需要人工批准时，可给 `npm` Environment 配置 required reviewers。
 
 发布流程：
 
