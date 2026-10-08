@@ -28,8 +28,11 @@ export async function startNativeSession(
   }
   let worker: JavaScriptSession;
   try {
+    const runtimeModule = import.meta.url.endsWith('.ts')
+      ? '../exploration-runtime.ts'
+      : '../exploration-runtime.js';
     worker = await createExplorationWorker(
-      new URL('../exploration-runtime.ts', import.meta.url),
+      new URL(runtimeModule, import.meta.url),
       {
         ...endpoint,
         maatAppId: appId,

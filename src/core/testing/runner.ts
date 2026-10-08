@@ -36,9 +36,13 @@ export async function runMaatTests(
         ? `@${selection.value}`
         : undefined;
   const input = { specs, grep, runDirectory };
+  const runMochaModule = import.meta.url.endsWith('.ts')
+    ? '../../hosts/test/run-mocha.ts'
+    : '../../hosts/test/run-mocha.js';
   const args = [
-    '--experimental-strip-types',
-    fileURLToPath(new URL('../../hosts/test/run-mocha.ts', import.meta.url)),
+    '--import',
+    import.meta.resolve('tsx'),
+    fileURLToPath(new URL(runMochaModule, import.meta.url)),
     JSON.stringify(input),
   ];
   return new Promise((resolve, reject) => {

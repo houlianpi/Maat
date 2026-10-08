@@ -40,16 +40,16 @@ let forwardedArgs;
 switch (command) {
   case undefined:
   case 'tui':
-    script = 'src/hosts/tui/main.ts';
+    script = 'dist/hosts/tui/main.js';
     forwardedArgs = args.slice(command === 'tui' ? 1 : 0);
     break;
   case 'agent':
-    script = 'src/cli/agent.ts';
+    script = 'dist/cli/agent.js';
     forwardedArgs = args.slice(1);
     break;
   case 'cases':
   case 'test':
-    script = 'src/cli/cases.ts';
+    script = 'dist/cli/cases.js';
     forwardedArgs = args.slice(1);
     break;
   case 'replay': {
@@ -67,19 +67,15 @@ switch (command) {
     process.exit(1);
 }
 
-const child = spawn(
-  process.execPath,
-  [
-    '--experimental-strip-types',
-    command === 'replay' ? script : path.resolve(packageRoot, script),
-    ...forwardedArgs,
-  ],
-  {
-    cwd: process.cwd(),
-    env: process.env,
-    stdio: 'inherit',
-  },
-);
+const runtimeArgs =
+  command === 'replay'
+    ? ['--import', import.meta.resolve('tsx'), script]
+    : [path.resolve(packageRoot, script)];
+const child = spawn(process.execPath, [...runtimeArgs, ...forwardedArgs], {
+  cwd: process.cwd(),
+  env: process.env,
+  stdio: 'inherit',
+});
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => child.kill(signal));

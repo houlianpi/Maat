@@ -11,16 +11,23 @@ export async function createExplorationWorker(
   timeoutMs = 60_000,
   initializationTimeoutMs = 30_000,
 ): Promise<JavaScriptSession> {
-  const child = fork(fileURLToPath(new URL('./worker-host.ts', import.meta.url)), [], {
-    execArgv: ['--experimental-strip-types'],
-    detached: true,
-    stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
-    env: Object.fromEntries(
-      Object.entries(process.env).filter(
-        ([key]) => !/KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH/i.test(key),
-      ),
+  const sourceRuntime = import.meta.url.endsWith('.ts');
+  const child = fork(
+    fileURLToPath(
+      new URL(sourceRuntime ? './worker-host.ts' : './worker-host.js', import.meta.url),
     ),
-  });
+    [],
+    {
+      execArgv: sourceRuntime ? ['--experimental-strip-types'] : [],
+      detached: true,
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+      env: Object.fromEntries(
+        Object.entries(process.env).filter(
+          ([key]) => !/KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH/i.test(key),
+        ),
+      ),
+    },
+  );
   let id = 0;
   let pending:
     | { id: number; resolve(value: unknown): void; reject(error: Error): void }

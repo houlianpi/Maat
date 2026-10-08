@@ -56,7 +56,7 @@ const { values } = parseArgs({
 
 if (values.help) {
   console.log([
-    "Usage: node --experimental-strip-types replay.ts [options]",
+    "Usage: maat replay replay.ts [options]",
     "",
     "--browser <chromium|chrome|chrome-beta|edge|edge-beta>",
     "--executable-path <path>  Use a specific browser executable (mutually exclusive with a channel)",

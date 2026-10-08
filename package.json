@@ -11,8 +11,8 @@
   ],
   "files": [
     "bin",
+    "dist",
     "docs",
-    "src",
     "README.md",
     "README.zh-CN.md",
     "AGENTS.md"
@@ -30,23 +30,25 @@
     "maat": "bin/maat.mjs"
   },
   "exports": {
-    ".": "./src/api/create-maat.ts",
-    "./api": "./src/api/maat-api.ts",
-    "./pi": "./src/hosts/pi/extension.ts",
-    "./test": "./src/hosts/test/fixture.ts"
+    ".": "./dist/api/create-maat.js",
+    "./api": "./dist/api/maat-api.js",
+    "./pi": "./dist/hosts/pi/extension.js",
+    "./test": "./dist/hosts/test/fixture.js"
   },
   "pi": {
     "extensions": [
-      "./src/hosts/pi/extension.ts"
+      "./dist/hosts/pi/extension.js"
     ]
   },
   "scripts": {
     "agent": "node --experimental-strip-types src/cli/agent.ts",
+    "build": "tsc -p tsconfig.build.json",
     "cases": "node --experimental-strip-types src/cli/cases.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "maat:test": "node --experimental-strip-types src/cli/cases.ts",
     "package:check": "node --experimental-strip-types scripts/check-package.ts",
+    "prepack": "npm run build",
     "replay": "node --experimental-strip-types",
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "tui": "node --experimental-strip-types src/hosts/tui/main.ts",
@@ -59,6 +61,7 @@
     "mocha": "10.8.2",
     "playwright": "1.58.2",
     "typescript": "5.9.3",
+    "tsx": "4.23.15",
     "webdriverio": "9.32.0"
   },
   "peerDependencies": {
