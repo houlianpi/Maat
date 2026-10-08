@@ -52,7 +52,7 @@
     "replay": "node --experimental-strip-types",
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "tui": "node --experimental-strip-types src/hosts/tui/main.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "npm run build && tsc --noEmit"
   },
   "dependencies": {
     "@wdio/globals": "9.31.3",
