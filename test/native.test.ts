@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:http';
 import { mkdtemp, mkdir, rm, readdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { startNativeSession } from '../src/platforms/appium/runtime/session.ts';
 import { capabilities, connection, splitCapabilities } from '../src/platforms/appium/schema.ts';
@@ -111,7 +112,7 @@ test('derived native capabilities never leak unprefixed WebDriver fields', () =>
 });
 
 test('legacy App capability names normalize and invalid configuration is recoverable', async () => {
-  const root = await mkdtemp(path.resolve('artifacts/native-tests/config-'));
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-native-config-'));
   const adapter = new AppiumPlatformAdapter(
     { id: 'macos', label: 'macOS', platformName: 'Mac', automationName: 'Mac2' },
     root,
