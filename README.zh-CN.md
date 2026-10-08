@@ -15,7 +15,7 @@ Maat 是一个对话式 UI 测试 Harness。Agent 探索真实界面、执行 Ja
 作为 Pi Package 安装：
 
 ```bash
-pi install npm:@houlianpi/maat
+pi install npm:@houlianpi/maat-pi
 pi
 # 在 Pi 中运行：/maat-status
 ```
@@ -23,7 +23,7 @@ pi
 这会保留 Pi 原本的 UI 与会话，并增加 Maat 的平台、探索、Case 和 Evidence 工具。更新已安装版本：
 
 ```bash
-pi update npm:@houlianpi/maat
+pi update npm:@houlianpi/maat-pi
 ```
 
 独立运行 Maat TUI 或 Agent：
@@ -34,9 +34,9 @@ maat
 maat agent --browser chromium --headless "测试结账流程"
 ```
 
-发布包只包含 `dist` 下的编译后 JavaScript，Node.js 不会在 `node_modules` 中直接转换
-TypeScript。Pi Extension 还提供 `/maat-status`。所有 Host 共用同一个与宿主无关的
-`MaatApi`；Core 与 Platform Adapter 不依赖 Pi SDK。
+Maat 发布为三个包：与 Host 无关的 `@houlianpi/maat-core`、Pi Extension
+`@houlianpi/maat-pi`、独立产品 `@houlianpi/maat`。发布包只包含 `dist` 下的编译后
+JavaScript；Core 与 Platform Adapter 不依赖任何具体 Host SDK。
 
 描述目标 UI、操作和明确的业务预期。Maat 使用统一的 `exe_js`：Web Adapter 暴露 Playwright `page/context/browser`；Android、iOS、macOS Adapter 暴露由 Appium Session 支持的 WebdriverIO `driver/browser`。
 
@@ -108,6 +108,7 @@ appium --address 127.0.0.1 --port 4723
 | `begin_case`                         | 根据明确测试目的创建 Draft             |
 | `exe_js`                             | 在当前持久 UI Session 执行 JavaScript  |
 | `get_case_status`                    | 查看步骤、失败尝试和 Evidence          |
+| `list/remove/replace_case_step`      | 查看、删除和替换正式候选步骤           |
 | `save_case`                          | 全新 Session 验证并保存统一 Mocha Case |
 
 Assist 模式允许 Shell 和配置排障；Case 模式在探索和生成期间禁止 Shell 与直接文件编辑。
@@ -120,6 +121,18 @@ base64 data URL。截图优先使用 `await evidence.screenshot('result')`。非
 const value = await result.getAttribute('value');
 expect(value.replace(/\p{Cf}/gu, '').trim()).toBe('7');
 ```
+
+`exe_js` 默认只探索。只有最小、可复用的业务操作或断言才使用 `record: true`，并提供简洁
+`stepName`。页面树、元素枚举和配置诊断不得录入 Case。保存前使用 `list_case_steps` 检查步骤。
+
+## 从 0.1.x 迁移
+
+```bash
+pi remove npm:@houlianpi/maat
+pi install npm:@houlianpi/maat-pi
+```
+
+已有 Case 应将 `@houlianpi/maat/test` 改为 `@houlianpi/maat-core/test`。
 
 ## 运行与报告
 
@@ -153,15 +166,14 @@ cases/<case-id>/*.png
 ## 代码结构
 
 ```text
-src/
-├── api/           稳定、与 Host 无关的 MaatApi 组合入口
-├── core/          与框架无关的 Case、Worker、Runner、SessionPool、Evidence、契约
-├── platforms/     Web、Android、iOS、macOS 与共享 Appium 实现
-├── hosts/         独立 Pi Agent/TUI、可安装 Pi Extension 与 Mocha 测试宿主
-├── tools/         Agent 工具
-├── setup/         可选浏览器/设备/App 发现能力
-└── cli/           薄命令入口
+packages/
+├── core/          与 Host 无关的 API、Adapter、Worker、Runner、Evidence 和 test fixture
+├── pi/            Pi Extension、工具、提示词、work mode 和状态 UI
+└── maat/          独立 TUI、Agent、CLI 和可执行文件
 ```
+
+未来的 Codex、Claude Code 或 DeepSeek 集成作为依赖 `maat-core` 的平行 Host Package 增加；
+Core 永远不导入具体 Host SDK。
 
 Worker 是具备超时、Abort、代码/输出限制和敏感环境过滤的可终止进程边界，不是 OS 或容器安全沙箱。
 
@@ -183,7 +195,7 @@ maat test --suite smoke --browser chromium
 
 发布由 `.github/workflows/publish.yml` 完成。创建非预发布 GitHub Release，且标签严格等于
 `v<package.json version>` 后，流水线会先执行格式检查、类型检查、全部项目测试和 npm
-tarball 内容检查，再以公开 scoped package 和 provenance 的方式发布。
+三个 tarball 安装检查，再按 Core → Pi Extension → 独立 Maat 的顺序以 provenance 发布。
 
 发布使用 npm Trusted Publishing：仓库 `houlianpi/Maat`、工作流 `publish.yml`、GitHub
 Environment `npm`。不要配置 `NPM_TOKEN`；token 会覆盖 OIDC，并可能触发交互式 OTP 失败。
@@ -192,7 +204,7 @@ Environment `npm`。不要配置 `NPM_TOKEN`；token 会覆盖 OIDC，并可能�
 发布流程：
 
 ```bash
-npm version patch
+npm version 0.2.1 --workspaces --include-workspace-root
 git push origin main --follow-tags
 # 使用推送的 vX.Y.Z 标签创建对应 GitHub Release。
 ```

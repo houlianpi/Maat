@@ -5,8 +5,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
 
-import { findBrowserExecutable } from '../src/setup/browser-discovery.ts';
-import { createRunRecorder } from '../src/hosts/agent/run-recorder.ts';
+import { findBrowserExecutable } from '../packages/core/src/setup/browser-discovery.ts';
+import { createRunRecorder } from '../packages/maat/src/agent/run-recorder.ts';
 
 const execFileAsync = promisify(execFile);
 const testArtifacts = path.resolve('artifacts/test-recordings');

@@ -1,6 +1,6 @@
 /** Case ID: calculator-3-times-3-times-8; @maat-adapters web; Objective: 3 × 3 × 8 = 72. */
 import { afterEach, beforeEach, describe, it } from 'mocha';
-import { createMaatTest, type MaatTest } from '@houlianpi/maat/test';
+import { createMaatTest, type MaatTest } from '@houlianpi/maat-core/test';
 describe('计算器验证 3 × 3 × 8 = 72 @calculator @smoke @suite:smoke', () => {
   let maat: MaatTest;
   beforeEach(async () => {

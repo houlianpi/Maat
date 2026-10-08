@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createAgentTrace } from '../src/hosts/agent/trace.ts';
+import { createAgentTrace } from '../packages/maat/src/agent/trace.ts';
 
 test('trace labels directions and summarizes images and secrets', () => {
   let output = '';

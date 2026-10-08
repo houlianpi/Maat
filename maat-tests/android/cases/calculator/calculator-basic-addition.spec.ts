@@ -22,7 +22,7 @@
  */
 
 import { afterEach, beforeEach, describe, it } from 'mocha';
-import { createMaatTest, type MaatTest } from '@houlianpi/maat/test';
+import { createMaatTest, type MaatTest } from '@houlianpi/maat-core/test';
 
 describe('Android 计算器基础加法 @calculator @android @smoke @suite:smoke', () => {
   let maat: MaatTest;

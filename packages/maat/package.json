@@ -1,0 +1,38 @@
+{
+  "name": "@houlianpi/maat",
+  "version": "0.2.0",
+  "description": "Standalone conversational UI verification Agent and CLI",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "bin",
+    "dist",
+    "README.md"
+  ],
+  "bin": {
+    "maat": "bin/maat.mjs"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "test": "node --experimental-strip-types --test ../../test/agent-options.test.ts ../../test/agent-trace.test.ts ../../test/cli-bin.test.ts ../../test/maat-tui.test.ts ../../test/run-recorder.test.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.87.0",
+    "@houlianpi/maat-core": "0.2.0",
+    "@houlianpi/maat-pi": "0.2.0",
+    "tsx": "4.23.15"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/houlianpi/Maat.git",
+    "directory": "packages/maat"
+  }
+}

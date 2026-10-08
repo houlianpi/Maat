@@ -20,7 +20,7 @@ Maat is a conversational UI testing Harness. The Agent explores real interfaces,
 Install Maat as a Pi package:
 
 ```bash
-pi install npm:@houlianpi/maat
+pi install npm:@houlianpi/maat-pi
 pi
 # In Pi: /maat-status
 ```
@@ -29,7 +29,7 @@ This keeps Pi's normal UI and conversation and adds Maat's platform, exploration
 Evidence tools. Update an existing installation with:
 
 ```bash
-pi update npm:@houlianpi/maat
+pi update npm:@houlianpi/maat-pi
 ```
 
 To run the standalone Maat TUI or Agent, install the npm executable normally:
@@ -40,9 +40,9 @@ maat
 maat agent --browser chromium --headless "Test the checkout flow"
 ```
 
-Published packages contain compiled JavaScript under `dist`; Node.js never type-strips TypeScript
-inside `node_modules`. The Pi Extension adds `/maat-status`. All hosts share the same host-neutral
-`MaatApi`; Core and Platform Adapters do not depend on the Pi SDK.
+Maat is published as three packages: host-neutral `@houlianpi/maat-core`, Pi Extension
+`@houlianpi/maat-pi`, and standalone `@houlianpi/maat`. Published packages contain compiled
+JavaScript under `dist`; Core and Platform Adapters do not depend on any Host SDK.
 
 Describe the UI, actions, and explicit business outcome. Maat uses `exe_js` against the active Adapter. Web exposes Playwright `page/context/browser`; Android, iOS and macOS expose WebdriverIO `driver/browser` backed by an Appium Session.
 
@@ -52,7 +52,7 @@ Cases live under `maat-tests/<owner-platform>/cases/<business-module>`. Pure Web
 
 ```typescript
 import { describe, it } from 'mocha';
-import { createMaatTest } from '@houlianpi/maat/test';
+import { createMaatTest } from '@houlianpi/maat-core/test';
 
 describe('Web opens desktop confirmation', () => {
   it('mixed-confirmation', async () => {
@@ -132,6 +132,7 @@ Optional Appium Session hints live outside the test tree under `~/.maat/session-
 | `begin_case`                         | Create a Draft with explicit objectives                 |
 | `exe_js`                             | Execute JavaScript in the active persistent UI Session  |
 | `get_case_status`                    | Inspect steps, attempts and Evidence                    |
+| `list/remove/replace_case_step`      | Review and edit formal candidate steps                  |
 | `save_case`                          | Validate with fresh Sessions and promote one Mocha spec |
 
 Assist mode permits Shell/setup work. Case mode blocks Shell and direct file edits while exploration and generation are active.
@@ -145,6 +146,19 @@ may contain Unicode format controls; normalize user-visible text before assertio
 const value = await result.getAttribute('value');
 expect(value.replace(/\p{Cf}/gu, '').trim()).toBe('7');
 ```
+
+`exe_js` is exploratory by default. Set `record: true` with a concise `stepName` only for minimal
+reusable business actions/assertions. Page-source dumps, element inventories and setup diagnostics
+must remain unrecorded. Review `list_case_steps` before saving.
+
+## Migrate from 0.1.x
+
+```bash
+pi remove npm:@houlianpi/maat
+pi install npm:@houlianpi/maat-pi
+```
+
+Existing Cases should import `@houlianpi/maat-core/test` instead of `@houlianpi/maat/test`.
 
 ## Run and report
 
@@ -179,15 +193,14 @@ Exploration Evidence and failed attempts live under `artifacts/cases/<case-id>`.
 ## Architecture
 
 ```text
-src/
-├── api/           stable host-neutral MaatApi composition surface
-├── core/          framework-agnostic Case, Worker, Runner, SessionPool, Evidence, contracts
-├── platforms/     Web, Android, iOS, macOS and shared Appium implementations
-├── hosts/         standalone Pi Agent/TUI, installable Pi Extension and Mocha test host
-├── tools/         Agent-facing tools
-├── setup/         optional browser/device/application discovery
-└── cli/           thin command entry points
+packages/
+├── core/          host-neutral API, Adapters, Worker, Case Runner, Evidence and test fixture
+├── pi/            Pi Extension, tools, prompt, work mode and status UI
+└── maat/          standalone TUI, Agent, CLI and executable
 ```
+
+Future Codex, Claude Code or DeepSeek integrations are added as parallel Host packages depending
+on `maat-core`; Core never imports a Host SDK.
 
 The Worker is a killable process boundary with timeout, Abort, code/output limits and sensitive environment filtering. It is not an OS or container sandbox.
 
@@ -208,8 +221,9 @@ the installed CLI and Worker. This catches failures that do not reproduce from a
 ## npm releases
 
 Publishing is handled by `.github/workflows/publish.yml`. A non-prerelease GitHub Release whose
-tag exactly matches `v<package.json version>` runs formatting, type checking, all project tests,
-and an npm tarball inspection before publishing the public scoped package with provenance.
+tag exactly matches `v<workspace version>` runs formatting, type checking, all project tests, and
+three tarball installation checks before publishing Core → Pi Extension → standalone Maat with
+provenance.
 
 Publishing uses npm Trusted Publishing for repository `houlianpi/Maat`, workflow `publish.yml` and
 GitHub Environment `npm`. Do not add an `NPM_TOKEN`: a token overrides OIDC publishing and may
@@ -219,7 +233,7 @@ approval.
 Release sequence:
 
 ```bash
-npm version patch
+npm version 0.2.1 --workspaces --include-workspace-root
 git push origin main --follow-tags
 # Create the matching GitHub Release from the pushed vX.Y.Z tag.
 ```

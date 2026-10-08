@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createExplorationWorker } from '../src/core/exploration/worker-client.ts';
-import { parseObservations } from '../src/core/exploration/protocol.ts';
-import { findBrowserExecutable } from '../src/setup/browser-discovery.ts';
-import { createWebExplorationSession as launchJavaScriptSession } from '../src/platforms/web/exploration-session.ts';
+import { createExplorationWorker } from '../packages/core/src/core/exploration/worker-client.ts';
+import { parseObservations } from '../packages/core/src/core/exploration/protocol.ts';
+import { findBrowserExecutable } from '../packages/core/src/setup/browser-discovery.ts';
+import { createWebExplorationSession as launchJavaScriptSession } from '../packages/core/src/platforms/web/exploration-session.ts';
 
 async function launch(executionTimeoutMs = 5_000) {
   return launchJavaScriptSession({

@@ -1,6 +1,6 @@
 /** Case ID: verify-return-to-work-oct-08; @maat-adapters ios; Objective: verify the holiday ends October 7, 2026. */
 import { afterEach, beforeEach, describe, it } from 'mocha';
-import { createMaatTest, type MaatTest } from '@houlianpi/maat/test';
+import { createMaatTest, type MaatTest } from '@houlianpi/maat-core/test';
 describe('根据国庆假期核对10月8日返岗 @ios @calendar', () => {
   let maat: MaatTest;
   beforeEach(async () => {

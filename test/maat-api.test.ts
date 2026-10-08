@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { createMaat } from '../src/api/create-maat.ts';
+import { createMaat } from '../packages/core/src/api/create-maat.ts';
 
 test('MaatApi owns platform, Case, and lifecycle boundaries without a Pi session', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'maat-api-'));

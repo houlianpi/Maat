@@ -1,0 +1,47 @@
+{
+  "name": "@houlianpi/maat-pi",
+  "version": "0.2.0",
+  "description": "Maat extension for Pi coding-agent",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "ui-testing",
+    "playwright",
+    "appium"
+  ],
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/extension.js"
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "test": "node --experimental-strip-types --test ../../test/exec-js-tool.test.ts ../../test/pi-extension.test.ts ../../test/work-mode.test.ts"
+  },
+  "dependencies": {
+    "@houlianpi/maat-core": "0.2.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/houlianpi/Maat.git",
+    "directory": "packages/pi"
+  }
+}

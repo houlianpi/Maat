@@ -3,10 +3,10 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { resolveCaseSpec } from '../src/core/testing/case-selection.ts';
-import { buildSpecModel } from '../src/core/cases/spec-model.ts';
-import { renderSpec } from '../src/core/cases/spec-renderer.ts';
-import type { CaseDraft } from '../src/core/cases/types.ts';
+import { resolveCaseSpec } from '../packages/core/src/core/testing/case-selection.ts';
+import { buildSpecModel } from '../packages/core/src/core/cases/spec-model.ts';
+import { renderSpec } from '../packages/core/src/core/cases/spec-renderer.ts';
+import type { CaseDraft } from '../packages/core/src/core/cases/types.ts';
 
 test('unified renderer creates one Mocha Case with adapter steps', () => {
   const draft: CaseDraft = {
@@ -24,6 +24,7 @@ test('unified renderer creates one Mocha Case with adapter steps', () => {
     steps: [
       {
         number: 1,
+        name: 'Sample step',
         adapterId: 'web',
         bindings: ['page', 'expect'],
         code: "await expect(page.locator('h1')).toHaveText('Done');",
@@ -33,8 +34,8 @@ test('unified renderer creates one Mocha Case with adapter steps', () => {
     failures: [],
     evidence: [],
   };
-  const spec = renderSpec(buildSpecModel(draft), '../../src/hosts/test/fixture.ts');
-  assert.match(spec, /import \{ afterEach, beforeEach, describe, it \} from 'mocha'/);
+  const spec = renderSpec(buildSpecModel(draft), '@houlianpi/maat-core/test');
+  assert.match(spec, /afterEach, beforeEach, createMaatTest, describe, it/);
   assert.match(spec, /Case ID: sample-case/);
   assert.match(spec, /@suite:regression/);
   assert.match(spec, /createMaatTest/);
@@ -43,8 +44,8 @@ test('unified renderer creates one Mocha Case with adapter steps', () => {
   assert.match(spec, /afterEach\(async function/);
   assert.match(spec, /await maat\.teardown\(\{ passed:/);
   assert.doesNotMatch(spec, /try \{|finally \{|maat\.close/);
-  assert.match(spec, /\n    await maat\.step\("Recorded step 001"/);
-  assert.match(spec, /maat\.step\("Recorded step 001", "web"/);
+  assert.match(spec, /\n    await maat\.step\("Sample step"/);
+  assert.match(spec, /maat\.step\("Sample step", "web"/);
   assert.match(spec, /async \(\{ page, expect \}\)/);
 });
 
@@ -92,6 +93,7 @@ test('native renderer keeps the concrete App target out of reusable Case source'
     steps: [
       {
         number: 1,
+        name: 'Native step',
         adapterId: 'android',
         bindings: ['driver', 'app'],
         code: `await driver.$(app.resourceId('toolbar')).click();`,
@@ -102,7 +104,7 @@ test('native renderer keeps the concrete App target out of reusable Case source'
     evidence: [],
   };
 
-  const spec = renderSpec(buildSpecModel(draft), '@houlianpi/maat/test');
+  const spec = renderSpec(buildSpecModel(draft), '@houlianpi/maat-core/test');
   assert.match(spec, /"app": "runtime"/);
   assert.match(spec, /app\.resourceId\('toolbar'\)/);
   assert.doesNotMatch(spec, /com\.microsoft\.emmx/);

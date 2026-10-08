@@ -37,11 +37,13 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          PACKAGE_VERSION=$(node -p "require('./packages/core/package.json').version")
           test "$RELEASE_TAG" = "v$PACKAGE_VERSION" || {
             echo "Release tag $RELEASE_TAG must equal v$PACKAGE_VERSION" >&2
             exit 1
           }
+          test "$(node -p "require('./packages/pi/package.json').version")" = "$PACKAGE_VERSION"
+          test "$(node -p "require('./packages/maat/package.json').version")" = "$PACKAGE_VERSION"
 
       - name: Install dependencies
         run: npm ci
@@ -58,9 +60,11 @@ jobs:
       - name: Verify package contents
         run: npm run package:check
 
-      - name: Publish with provenance
-        env:
-          # Bootstrap only: add an npm environment secret for the first publish, then remove it
-          # after configuring npm Trusted Publishing for this workflow.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish
+      - name: Publish Core with provenance
+        run: npm publish --workspace @houlianpi/maat-core
+
+      - name: Publish Pi Extension with provenance
+        run: npm publish --workspace @houlianpi/maat-pi
+
+      - name: Publish standalone Maat with provenance
+        run: npm publish --workspace @houlianpi/maat

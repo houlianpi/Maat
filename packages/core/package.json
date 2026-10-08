@@ -1,0 +1,39 @@
+{
+  "name": "@houlianpi/maat-core",
+  "version": "0.2.0",
+  "description": "Host-neutral conversational UI verification core for Maat",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": "./dist/index.js",
+    "./test": "./dist/test/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "test": "node --experimental-strip-types --test ../../test/case-system.test.ts ../../test/javascript-session.test.ts ../../test/maat-api.test.ts ../../test/mixed-case.test.ts ../../test/platform-adapter.test.ts ../../test/playwright-spec-generator.test.ts"
+  },
+  "dependencies": {
+    "@wdio/globals": "9.31.3",
+    "@wdio/logger": "9.29.1",
+    "expect-webdriverio": "6.1.0",
+    "mocha": "10.8.2",
+    "playwright": "1.58.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "webdriverio": "9.32.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/houlianpi/Maat.git",
+    "directory": "packages/core"
+  }
+}

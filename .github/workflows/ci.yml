@@ -53,6 +53,11 @@ jobs:
       - name: Verify npm package
         run: npm run package:check
 
+      - name: Verify dependency boundaries
+        run: |
+          test -z "$(rg '@earendil-works/pi' packages/core/src || true)"
+          test "$(node -p "require('./packages/pi/package.json').peerDependencies['@earendil-works/pi-coding-agent']")" = "*"
+
       - name: Maat smoke suite
         run: npm run maat:test -- --project web --suite smoke --browser chromium --workers 2
 

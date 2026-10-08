@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import maatPiExtension from '../src/hosts/pi/extension.ts';
+import maatPiExtension from '../packages/pi/src/extension.ts';
 
 test('Pi Extension registers the complete Maat tool surface and lifecycle', () => {
   const tools: string[] = [];
@@ -26,6 +26,9 @@ test('Pi Extension registers the complete Maat tool surface and lifecycle', () =
   for (const name of [
     'exe_js',
     'begin_case',
+    'list_case_steps',
+    'remove_case_step',
+    'replace_case_step',
     'save_case',
     'list_evidence',
     'select_platform',

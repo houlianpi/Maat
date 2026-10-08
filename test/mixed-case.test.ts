@@ -3,8 +3,8 @@ import { createServer } from 'node:http';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
-import { CaseDraftManager } from '../src/core/cases/draft-manager.ts';
-import { saveCase } from '../src/core/cases/save-case.ts';
+import { CaseDraftManager } from '../packages/core/src/core/cases/draft-manager.ts';
+import { saveCase } from '../packages/core/src/core/cases/save-case.ts';
 
 async function mockAppium() {
   let creations = 0;
@@ -59,6 +59,7 @@ test('one Mocha Case reuses Web around an Appium step', async () => {
     draft.steps.push(
       {
         number: 1,
+        name: 'Open web',
         adapterId: 'web',
         bindings: ['page'],
         observations: [],
@@ -66,6 +67,7 @@ test('one Mocha Case reuses Web around an Appium step', async () => {
       },
       {
         number: 2,
+        name: 'Verify native',
         adapterId: 'android',
         bindings: ['driver', 'expect'],
         observations: [],
@@ -73,6 +75,7 @@ test('one Mocha Case reuses Web around an Appium step', async () => {
       },
       {
         number: 3,
+        name: 'Verify web',
         adapterId: 'web',
         bindings: ['page', 'expect'],
         observations: [],
@@ -85,9 +88,9 @@ test('one Mocha Case reuses Web around an Appium step', async () => {
     ];
     const saved = await saveCase(draft, root);
     const source = await readFile(saved.testPath, 'utf8');
-    assert.match(source, /maat\.step\("Recorded step 001", "web"/);
-    assert.match(source, /maat\.step\("Recorded step 002", "android"/);
-    assert.match(source, /maat\.step\("Recorded step 003", "web"/);
+    assert.match(source, /maat\.step\("Open web", "web"/);
+    assert.match(source, /maat\.step\("Verify native", "android"/);
+    assert.match(source, /maat\.step\("Verify web", "web"/);
     assert.equal(appium.creations(), 1);
   } finally {
     if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;

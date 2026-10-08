@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { CaseDraftManager } from '../src/core/cases/draft-manager.ts';
-import { saveCase } from '../src/core/cases/save-case.ts';
-import { runMaatTests } from '../src/core/testing/runner.ts';
+import { CaseDraftManager } from '../packages/core/src/core/cases/draft-manager.ts';
+import { saveCase } from '../packages/core/src/core/cases/save-case.ts';
+import { runMaatTests } from '../packages/core/src/core/testing/runner.ts';
 
 const testArtifacts = path.resolve('artifacts/test-cases');
 async function createRoot() {
@@ -75,6 +76,60 @@ test('Case stores exploration Evidence and failed Attempts outside source', asyn
   }
 });
 
+test('Case candidate steps can be listed, replaced, removed, and renumbered', async () => {
+  const root = await createRoot();
+  const cases = new CaseDraftManager();
+  try {
+    cases.begin({
+      id: 'managed-steps',
+      name: 'Managed steps',
+      description: 'Manage candidates',
+      objectives: ['Done'],
+      rootDirectory: root,
+    });
+    await cases.recordSuccessfulStep(
+      'void page;',
+      [{ type: 'text', text: 'web' }],
+      {
+        adapterId: 'web',
+        bindings: ['page'],
+        requirement: { adapterId: 'web' },
+      },
+      'Explore web',
+    );
+    await cases.recordSuccessfulStep(
+      'void driver;',
+      [{ type: 'text', text: 'native' }],
+      {
+        adapterId: 'macos',
+        bindings: ['driver'],
+        requirement: { adapterId: 'macos' },
+      },
+      'Verify native',
+    );
+    cases.replaceStep(2, { name: 'Confirm native', code: 'void browser;' });
+    assert.deepEqual(
+      cases.listSteps().map(({ number, name, code }) => ({ number, name, code })),
+      [
+        { number: 1, name: 'Explore web', code: 'void page;' },
+        { number: 2, name: 'Confirm native', code: 'void browser;' },
+      ],
+    );
+    cases.removeStep(1);
+    assert.deepEqual(
+      cases.listSteps().map(({ number, name }) => ({ number, name })),
+      [{ number: 1, name: 'Confirm native' }],
+    );
+    assert.deepEqual(cases.current?.requirements, [{ adapterId: 'macos' }]);
+    assert.equal(cases.current?.evidence.length, 1);
+    assert.equal(cases.current?.evidence[0]?.stepNumber, 1);
+    assert.throws(() => cases.replaceStep(1, {}), /requires name and\/or code/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(path.resolve('artifacts/cases/managed-steps'), { recursive: true, force: true });
+  }
+});
+
 test('clean validation failure prevents Case promotion', async () => {
   const root = await createRoot();
   const cases = new CaseDraftManager();
@@ -99,5 +154,44 @@ test('clean validation failure prevents Case promotion', async () => {
     await assert.rejects(readFile(path.join(root, 'cases/failing-case.spec.ts')), /ENOENT/);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Case saves and reruns from an empty project without local dependencies', async () => {
+  const workspace = await mkdtemp(path.join(tmpdir(), 'maat-empty-project-'));
+  const root = path.join(workspace, 'maat-tests', 'web');
+  const cases = new CaseDraftManager();
+  try {
+    const draft = cases.begin({
+      id: 'empty-project',
+      name: 'Empty project',
+      description: 'Runs without project dependencies',
+      objectives: ['Result is visible'],
+      rootDirectory: root,
+    });
+    await cases.recordSuccessfulStep(
+      `await page.setContent('<h1>Ready</h1>'); await expect(page.locator('h1')).toHaveText('Ready');`,
+      [],
+      {
+        adapterId: 'web',
+        bindings: ['page', 'expect'],
+        requirement: { adapterId: 'web', setup: { browser: 'chromium', headless: true } },
+      },
+      'Verify ready',
+    );
+    const saved = await saveCase(draft, root);
+    assert.match(await readFile(saved.testPath, 'utf8'), /@houlianpi\/maat-core\/test/);
+    assert.equal(
+      (
+        await runMaatTests(root, { mode: 'case', value: 'empty-project' }, undefined, undefined, {
+          browser: 'chromium',
+          workspaceRoot: workspace,
+        })
+      ).exitCode,
+      0,
+    );
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+    await rm(path.resolve('artifacts/cases/empty-project'), { recursive: true, force: true });
   }
 });

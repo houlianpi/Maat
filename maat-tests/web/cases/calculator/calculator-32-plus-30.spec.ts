@@ -1,6 +1,6 @@
 /** Case ID: calculator-32-plus-30; @maat-adapters web; Objective: 32 + 30 = 62. */
 import { afterEach, beforeEach, describe, it } from 'mocha';
-import { createMaatTest, type MaatTest } from '@houlianpi/maat/test';
+import { createMaatTest, type MaatTest } from '@houlianpi/maat-core/test';
 describe('计算器验证 32 + 30 = 62 @calculator @smoke @suite:smoke', () => {
   let maat: MaatTest;
   beforeEach(async () => {

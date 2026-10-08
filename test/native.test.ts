@@ -4,18 +4,27 @@ import { createServer } from 'node:http';
 import { mkdtemp, mkdir, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { startNativeSession } from '../src/platforms/appium/runtime/session.ts';
-import { capabilities, connection, splitCapabilities } from '../src/platforms/appium/schema.ts';
-import { matchDevices, parseAndroidDevices, parseIosDevices } from '../src/setup/devices.ts';
-import { CaseDraftManager } from '../src/core/cases/draft-manager.ts';
-import { MaatApi } from '../src/api/maat-api.ts';
-import { adapterRoot as platformRoot, casePath } from '../src/core/cases/paths.ts';
-import { createPlatformTools } from '../src/tools/platform-tools.ts';
-import { createCaseTools } from '../src/tools/case-tools.ts';
-import { createMaatResourceOptions } from '../src/hosts/tui/runtime-config.ts';
-import { AppiumPlatformAdapter } from '../src/platforms/appium/appium-adapter.ts';
-import { createDefaultPlatformRegistry } from '../src/platforms/default-registry.ts';
-import { createAppiumTestSession } from '../src/platforms/appium/test-session.ts';
+import { startNativeSession } from '../packages/core/src/platforms/appium/runtime/session.ts';
+import {
+  capabilities,
+  connection,
+  splitCapabilities,
+} from '../packages/core/src/platforms/appium/schema.ts';
+import {
+  matchDevices,
+  parseAndroidDevices,
+  parseIosDevices,
+} from '../packages/core/src/setup/devices.ts';
+import { CaseDraftManager } from '../packages/core/src/core/cases/draft-manager.ts';
+import { MaatApi } from '../packages/core/src/api/maat-api.ts';
+import { adapterRoot as platformRoot, casePath } from '../packages/core/src/core/cases/paths.ts';
+import { createPlatformTools } from '../packages/pi/src/tools/platform-tools.ts';
+import { createCaseTools } from '../packages/pi/src/tools/case-tools.ts';
+import { createMaatResourceOptions } from '../packages/maat/src/hosts/tui/runtime-config.ts';
+import { AppiumPlatformAdapter } from '../packages/core/src/platforms/appium/appium-adapter.ts';
+import { createDefaultPlatformRegistry } from '../packages/core/src/platforms/default-registry.ts';
+import { createAppiumTestSession } from '../packages/core/src/platforms/appium/test-session.ts';
+import { takeAppiumScreenshot } from '../packages/core/src/platforms/appium/screenshot.ts';
 
 async function mockAppium() {
   let deletes = 0;
@@ -204,6 +213,26 @@ test('macOS App target relies on Session capabilities instead of unsupported app
   assert.equal(mock.deleted(), 1);
 });
 
+test('macOS screenshots use the Mac2 display extension and reject empty results', async () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
+  const calls: Array<[string, unknown]> = [];
+  const driver = {
+    async execute(name: string, input: unknown) {
+      calls.push([name, input]);
+      return { '42': { id: 42, isMain: true, payload: png } };
+    },
+  } as never;
+  assert.deepEqual(await takeAppiumScreenshot(driver, 'macos'), {
+    data: png,
+    mimeType: 'image/png',
+  });
+  assert.deepEqual(calls, [['macos: screenshots', {}]]);
+  await assert.rejects(
+    takeAppiumScreenshot({ execute: async () => ({}) } as never, 'macos'),
+    /Grant Screen Recording permission/,
+  );
+});
+
 test('WDIO worker executes TypeScript and assertions, owns only its remote session', async () => {
   const mock = await mockAppium();
   const session = await startNativeSession({
@@ -320,6 +349,7 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
     });
     draft.steps.push({
       number: 2,
+      name: 'Failing assertion',
       adapterId: 'android',
       bindings: ['expect'],
       observations: [],

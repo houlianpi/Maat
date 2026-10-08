@@ -18,7 +18,7 @@
  */
 
 import { afterEach, beforeEach, describe, it } from 'mocha';
-import { createMaatTest, type MaatTest } from '@houlianpi/maat/test';
+import { createMaatTest, type MaatTest } from '@houlianpi/maat-core/test';
 
 describe('Exit browser with confirmation - Cancel option @p0 @edge @android @suite:p0', () => {
   let maat: MaatTest;

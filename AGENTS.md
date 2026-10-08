@@ -5,22 +5,18 @@ Maat is a TypeScript project for conversational UI verification. Exploration use
 ## Project structure
 
 ```text
-src/
-  core/         Framework-agnostic Case, exploration, platform contracts, runner, SessionPool, Evidence
-  platforms/    Web, Android, iOS, macOS and shared Appium implementations
-  hosts/        Pi noninteractive Agent, Pi TUI, and formal Mocha test host
-  tools/        Agent-facing Case, platform, and JavaScript tools
-  setup/        Optional browser/device/application discovery
-  cli/          Thin command entry points; parsing and exit codes only
+packages/
+  core/         Host-neutral API, Case, Workers, Adapters, Runner, SessionPool and Evidence
+  pi/           Pi Extension, tools, prompt, work mode and status UI
+  maat/         Standalone Pi-backed Agent/TUI and thin CLI executable
 examples/      Small, manually runnable demonstrations
 test/          Automated tests, mirroring the source domains
 artifacts/     Generated screenshots and run records; never source code
-bin/           Thin package executables; dispatch only, with no business logic
 ```
 
 - Organize by runtime responsibility, not by generic categories such as `utils` or `types`.
 - Do not create a directory until code for that responsibility exists.
-- Dependencies point inward: `cli/hosts/tools/platforms -> core`. Core never imports Hosts or concrete Platforms. Setup may depend on platform schemas but never on Hosts.
+- Dependencies point inward: Host packages and standalone Maat depend on `maat-core`; Core never imports a Host SDK. Future Host integrations are parallel workspace packages.
 - Avoid barrel `index.ts` files while modules are few. Import the defining module directly.
 
 ## TypeScript conventions

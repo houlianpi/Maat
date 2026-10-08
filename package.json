@@ -1,78 +1,32 @@
 {
-  "name": "@houlianpi/maat",
-  "version": "0.1.4",
-  "description": "Conversational UI verification for Pi, Playwright, and Appium",
-  "license": "MIT",
-  "keywords": [
-    "pi-package",
-    "ui-testing",
-    "playwright",
-    "appium"
-  ],
-  "files": [
-    "bin",
-    "dist",
-    "docs",
-    "README.md",
-    "README.zh-CN.md",
-    "AGENTS.md"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/houlianpi/Maat.git"
-  },
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
+  "name": "maat-monorepo",
+  "version": "0.2.0",
+  "private": true,
   "type": "module",
-  "bin": {
-    "maat": "bin/maat.mjs"
-  },
-  "exports": {
-    ".": "./dist/api/create-maat.js",
-    "./api": "./dist/api/maat-api.js",
-    "./pi": "./dist/hosts/pi/extension.js",
-    "./test": "./dist/hosts/test/fixture.js"
-  },
-  "pi": {
-    "extensions": [
-      "./dist/hosts/pi/extension.js"
-    ]
-  },
+  "workspaces": [
+    "packages/core",
+    "packages/pi",
+    "packages/maat"
+  ],
   "scripts": {
-    "agent": "node --experimental-strip-types src/cli/agent.ts",
-    "build": "tsc -p tsconfig.build.json",
-    "cases": "node --experimental-strip-types src/cli/cases.ts",
+    "agent": "node --experimental-strip-types packages/maat/src/cli/agent.ts",
+    "build": "npm run build --workspace @houlianpi/maat-core && npm run build --workspace @houlianpi/maat-pi && npm run build --workspace @houlianpi/maat",
+    "cases": "node --experimental-strip-types packages/maat/src/cli/cases.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "maat:test": "node --experimental-strip-types src/cli/cases.ts",
+    "maat:test": "node --experimental-strip-types packages/maat/src/cli/cases.ts",
     "package:check": "node --experimental-strip-types scripts/check-package.ts",
-    "prepack": "npm run build",
     "replay": "node --experimental-strip-types",
     "test": "node --experimental-strip-types --test test/*.test.ts",
-    "tui": "node --experimental-strip-types src/hosts/tui/main.ts",
+    "test:workspaces": "npm test --workspace @houlianpi/maat-core && npm test --workspace @houlianpi/maat-pi && npm test --workspace @houlianpi/maat",
+    "tui": "node --experimental-strip-types packages/maat/src/hosts/tui/main.ts",
     "typecheck": "npm run build && tsc --noEmit"
-  },
-  "dependencies": {
-    "@wdio/globals": "9.31.3",
-    "@wdio/logger": "9.29.1",
-    "expect-webdriverio": "6.1.0",
-    "mocha": "10.8.2",
-    "playwright": "1.58.2",
-    "typescript": "5.9.3",
-    "tsx": "4.23.15",
-    "webdriverio": "9.32.0"
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-agent-core": "*",
-    "@earendil-works/pi-ai": "*",
-    "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.87.0",
     "@types/mocha": "10.0.10",
     "@types/node": "^24.0.0",
-    "prettier": "3.6.2"
+    "prettier": "3.6.2",
+    "typescript": "5.9.3"
   }
 }

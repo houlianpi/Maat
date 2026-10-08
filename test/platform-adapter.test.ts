@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { PlatformAdapter } from '../src/core/platforms/contracts.ts';
-import { PlatformRegistry } from '../src/core/platforms/registry.ts';
+import type { PlatformAdapter } from '../packages/core/src/core/platforms/contracts.ts';
+import { PlatformRegistry } from '../packages/core/src/core/platforms/registry.ts';
 import {
   resolveAppiumSession,
   SessionSetupError,
   type SessionResolverDependencies,
-} from '../src/platforms/appium/session-resolver.ts';
-import { renderSpec } from '../src/core/cases/spec-renderer.ts';
-import { buildSpecModel } from '../src/core/cases/spec-model.ts';
-import { CaseDraftManager } from '../src/core/cases/draft-manager.ts';
+} from '../packages/core/src/platforms/appium/session-resolver.ts';
+import { renderSpec } from '../packages/core/src/core/cases/spec-renderer.ts';
+import { buildSpecModel } from '../packages/core/src/core/cases/spec-model.ts';
+import { CaseDraftManager } from '../packages/core/src/core/cases/draft-manager.ts';
 
 function adapter(id: string, events: string[]): PlatformAdapter {
   return {
@@ -99,8 +99,22 @@ test('spec metadata identifies every Adapter used by a mixed Case', () => {
     objectives: ['Done'],
   });
   draft.steps.push(
-    { number: 1, adapterId: 'web', bindings: ['page'], code: 'void page;', observations: [] },
-    { number: 2, adapterId: 'macos', bindings: ['driver'], code: 'void driver;', observations: [] },
+    {
+      name: 'Web',
+      number: 1,
+      adapterId: 'web',
+      bindings: ['page'],
+      code: 'void page;',
+      observations: [],
+    },
+    {
+      name: 'macOS',
+      number: 2,
+      adapterId: 'macos',
+      bindings: ['driver'],
+      code: 'void driver;',
+      observations: [],
+    },
   );
   assert.match(renderSpec(buildSpecModel(draft), './fixture.ts'), /@maat-adapters web macos/);
 });
