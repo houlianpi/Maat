@@ -170,7 +170,7 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
       ['--no-extensions', '--extension', piRoot, '--help'],
       { encoding: 'utf8', env: { ...process.env, NODE_PATH: modules } },
     );
-    assert.match(piHelp, /pi - AI coding assistant/);
+    assert.match(piHelp.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, ''), /pi - AI coding assistant/);
     const piRun = spawnSync(
       piExecutable,
       [
@@ -184,7 +184,10 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
         '-p',
         'Reply OK',
       ],
-      { encoding: 'utf8', env: { ...process.env, NODE_PATH: modules } },
+      {
+        encoding: 'utf8',
+        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', NODE_PATH: modules },
+      },
     );
     assert.equal(piRun.status, 0, piRun.stderr);
     assert.doesNotMatch(piRun.stderr, /Host-provided extension packages must be declared/);
