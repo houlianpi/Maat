@@ -169,4 +169,23 @@ npm test
 maat test --suite smoke --browser chromium
 ```
 
+## npm releases
+
+Publishing is handled by `.github/workflows/publish.yml`. A non-prerelease GitHub Release whose
+tag exactly matches `v<package.json version>` runs formatting, type checking, all project tests,
+and an npm tarball inspection before publishing the public scoped package with provenance.
+
+For the first publication of `@houlianpi/maat`, create the `npm` GitHub Environment and add a
+short-lived granular `NPM_TOKEN` secret with publish access. After the package exists, configure
+npm Trusted Publishing for repository `houlianpi/Maat` and workflow `publish.yml`, then remove the
+secret. Keep required reviewers on the `npm` Environment if releases need approval.
+
+Release sequence:
+
+```bash
+npm version patch
+git push origin main --follow-tags
+# Create the matching GitHub Release from the pushed vX.Y.Z tag.
+```
+
 The current dependency audit reports 16 high-severity transitive advisories. They are not suppressed or force-upgraded; review upstream fixes before production distribution.

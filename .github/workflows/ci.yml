@@ -50,6 +50,9 @@ jobs:
       - name: Project tests
         run: npm test
 
+      - name: Verify npm package
+        run: npm run package:check
+
       - name: Maat smoke suite
         run: npm run maat:test -- --project web --suite smoke --browser chromium --workers 2
 

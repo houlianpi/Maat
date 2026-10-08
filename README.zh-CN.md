@@ -144,4 +144,23 @@ npm test
 maat test --suite smoke --browser chromium
 ```
 
+## npm 发布
+
+发布由 `.github/workflows/publish.yml` 完成。创建非预发布 GitHub Release，且标签严格等于
+`v<package.json version>` 后，流水线会先执行格式检查、类型检查、全部项目测试和 npm
+tarball 内容检查，再以公开 scoped package 和 provenance 的方式发布。
+
+首次发布 `@houlianpi/maat` 时，在 GitHub 创建 `npm` Environment，并临时配置具有发布权限的
+granular `NPM_TOKEN` secret。包创建成功后，在 npm 为仓库 `houlianpi/Maat`、工作流
+`publish.yml` 配置 Trusted Publishing，然后删除该 secret。需要人工批准发布时，可给 `npm`
+Environment 配置 required reviewers。
+
+发布流程：
+
+```bash
+npm version patch
+git push origin main --follow-tags
+# 使用推送的 vX.Y.Z 标签创建对应 GitHub Release。
+```
+
 当前依赖审计仍报告 16 个高危传递依赖。未隐藏审计结果，也未使用强制升级；生产分发前需要跟进上游修复。

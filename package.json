@@ -21,6 +21,10 @@
     "type": "git",
     "url": "git+https://github.com/houlianpi/Maat.git"
   },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "type": "module",
   "bin": {
     "maat": "./bin/maat.mjs"
@@ -42,6 +46,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "maat:test": "node --experimental-strip-types src/cli/cases.ts",
+    "package:check": "node --experimental-strip-types scripts/check-package.ts",
     "replay": "node --experimental-strip-types",
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "tui": "node --experimental-strip-types src/hosts/tui/main.ts",
