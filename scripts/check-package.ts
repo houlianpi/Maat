@@ -75,7 +75,6 @@ try {
         installation,
         '--ignore-scripts',
         '--legacy-peer-deps',
-        '--offline',
         path.resolve(packed.filename),
       ],
       { stdio: 'pipe' },
