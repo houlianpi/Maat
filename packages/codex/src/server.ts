@@ -5,6 +5,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { fileURLToPath } from 'node:url';
 
 import { CodexMaatRuntime, type CodexMaatRuntimeOptions } from './runtime.ts';
+import { registerDashboard } from './dashboard.ts';
 import { registerCaseTools } from './tools/case-tools.ts';
 import { registerExplorationTools } from './tools/exploration-tools.ts';
 import { registerPlatformTools } from './tools/platform-tools.ts';
@@ -25,6 +26,7 @@ export function createMaatCodexServer(options: CodexMaatRuntimeOptions = {}) {
   registerExplorationTools(server, runtime);
   registerCaseTools(server, runtime);
   registerTestTools(server, runtime);
+  registerDashboard(server, runtime);
   return { server, runtime };
 }
 

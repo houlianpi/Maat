@@ -21,6 +21,7 @@ for (const entry of [
   '.mcp.json',
   'skills',
   'assets',
+  'ui',
   'README.md',
 ]) {
   await cp(path.join(codexRoot, entry), path.join(destination, entry), { recursive: true });

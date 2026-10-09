@@ -291,6 +291,11 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
     assert.ok(
       (await readFile(path.join(codexRoot, 'mcp.json'), 'utf8')).includes('dist/server.js'),
     );
+    assert.ok(
+      (await readFile(path.join(codexRoot, 'ui', 'dashboard.html'), 'utf8')).includes(
+        'Maat Dashboard',
+      ),
+    );
     for (const skill of ['maat-setup', 'maat-case-builder', 'maat-test-runner']) {
       assert.ok(
         (await readFile(path.join(codexRoot, 'skills', skill, 'SKILL.md'), 'utf8')).startsWith(

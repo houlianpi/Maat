@@ -7,6 +7,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
 import { createMaatCodexServer } from '../packages/codex/src/server.ts';
+import { dashboardUri } from '../packages/codex/src/dashboard.ts';
+import { dashboardEvidence } from '../packages/codex/src/dashboard-state.ts';
 
 test('Codex plugin manifests expose Skills and local stdio tools', async () => {
   const root = path.resolve(import.meta.dirname, '../packages/codex');
@@ -49,6 +51,7 @@ test('Codex Tool Server exposes a persistent Maat workflow', async () => {
       'maat_save_case',
       'maat_run_tests',
       'maat_show_evidence',
+      'maat_open_dashboard',
     ]) {
       assert.ok(names.has(name), `${name} was not registered`);
     }
@@ -66,6 +69,16 @@ test('Codex Tool Server exposes a persistent Maat workflow', async () => {
     });
     const status = await client.callTool({ name: 'maat_get_case_status', arguments: {} });
     assert.equal((status.structuredContent as { id?: string }).id, 'codex-smoke');
+
+    const resources = await client.listResources();
+    assert.ok(resources.resources.some((resource) => resource.uri === dashboardUri));
+    const dashboard = await client.readResource({ uri: dashboardUri });
+    assert.match((dashboard.contents[0] as { text?: string }).text ?? '', /Maat Dashboard/);
+    const rendered = await client.callTool({ name: 'maat_open_dashboard', arguments: {} });
+    assert.equal(
+      (rendered.structuredContent as { case?: { id?: string } }).case?.id,
+      'codex-smoke',
+    );
   } finally {
     await client.close();
     await runtime.close();
@@ -84,6 +97,33 @@ test('Codex request metadata relocates Maat from the plugin cache to the user wo
     });
     assert.equal(runtime.workspaceRoot, workspace);
     assert.equal(runtime.maat.platforms.current().root, path.join(workspace, 'maat-tests/web'));
+  } finally {
+    await runtime.close();
+    await server.close();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test('Dashboard Evidence preview rejects paths outside the active workspace', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const workspace = await mkdtemp(path.join(tmpdir(), 'maat-dashboard-workspace-'));
+  const { server, runtime } = createMaatCodexServer({ workspaceRoot: workspace });
+  try {
+    const draft = runtime.maat.cases.begin({
+      id: 'dashboard-evidence',
+      name: 'Dashboard Evidence',
+      description: 'Preview safety',
+      objectives: ['Evidence stays in workspace'],
+    });
+    draft.evidence.push({
+      id: 'outside',
+      stepNumber: 1,
+      type: 'image',
+      mimeType: 'image/png',
+      path: '/tmp/outside.png',
+    });
+    await assert.rejects(dashboardEvidence(runtime, 'outside'), /outside the active workspace/);
   } finally {
     await runtime.close();
     await server.close();
