@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import type { CodexMaatRuntime } from '../runtime.ts';
 import { jsonResult } from '../result.ts';
+import { bindMaatRequest } from '../request.ts';
 
 const optionalCapabilities = z.enum(['screenCapture', 'videoRecording', 'fullDiskAccess']);
 
@@ -15,14 +16,16 @@ export function registerSetupTools(server: McpServer, runtime: CodexMaatRuntime)
       inputSchema: { platform: z.string().optional(), serverUrl: z.string().url().optional() },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
-    async ({ platform, serverUrl }, extra) =>
-      jsonResult(
+    async ({ platform, serverUrl }, extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(
         await runtime.maat.setup.check({
           platform: platform ?? runtime.maat.platforms.current().id,
           serverUrl,
           signal: extra.signal,
         }),
-      ),
+      );
+    },
   );
 
   server.registerTool(
@@ -32,7 +35,10 @@ export function registerSetupTools(server: McpServer, runtime: CodexMaatRuntime)
       description: 'Return redacted technical setup diagnostics for the current platform.',
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
-    async () => jsonResult(runtime.maat.setup.current()),
+    async (extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(runtime.maat.setup.current());
+    },
   );
 
   server.registerTool(
@@ -44,12 +50,14 @@ export function registerSetupTools(server: McpServer, runtime: CodexMaatRuntime)
       inputSchema: { actionId: z.string().optional() },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ actionId }) =>
-      jsonResult(
+    async ({ actionId }, extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(
         await runtime.maat.setup.action(
           actionId as Parameters<typeof runtime.maat.setup.action>[0],
         ),
-      ),
+      );
+    },
   );
 
   server.registerTool(
@@ -59,13 +67,15 @@ export function registerSetupTools(server: McpServer, runtime: CodexMaatRuntime)
       description: 'Recheck setup after the user completes the requested system action.',
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
-    async (extra) =>
-      jsonResult(
+    async (extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(
         await runtime.maat.setup.check({
           platform: runtime.maat.platforms.current().id,
           signal: extra.signal,
         }),
-      ),
+      );
+    },
   );
 
   server.registerTool(
@@ -77,6 +87,9 @@ export function registerSetupTools(server: McpServer, runtime: CodexMaatRuntime)
       inputSchema: { capability: optionalCapabilities },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ capability }) => jsonResult(await runtime.maat.setup.skip(capability)),
+    async ({ capability }, extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(await runtime.maat.setup.skip(capability));
+    },
   );
 }

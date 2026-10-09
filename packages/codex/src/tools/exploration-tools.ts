@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 import type { CodexMaatRuntime } from '../runtime.ts';
+import { bindMaatRequest } from '../request.ts';
 
 export function registerExplorationTools(server: McpServer, runtime: CodexMaatRuntime): void {
   server.registerTool(
@@ -12,12 +13,15 @@ export function registerExplorationTools(server: McpServer, runtime: CodexMaatRu
         'Return the globals and guidelines available to JavaScript on the active adapter.',
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async () => ({
-      structuredContent: runtime.maat.exploration.context(),
-      content: [
-        { type: 'text', text: JSON.stringify(runtime.maat.exploration.context(), null, 2) },
-      ],
-    }),
+    async (extra) => {
+      await bindMaatRequest(runtime, extra);
+      return {
+        structuredContent: runtime.maat.exploration.context(),
+        content: [
+          { type: 'text', text: JSON.stringify(runtime.maat.exploration.context(), null, 2) },
+        ],
+      };
+    },
   );
 
   server.registerTool(
@@ -37,6 +41,7 @@ export function registerExplorationTools(server: McpServer, runtime: CodexMaatRu
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
     async ({ code, record, stepName }, extra) => {
+      await bindMaatRequest(runtime, extra);
       if (record && !stepName?.trim()) throw new Error('stepName is required when record=true.');
       const observations = await runtime.maat.exploration.executeJavaScript(code, extra.signal);
       if (record) {
@@ -62,7 +67,8 @@ export function registerExplorationTools(server: McpServer, runtime: CodexMaatRu
         'Close the active persistent exploration Session without closing external servers.',
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
-    async () => {
+    async (extra) => {
+      await bindMaatRequest(runtime, extra);
       await runtime.maat.platforms.current().close();
       return { content: [{ type: 'text', text: 'Exploration Session closed.' }] };
     },

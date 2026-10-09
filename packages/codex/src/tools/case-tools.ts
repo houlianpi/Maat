@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import type { CodexMaatRuntime } from '../runtime.ts';
 import { jsonResult } from '../result.ts';
+import { bindMaatRequest } from '../request.ts';
 
 export function registerCaseTools(server: McpServer, runtime: CodexMaatRuntime): void {
   server.registerTool(
@@ -27,7 +28,10 @@ export function registerCaseTools(server: McpServer, runtime: CodexMaatRuntime):
       },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async (input) => jsonResult(runtime.maat.cases.begin(input)),
+    async (input, extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(runtime.maat.cases.begin(input));
+    },
   );
 
   server.registerTool(
@@ -38,7 +42,10 @@ export function registerCaseTools(server: McpServer, runtime: CodexMaatRuntime):
         'Return the active Case objectives, recorded steps, failed attempts, and Evidence.',
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async () => jsonResult(runtime.maat.cases.status()),
+    async (extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(runtime.maat.cases.status());
+    },
   );
 
   server.registerTool(
@@ -48,7 +55,10 @@ export function registerCaseTools(server: McpServer, runtime: CodexMaatRuntime):
       description: 'List formal candidate steps recorded for the active Case.',
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async () => jsonResult(runtime.maat.cases.listSteps()),
+    async (extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(runtime.maat.cases.listSteps());
+    },
   );
 
   server.registerTool(
@@ -59,7 +69,8 @@ export function registerCaseTools(server: McpServer, runtime: CodexMaatRuntime):
       inputSchema: { number: z.number().int().min(1) },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
-    async ({ number }) => {
+    async ({ number }, extra) => {
+      await bindMaatRequest(runtime, extra);
       runtime.maat.cases.removeStep(number);
       return jsonResult(runtime.maat.cases.listSteps());
     },
@@ -77,7 +88,8 @@ export function registerCaseTools(server: McpServer, runtime: CodexMaatRuntime):
       },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
-    async ({ number, name, code }) => {
+    async ({ number, name, code }, extra) => {
+      await bindMaatRequest(runtime, extra);
       runtime.maat.cases.replaceStep(number, { name, code });
       return jsonResult(runtime.maat.cases.listSteps());
     },
@@ -91,7 +103,10 @@ export function registerCaseTools(server: McpServer, runtime: CodexMaatRuntime):
         'Validate the complete Case in fresh Sessions and save an executable Mocha TypeScript spec. Failed validation does not save.',
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
-    async (extra) => jsonResult(await runtime.maat.cases.save(extra.signal)),
+    async (extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(await runtime.maat.cases.save(extra.signal));
+    },
   );
 
   server.registerTool(
@@ -101,7 +116,8 @@ export function registerCaseTools(server: McpServer, runtime: CodexMaatRuntime):
       description: 'Discard the active unsaved Case draft. Does not delete saved Cases.',
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
     },
-    async () => {
+    async (extra) => {
+      await bindMaatRequest(runtime, extra);
       runtime.maat.cases.clear();
       return { content: [{ type: 'text', text: 'Active Case draft discarded.' }] };
     },
@@ -114,7 +130,10 @@ export function registerCaseTools(server: McpServer, runtime: CodexMaatRuntime):
       description: 'List text and screenshot Evidence captured for the active Case.',
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async () => jsonResult(runtime.maat.evidence.list()),
+    async (extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(runtime.maat.evidence.list());
+    },
   );
 
   server.registerTool(
@@ -125,7 +144,8 @@ export function registerCaseTools(server: McpServer, runtime: CodexMaatRuntime):
       inputSchema: { id: z.string().min(1) },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async ({ id }) => {
+    async ({ id }, extra) => {
+      await bindMaatRequest(runtime, extra);
       const evidence = runtime.maat.evidence.get(id);
       if (!evidence) throw new Error(`Unknown Evidence id: ${id}`);
       if (evidence.type === 'text') {

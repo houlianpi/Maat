@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import type { CodexMaatRuntime } from '../runtime.ts';
 import { jsonResult, textResult } from '../result.ts';
+import { bindMaatRequest } from '../request.ts';
 
 export function registerPlatformTools(server: McpServer, runtime: CodexMaatRuntime): void {
   server.registerTool(
@@ -13,14 +14,16 @@ export function registerPlatformTools(server: McpServer, runtime: CodexMaatRunti
       description: 'List Maat UI platform adapters and the JavaScript globals each exposes.',
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async () =>
-      jsonResult(
+    async (extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(
         runtime.maat.platforms.list().map((adapter) => ({
           id: adapter.id,
           label: adapter.label,
           codeContext: adapter.codeContext,
         })),
-      ),
+      );
+    },
   );
 
   server.registerTool(
@@ -31,7 +34,10 @@ export function registerPlatformTools(server: McpServer, runtime: CodexMaatRunti
       inputSchema: { platform: z.string().min(1) },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ platform }) => jsonResult(await runtime.maat.platforms.select(platform)),
+    async ({ platform }, extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(await runtime.maat.platforms.select(platform));
+    },
   );
 
   server.registerTool(
@@ -41,7 +47,10 @@ export function registerPlatformTools(server: McpServer, runtime: CodexMaatRunti
       description: 'Return the selected platform and persistent exploration Session state.',
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async () => jsonResult(runtime.maat.platforms.status()),
+    async (extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(runtime.maat.platforms.status());
+    },
   );
 
   server.registerTool(
@@ -56,7 +65,10 @@ export function registerPlatformTools(server: McpServer, runtime: CodexMaatRunti
       },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async (input) => jsonResult(await runtime.maat.platforms.configure(input)),
+    async (input, extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(await runtime.maat.platforms.configure(input));
+    },
   );
 
   server.registerTool(
@@ -78,7 +90,8 @@ export function registerPlatformTools(server: McpServer, runtime: CodexMaatRunti
       },
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
-    async (input) => {
+    async (input, extra) => {
+      await bindMaatRequest(runtime, extra);
       await runtime.maat.platforms.configureSession(input);
       return textResult('Session hints accepted.', runtime.maat.platforms.status());
     },
@@ -91,7 +104,10 @@ export function registerPlatformTools(server: McpServer, runtime: CodexMaatRunti
       description: 'Discover online devices for the selected Appium platform.',
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
-    async () => jsonResult(await runtime.maat.platforms.inspectSetup({ kind: 'devices' })),
+    async (extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(await runtime.maat.platforms.inspectSetup({ kind: 'devices' }));
+    },
   );
 
   server.registerTool(
@@ -102,7 +118,9 @@ export function registerPlatformTools(server: McpServer, runtime: CodexMaatRunti
       inputSchema: { query: z.string().min(1) },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
-    async ({ query }) =>
-      jsonResult(await runtime.maat.platforms.inspectSetup({ kind: 'applications', query })),
+    async ({ query }, extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult(await runtime.maat.platforms.inspectSetup({ kind: 'applications', query }));
+    },
   );
 }

@@ -6,6 +6,7 @@ description: Explore a real UI with Maat and turn the user's explicit test objec
 # Build a Maat Case
 
 Build through Maat tools; do not hand-edit generated source unless the user explicitly asks.
+The complete workflow is in this loaded file. Do not browse or open this `SKILL.md`, enumerate unrelated tools, or use another UI automation tool to rediscover these instructions.
 
 1. Extract the platform, Case identity, business actions, and explicit expected outcomes. Ask only when a missing choice materially changes the test.
 2. Select the platform. If setup is not ready, use `$maat-setup` before exploration.

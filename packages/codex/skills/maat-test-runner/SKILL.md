@@ -5,6 +5,8 @@ description: Run saved Maat Cases or Suites, inspect structured results and Evid
 
 # Run and diagnose Maat tests
 
+The workflow is already loaded. Do not browse or open this `SKILL.md` to rediscover it.
+
 1. Select the Case, Suite, tag, or all-Cases scope requested by the user. Do not silently broaden it.
 2. Select the owner platform, then call `maat_run_tests` with exactly one scope.
 3. Call `maat_get_latest_run` and inspect the structured result. Inspect relevant Evidence before concluding.

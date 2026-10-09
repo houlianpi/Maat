@@ -72,3 +72,21 @@ test('Codex Tool Server exposes a persistent Maat workflow', async () => {
     await server.close();
   }
 });
+
+test('Codex request metadata relocates Maat from the plugin cache to the user workspace', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const workspace = await mkdtemp(path.join(tmpdir(), 'maat-codex-workspace-'));
+  const { server, runtime } = createMaatCodexServer({ workspaceRoot: '/tmp/plugin-cache' });
+  try {
+    await runtime.bindRequest({
+      'x-codex-turn-metadata': { workspaces: { [workspace]: { has_changes: false } } },
+    });
+    assert.equal(runtime.workspaceRoot, workspace);
+    assert.equal(runtime.maat.platforms.current().root, path.join(workspace, 'maat-tests/web'));
+  } finally {
+    await runtime.close();
+    await server.close();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});

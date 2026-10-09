@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import type { CodexMaatRuntime } from '../runtime.ts';
 import { jsonResult } from '../result.ts';
+import { bindMaatRequest } from '../request.ts';
 
 export function registerTestTools(server: McpServer, runtime: CodexMaatRuntime): void {
   server.registerTool(
@@ -22,6 +23,7 @@ export function registerTestTools(server: McpServer, runtime: CodexMaatRuntime):
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
     },
     async (input, extra) => {
+      await bindMaatRequest(runtime, extra);
       const selectors = [input.case, input.suite, input.tag, input.all ? true : undefined].filter(
         Boolean,
       );
@@ -51,6 +53,9 @@ export function registerTestTools(server: McpServer, runtime: CodexMaatRuntime):
       description: 'Return the most recent completed Maat run and its structured result.',
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async () => jsonResult((await runtime.latestRun()) ?? { available: false }),
+    async (extra) => {
+      await bindMaatRequest(runtime, extra);
+      return jsonResult((await runtime.latestRun()) ?? { available: false });
+    },
   );
 }

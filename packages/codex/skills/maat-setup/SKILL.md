@@ -6,6 +6,7 @@ description: Prepare or diagnose Maat Web, Android, iOS, or macOS UI testing whe
 # Prepare Maat
 
 Use Maat tools to reach an evidence-backed setup state without replacing the user's infrastructure.
+The workflow is already loaded. Do not browse or open this `SKILL.md` to rediscover it.
 
 1. Call `maat_list_platforms`, select the requested platform, then call `maat_check_setup`.
 2. Present the human-relevant state and one recommended next action. Keep technical details in `maat_get_setup_diagnostics` unless requested.

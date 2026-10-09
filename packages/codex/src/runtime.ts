@@ -32,6 +32,25 @@ export class CodexMaatRuntime {
     });
   }
 
+  async bindRequest(meta: unknown): Promise<void> {
+    if (!meta || typeof meta !== 'object') return;
+    const turn = (meta as Record<string, unknown>)['x-codex-turn-metadata'];
+    if (!turn || typeof turn !== 'object') return;
+    const workspaces = (turn as Record<string, unknown>).workspaces;
+    if (!workspaces || typeof workspaces !== 'object' || Array.isArray(workspaces)) return;
+    const roots = Object.keys(workspaces as Record<string, unknown>);
+    if (roots.length === 1) {
+      process.chdir(roots[0]!);
+      await this.relocate(roots[0]!);
+      return;
+    }
+    if (roots.length > 1) {
+      throw new Error(
+        `Maat requires one Codex workspace per Tool call; received ${roots.length}. Set MAAT_WORKSPACE_ROOT explicitly.`,
+      );
+    }
+  }
+
   async latestRun(): Promise<{ runDirectory: string; result?: unknown } | undefined> {
     const root = path.join(this.workspaceRoot, 'artifacts', 'maat', 'runs');
     const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
