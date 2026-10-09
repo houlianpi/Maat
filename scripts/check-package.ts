@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -61,6 +61,19 @@ try {
   const installation = await mkdtemp(path.join(tmpdir(), 'maat-workspaces-'));
   const emptyProject = await mkdtemp(path.join(tmpdir(), 'maat-empty-'));
   try {
+    // Pi owns its SDK and supplies the Extension peers. Install that Host first so the
+    // tarball smoke test matches `pi install` instead of relying on repository modules.
+    execFileSync(
+      'npm',
+      [
+        'install',
+        '--prefix',
+        installation,
+        '--ignore-scripts',
+        '@earendil-works/pi-coding-agent@0.87.0',
+      ],
+      { stdio: 'pipe' },
+    );
     execFileSync(
       'npm',
       ['install', '--prefix', installation, '--ignore-scripts', '--legacy-peer-deps', ...tarballs],
@@ -219,15 +232,20 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
       .trim()
       .split('\n')
       .filter((line) => line.endsWith('/node_modules/@earendil-works/pi-coding-agent'));
-    assert.equal(
-      sdkPaths.length,
-      1,
-      `Expected one installed Pi SDK, found: ${sdkPaths.join(', ')}`,
+    const hostSdk = await realpath(path.join(modules, '@earendil-works', 'pi-coding-agent'));
+    const resolvedSdkPaths = await Promise.all(sdkPaths.map((sdkPath) => realpath(sdkPath)));
+    const resolvedPiRoot = await realpath(piRoot);
+    assert.ok(
+      resolvedSdkPaths.includes(hostSdk),
+      `Host Pi SDK missing from: ${resolvedSdkPaths.join(', ')}`,
     );
-    assert.equal(
-      (JSON.parse(await readFile(path.join(sdkPaths[0]!, 'package.json'), 'utf8')) as Manifest)
-        .version,
-      '0.87.0',
+    assert.ok(
+      !resolvedSdkPaths.some((sdkPath) => sdkPath.startsWith(resolvedPiRoot + path.sep)),
+      `Pi Extension installed a duplicate SDK: ${resolvedSdkPaths.join(', ')}`,
+    );
+    assert.match(
+      (JSON.parse(await readFile(path.join(hostSdk, 'package.json'), 'utf8')) as Manifest).version,
+      /^0\.87\./,
     );
     const piExecutable = path.resolve('node_modules/.bin/pi');
     const piRun = spawnSync(piExecutable, ['--no-extensions', '--extension', piRoot, '--help'], {
