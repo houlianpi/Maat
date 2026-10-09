@@ -59,21 +59,9 @@ try {
   }
 
   const installation = await mkdtemp(path.join(tmpdir(), 'maat-workspaces-'));
+  const piInstallation = await mkdtemp(path.join(tmpdir(), 'maat-pi-host-'));
   const emptyProject = await mkdtemp(path.join(tmpdir(), 'maat-empty-'));
   try {
-    // Pi owns its SDK and supplies the Extension peers. Install that Host first so the
-    // tarball smoke test matches `pi install` instead of relying on repository modules.
-    execFileSync(
-      'npm',
-      [
-        'install',
-        '--prefix',
-        installation,
-        '--ignore-scripts',
-        '@earendil-works/pi-coding-agent@0.87.0',
-      ],
-      { stdio: 'pipe' },
-    );
     execFileSync(
       'npm',
       ['install', '--prefix', installation, '--ignore-scripts', '--legacy-peer-deps', ...tarballs],
@@ -81,7 +69,6 @@ try {
     );
     const modules = path.join(installation, 'node_modules');
     const coreRoot = path.join(modules, '@houlianpi', 'maat-core');
-    const piRoot = path.join(modules, '@houlianpi', 'maat-pi');
     const maatRoot = path.join(modules, '@houlianpi', 'maat');
     const cli = path.join(maatRoot, 'bin', 'maat.mjs');
     assert.match(
@@ -174,6 +161,23 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
       );
     }
 
+    // Pi owns its SDK and supplies Extension peers. Test this independently from the
+    // standalone package, which intentionally carries its own exact Pi SDK dependency.
+    execFileSync(
+      'npm',
+      [
+        'install',
+        '--prefix',
+        piInstallation,
+        '--ignore-scripts',
+        '@earendil-works/pi-coding-agent@0.87.0',
+        tarballs[0]!,
+        tarballs[1]!,
+      ],
+      { stdio: 'pipe' },
+    );
+    const piModules = path.join(piInstallation, 'node_modules');
+    const piRoot = path.join(piModules, '@houlianpi', 'maat-pi');
     const piManifest = JSON.parse(
       await readFile(path.join(piRoot, 'package.json'), 'utf8'),
     ) as Manifest;
@@ -196,7 +200,7 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
     `;
     execFileSync(process.execPath, ['--input-type=module', '-e', extensionSmoke, piRoot], {
       cwd: emptyProject,
-      env: { ...process.env, NODE_PATH: modules },
+      env: { ...process.env, NODE_PATH: piModules },
       stdio: 'pipe',
     });
 
@@ -225,14 +229,14 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
 
     const dependencyTree = execFileSync(
       'npm',
-      ['ls', '--prefix', installation, '@earendil-works/pi-coding-agent', '--all', '--parseable'],
+      ['ls', '--prefix', piInstallation, '@earendil-works/pi-coding-agent', '--all', '--parseable'],
       { encoding: 'utf8' },
     );
     const sdkPaths = dependencyTree
       .trim()
       .split('\n')
       .filter((line) => line.endsWith('/node_modules/@earendil-works/pi-coding-agent'));
-    const hostSdk = await realpath(path.join(modules, '@earendil-works', 'pi-coding-agent'));
+    const hostSdk = await realpath(path.join(piModules, '@earendil-works', 'pi-coding-agent'));
     const resolvedSdkPaths = await Promise.all(sdkPaths.map((sdkPath) => realpath(sdkPath)));
     const resolvedPiRoot = await realpath(piRoot);
     assert.ok(
@@ -247,16 +251,17 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
       (JSON.parse(await readFile(path.join(hostSdk, 'package.json'), 'utf8')) as Manifest).version,
       /^0\.87\./,
     );
-    const piExecutable = path.resolve('node_modules/.bin/pi');
+    const piExecutable = path.join(piModules, '.bin', 'pi');
     const piRun = spawnSync(piExecutable, ['--no-extensions', '--extension', piRoot, '--help'], {
       encoding: 'utf8',
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', NODE_PATH: modules },
+      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', NODE_PATH: piModules },
     });
     assert.equal(piRun.status, 0, piRun.stderr);
     assert.match(piRun.stdout, /pi - AI coding assistant/);
     assert.doesNotMatch(piRun.stderr, /Host-provided extension packages must be declared/);
   } finally {
     await rm(installation, { recursive: true, force: true });
+    await rm(piInstallation, { recursive: true, force: true });
     await rm(emptyProject, { recursive: true, force: true });
   }
   process.stdout.write(
