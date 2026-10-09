@@ -16,6 +16,7 @@ export type BeginCaseInput = {
   tags?: string[];
   suites?: string[];
   rootDirectory?: string;
+  requireScreenshotEvidence?: boolean;
 };
 
 function normalizeId(value: string): string {
@@ -70,6 +71,7 @@ export class CaseDraftManager implements StepRecorder {
       steps: [],
       failures: [],
       evidence: [],
+      ...(input.requireScreenshotEvidence ? { requireScreenshotEvidence: true } : {}),
     };
     return this.draft;
   }

@@ -229,7 +229,7 @@ test('macOS screenshots use the Mac2 display extension and reject empty results'
   assert.deepEqual(calls, [['macos: screenshots', {}]]);
   await assert.rejects(
     takeAppiumScreenshot({ execute: async () => ({}) } as never, 'macos'),
-    /Grant Screen Recording permission/,
+    /MACOS_SCREEN_CAPTURE_PERMISSION_REQUIRED/,
   );
 });
 

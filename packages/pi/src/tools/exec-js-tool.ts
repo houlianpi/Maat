@@ -8,6 +8,7 @@ export function createExecJsTool(
   recorder?: StepRecorder,
   context?: { description?: string; guidelines?: string[] },
   execution?: () => StepExecution,
+  actionableError?: (error: unknown) => Promise<string | undefined>,
 ): ToolDefinition<any, any, any> {
   return defineTool({
     name: 'exe_js',
@@ -58,6 +59,8 @@ export function createExecJsTool(
         };
       } catch (error) {
         await recorder?.recordFailedStep(params.code, error, execution?.());
+        const guidance = await actionableError?.(error);
+        if (guidance) throw new Error(guidance, { cause: error });
         throw error;
       }
     },

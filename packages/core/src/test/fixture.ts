@@ -54,6 +54,7 @@ export type MaatTest = {
 export async function createMaatTest(
   caseId: string,
   requirements: RuntimeRequirement[],
+  options: { requireScreenshotEvidence?: boolean; skippedCapabilities?: string[] } = {},
 ): Promise<MaatTest> {
   const root = path.resolve(process.env.MAAT_TESTS_ROOT ?? 'maat-tests');
   const runDirectory = path.resolve(
@@ -81,8 +82,21 @@ export async function createMaatTest(
         display,
         evidence: {
           screenshot: async (evidenceName = 'observation') => {
-            const shot = await session.screenshot();
-            await evidence.image(name, adapterId, evidenceName, shot.data, shot.mimeType);
+            try {
+              const shot = await session.screenshot();
+              await evidence.image(name, adapterId, evidenceName, shot.data, shot.mimeType);
+            } catch (error) {
+              const reason = error instanceof Error ? error.message : String(error);
+              evidence.unavailable(
+                name,
+                adapterId,
+                evidenceName,
+                reason,
+                options.requireScreenshotEvidence === true,
+                options.skippedCapabilities?.includes('screenCapture') === true,
+              );
+              if (options.requireScreenshotEvidence) throw error;
+            }
           },
         },
       });
@@ -96,9 +110,21 @@ export async function createMaatTest(
     if (finished) return;
     finished = true;
     if (setupFailure) return;
+    let evidenceFailure: unknown;
     try {
       for (const [adapterId, session] of sessions.entries()) {
-        const shot = await session.screenshot().catch(() => undefined);
+        const shot = await session.screenshot().catch((error) => {
+          evidence.unavailable(
+            'final-state',
+            adapterId,
+            passed ? 'final-state' : 'failure-final-state',
+            error instanceof Error ? error.message : String(error),
+            options.requireScreenshotEvidence === true,
+            options.skippedCapabilities?.includes('screenCapture') === true,
+          );
+          if (options.requireScreenshotEvidence) evidenceFailure ??= error;
+          return undefined;
+        });
         if (shot)
           await evidence.image(
             'final-state',
@@ -108,7 +134,12 @@ export async function createMaatTest(
             shot.mimeType,
           );
       }
+      if (options.requireScreenshotEvidence && !evidence.hasCapturedImage())
+        evidenceFailure ??= new Error(
+          'Screenshot Evidence is required but no screenshot was captured.',
+        );
       await evidence.finish(passed);
+      if (evidenceFailure) throw evidenceFailure;
     } finally {
       try {
         await sessions.teardown();
@@ -123,6 +154,17 @@ export async function createMaatTest(
       started = true;
       try {
         await sessions.setup();
+        if (options.skippedCapabilities?.includes('screenCapture')) {
+          for (const requirement of requirements)
+            evidence.unavailable(
+              'setup',
+              requirement.adapterId,
+              'screenshot',
+              'User chose to continue without screenshot Evidence.',
+              false,
+              true,
+            );
+        }
       } catch (error) {
         setupFailure = error;
         try {

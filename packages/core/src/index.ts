@@ -15,3 +15,11 @@ export {
   type BrowserName,
 } from './platforms/web/config.ts';
 export { nativeDeviceKinds } from './platforms/appium/schema.ts';
+export { SetupAssistant, type SetupAssistantOptions } from './setup-assistant/setup-assistant.ts';
+export { aggregateSetup } from './setup-assistant/model.ts';
+export { SetupPreferenceStore, sameFingerprint } from './setup-assistant/storage.ts';
+export {
+  detectMacosSetup,
+  type MacosSetupDetectorDependencies,
+} from './setup-assistant/macos-detector.ts';
+export type * from './setup-assistant/types.ts';

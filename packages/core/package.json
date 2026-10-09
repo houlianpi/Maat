@@ -1,6 +1,6 @@
 {
   "name": "@houlianpi/maat-core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Host-neutral conversational UI verification core for Maat",
   "license": "MIT",
   "type": "module",
@@ -15,7 +15,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepack": "npm run build",
-    "test": "node --experimental-strip-types --test ../../test/case-system.test.ts ../../test/javascript-session.test.ts ../../test/maat-api.test.ts ../../test/mixed-case.test.ts ../../test/platform-adapter.test.ts ../../test/playwright-spec-generator.test.ts"
+    "test": "MAAT_WEB_BROWSER=chromium node --experimental-strip-types --test ../../test/case-system.test.ts ../../test/javascript-session.test.ts ../../test/maat-api.test.ts ../../test/mixed-case.test.ts ../../test/platform-adapter.test.ts ../../test/playwright-spec-generator.test.ts ../../test/setup-assistant.test.ts"
   },
   "dependencies": {
     "@wdio/globals": "9.31.3",

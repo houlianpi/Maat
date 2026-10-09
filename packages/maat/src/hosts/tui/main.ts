@@ -17,6 +17,7 @@ import { createMaat } from '@houlianpi/maat-core';
 import {
   createMaatExtension,
   createMaatPiTools,
+  createMaatSetupExtension,
   createWorkModeExtension,
 } from '@houlianpi/maat-pi';
 
@@ -72,6 +73,7 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
     settingsManager: maatSettings,
     resourceLoaderOptions: createMaatResourceOptions([
       maatExtension,
+      createMaatSetupExtension(maat),
       createWorkModeExtension(),
       {
         name: 'maat-cleanup',

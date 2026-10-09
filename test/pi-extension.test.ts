@@ -29,6 +29,10 @@ test('Pi Extension registers the complete Maat tool surface and lifecycle', () =
     'list_case_steps',
     'remove_case_step',
     'replace_case_step',
+    'check_platform_setup',
+    'open_setup_step',
+    'retry_setup_step',
+    'continue_without_capability',
     'save_case',
     'list_evidence',
     'select_platform',
@@ -39,6 +43,8 @@ test('Pi Extension registers the complete Maat tool surface and lifecycle', () =
     assert.ok(tools.includes(name), `${name} was not registered`);
   }
   assert.ok(commands.includes('maat-status'));
+  assert.ok(commands.includes('maat-setup'));
+  assert.ok(commands.includes('maat-doctor'));
   assert.ok(commands.includes('mode'));
   assert.ok(events.includes('session_shutdown'));
   assert.ok(events.includes('before_agent_start'));

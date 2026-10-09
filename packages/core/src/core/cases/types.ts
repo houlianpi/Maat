@@ -1,5 +1,6 @@
 import type { JavaScriptObservation } from '../exploration/protocol.ts';
 import type { RuntimeRequirement } from '../platforms/contracts.ts';
+import type { SetupCapabilityId } from '../../setup-assistant/types.ts';
 
 export type CaseObjective = {
   id: string;
@@ -45,4 +46,6 @@ export type CaseDraft = {
   steps: CaseStep[];
   failures: CaseAttemptFailure[];
   evidence: CaseEvidence[];
+  requireScreenshotEvidence?: boolean;
+  skippedCapabilities?: SetupCapabilityId[];
 };

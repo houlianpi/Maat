@@ -4,8 +4,14 @@ import path from 'node:path';
 export class EvidenceStore {
   private readonly directory: string;
   private sequence = 0;
-  private readonly records: Array<{ step: string; adapterId: string; name: string; path: string }> =
-    [];
+  private readonly records: Array<{
+    step: string;
+    adapterId: string;
+    name: string;
+    status: 'captured' | 'unavailable' | 'required-but-missing' | 'skipped-by-user';
+    path?: string;
+    reason?: string;
+  }> = [];
   constructor(directory: string) {
     this.directory = directory;
   }
@@ -24,7 +30,28 @@ export class EvidenceStore {
       path.join(this.directory, filename),
       Buffer.from(data.replace(/^data:image\/[^;]+;base64,/, ''), 'base64'),
     );
-    this.records.push({ step, adapterId, name, path: filename });
+    this.records.push({ step, adapterId, name, status: 'captured', path: filename });
+  }
+
+  unavailable(
+    step: string,
+    adapterId: string,
+    name: string,
+    reason: string,
+    required: boolean,
+    skipped = false,
+  ): void {
+    this.records.push({
+      step,
+      adapterId,
+      name,
+      status: skipped ? 'skipped-by-user' : required ? 'required-but-missing' : 'unavailable',
+      reason,
+    });
+  }
+
+  hasCapturedImage(): boolean {
+    return this.records.some((record) => record.status === 'captured' && record.path);
   }
 
   async finish(passed: boolean): Promise<void> {

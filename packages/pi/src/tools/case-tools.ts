@@ -25,6 +25,12 @@ export function createCaseTools(maat: MaatApi): ToolDefinition<any, any, any>[] 
       objectives: Type.Array(Type.String(), { minItems: 1 }),
       tags: Type.Optional(Type.Array(Type.String())),
       suites: Type.Optional(Type.Array(Type.String())),
+      requireScreenshotEvidence: Type.Optional(
+        Type.Boolean({
+          description:
+            'Require screenshot Evidence for this Case; missing screenshots fail validation.',
+        }),
+      ),
     }),
     execute: async (_id, params) => ({
       content: [

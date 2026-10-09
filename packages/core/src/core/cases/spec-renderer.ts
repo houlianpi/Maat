@@ -57,7 +57,7 @@ export function renderSpec(model: SpecModel, fixtureImport: string): string {
     '  let maat: MaatTest;',
     '',
     '  beforeEach(async () => {',
-    `    maat = await createMaatTest(${JSON.stringify(model.id)}, ${JSON.stringify(model.requirements, null, 2)});`,
+    `    maat = await createMaatTest(${JSON.stringify(model.id)}, ${JSON.stringify(model.requirements, null, 2)}, ${JSON.stringify({ requireScreenshotEvidence: model.requireScreenshotEvidence === true, skippedCapabilities: model.skippedCapabilities ?? [] })});`,
     '    await maat.setup();',
     '  });',
     '',

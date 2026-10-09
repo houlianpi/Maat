@@ -1,5 +1,5 @@
 import Mocha from 'mocha';
-import { mkdir, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 type TestResult = {
@@ -43,14 +43,35 @@ await writeFile(
 );
 const evidenceRoot = path.join(input.runDirectory, 'cases');
 const caseDirectories = await readdir(evidenceRoot, { withFileTypes: true }).catch(() => []);
-const evidenceLinks = new Map(
-  caseDirectories
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => [
-      entry.name,
-      `<a href="../cases/${encodeURIComponent(entry.name)}/evidence.json">Evidence</a>`,
-    ]),
-);
+const evidenceLinks = new Map<string, string>();
+for (const entry of caseDirectories.filter((candidate) => candidate.isDirectory())) {
+  const relative = `../cases/${encodeURIComponent(entry.name)}/evidence.json`;
+  const evidence = await readFile(path.join(evidenceRoot, entry.name, 'evidence.json'), 'utf8')
+    .then(
+      (text) =>
+        JSON.parse(text) as {
+          items?: Array<{ name?: string; reason?: string; status?: string }>;
+        },
+    )
+    .catch(() => ({ items: [] }));
+  const counts = new Map<string, number>();
+  for (const item of evidence.items ?? [])
+    counts.set(item.status ?? 'captured', (counts.get(item.status ?? 'captured') ?? 0) + 1);
+  const summary = [...counts.entries()]
+    .map(([status, count]) => `${escape(status)}: ${count}`)
+    .join(' · ');
+  const missing = (evidence.items ?? [])
+    .filter((item) => item.status && item.status !== 'captured')
+    .map(
+      (item) =>
+        `<li><strong>${escape(item.status!)}</strong>${item.name ? ` · ${escape(item.name)}` : ''}${item.reason ? ` — ${escape(item.reason)}` : ''}</li>`,
+    )
+    .join('');
+  evidenceLinks.set(
+    entry.name,
+    `<a href="${relative}">Evidence</a>${summary ? `<div>${summary}</div>` : ''}${missing ? `<ul>${missing}</ul>` : ''}`,
+  );
+}
 const rows = tests
   .map(
     (test) =>

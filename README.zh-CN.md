@@ -98,6 +98,21 @@ appium --address 127.0.0.1 --port 4723
 
 可选 Appium Session 提示位于测试目录之外的 `~/.maat/session-hints/<adapter>.json`。`maat-tests` 只保存 Case。
 
+### macOS Setup Assistant
+
+选择 macOS 时会自动执行只读能力检测：
+
+```text
+/maat-setup   一次只展示一个推荐动作的设置向导
+/maat-status  能力与下一步面板
+/maat-doctor  脱敏的工程师诊断
+```
+
+屏幕录制权限控制截图 Evidence；辅助功能控制读取和操作应用；Automation Mode 可减少认证提示；
+完全磁盘访问用于部分 XCTest 视频附件；ffmpeg 仅用于可选视频，不阻止截图和功能测试。Maat
+经确认后可以打开系统设置，但不会自行授权、运行 `tccutil reset`、杀进程或重启 Appium。详见
+[Setup Assistant 产品设计](docs/setup-assistant.zh-CN.md)。
+
 ## 工具
 
 | 工具                                 | 作用                                   |
@@ -110,6 +125,11 @@ appium --address 127.0.0.1 --port 4723
 | `get_case_status`                    | 查看步骤、失败尝试和 Evidence          |
 | `list/remove/replace_case_step`      | 查看、删除和替换正式候选步骤           |
 | `save_case`                          | 全新 Session 验证并保存统一 Mocha Case |
+| `check_platform_setup`               | 只读检测平台能力                       |
+| `open_setup_step`                    | 打开推荐设置页面，不修改权限           |
+| `retry_setup_step`                   | 重新检测并恢复被中断的 Case            |
+| `continue_without_capability`        | 记录用户跳过可选能力的明确选择         |
+| `continue_without_capability`        | 记录用户明确选择的可选能力降级         |
 
 Assist 模式允许 Shell 和配置排障；Case 模式在探索和生成期间禁止 Shell 与直接文件编辑。
 

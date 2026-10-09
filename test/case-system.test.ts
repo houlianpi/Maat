@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { CaseDraftManager } from '../packages/core/src/core/cases/draft-manager.ts';
 import { saveCase } from '../packages/core/src/core/cases/save-case.ts';
 import { runMaatTests } from '../packages/core/src/core/testing/runner.ts';
+import { EvidenceStore } from '../packages/core/src/core/testing/evidence.ts';
 
 const testArtifacts = path.resolve('artifacts/test-cases');
 async function createRoot() {
@@ -193,5 +194,67 @@ test('Case saves and reruns from an empty project without local dependencies', a
   } finally {
     await rm(workspace, { recursive: true, force: true });
     await rm(path.resolve('artifacts/cases/empty-project'), { recursive: true, force: true });
+  }
+});
+
+test('Evidence records captured, optional missing, required missing, and user skipped states', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'maat-evidence-state-'));
+  try {
+    const store = new EvidenceStore(directory);
+    store.unavailable('step', 'macos', 'optional', 'permission missing', false);
+    store.unavailable('step', 'macos', 'required', 'permission missing', true);
+    store.unavailable('step', 'macos', 'skipped', 'user choice', false, true);
+    await store.finish(true);
+    const evidence = JSON.parse(await readFile(path.join(directory, 'evidence.json'), 'utf8'));
+    assert.deepEqual(
+      evidence.items.map((item: { status: string }) => item.status),
+      ['unavailable', 'required-but-missing', 'skipped-by-user'],
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('required screenshot Evidence fails teardown when capture is unavailable', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'maat-required-evidence-'));
+  try {
+    const store = new EvidenceStore(directory);
+    store.unavailable('final-state', 'macos', 'screenshot', 'permission missing', true);
+    assert.equal(store.hasCapturedImage(), false);
+    await store.finish(false);
+    const evidence = JSON.parse(await readFile(path.join(directory, 'evidence.json'), 'utf8'));
+    assert.equal(evidence.items[0].status, 'required-but-missing');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('HTML report shows business result, missing Evidence reason, and user degradation choice', async () => {
+  const root = await createRoot();
+  const spec = path.join(root, 'report-evidence.spec.ts');
+  await writeFile(
+    spec,
+    `import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { describe, it } from 'mocha';
+describe('Evidence report', () => {
+  it('report-evidence', async () => {
+    const directory = path.join(process.env.MAAT_RUN_DIRECTORY, 'cases', 'report-evidence');
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, 'evidence.json'), JSON.stringify({ passed: true, items: [{ name: 'result', status: 'skipped-by-user', reason: 'User chose to continue without screenshot Evidence.' }] }));
+  });
+});
+`,
+  );
+  try {
+    const result = await runMaatTests(root, { mode: 'case', value: 'unused' }, undefined, spec);
+    assert.equal(result.exitCode, 0);
+    const html = await readFile(path.join(result.runDirectory, 'report', 'index.html'), 'utf8');
+    assert.match(html, /report-evidence/);
+    assert.match(html, /class="passed">passed/);
+    assert.match(html, /skipped-by-user/);
+    assert.match(html, /User chose to continue without screenshot Evidence/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });

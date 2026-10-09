@@ -5,16 +5,24 @@ import type { CaseSelection } from '../core/testing/case-selection.ts';
 import { runMaatTests, type MaatRunOptions } from '../core/testing/runner.ts';
 import type { SessionSetup, SetupInspection } from '../core/platforms/contracts.ts';
 import { PlatformRegistry } from '../core/platforms/registry.ts';
+import { SetupAssistant, type SetupAssistantOptions } from '../setup-assistant/setup-assistant.ts';
+import type { SetupCapabilityId, SetupAction } from '../setup-assistant/types.ts';
 
 /** Stable, host-neutral product API. Agent hosts translate this API into their own tools and UI. */
 export class MaatApi {
   readonly workspaceRoot: string;
   readonly registry: PlatformRegistry;
   readonly drafts = new CaseDraftManager();
+  readonly setupAssistant: SetupAssistant;
 
-  constructor(registry: PlatformRegistry, workspaceRoot: string) {
+  constructor(
+    registry: PlatformRegistry,
+    workspaceRoot: string,
+    setupOptions?: SetupAssistantOptions,
+  ) {
     this.registry = registry;
     this.workspaceRoot = workspaceRoot;
+    this.setupAssistant = new SetupAssistant(setupOptions);
   }
 
   readonly platforms = {
@@ -22,7 +30,15 @@ export class MaatApi {
     list: () => this.registry.list(),
     select: async (id: string) => {
       await this.registry.select(id);
-      return this.registry.current.status();
+      const status = this.registry.current.status();
+      if (id === 'macos') {
+        const adapter = this.registry.current as { sessionHints?: { serverUrl?: string } };
+        await this.setupAssistant.check({
+          platform: id,
+          serverUrl: adapter.sessionHints?.serverUrl,
+        });
+      }
+      return status;
     },
     status: () => this.registry.current.status(),
     configure: async (configuration: Record<string, unknown>) => {
@@ -44,6 +60,29 @@ export class MaatApi {
       }
       return adapter.inspectSetup(request);
     },
+  };
+
+  readonly setup = {
+    current: () => this.setupAssistant.current(),
+    check: (input?: { platform?: string; serverUrl?: string; signal?: AbortSignal }) =>
+      this.setupAssistant.check(input),
+    action: (actionId?: SetupAction['id']) => this.setupAssistant.action(actionId),
+    skip: async (capabilityId: SetupCapabilityId) => {
+      if (capabilityId === 'screenCapture' && this.drafts.current?.requireScreenshotEvidence) {
+        throw new Error('This Case requires screenshot Evidence and cannot skip screenCapture.');
+      }
+      const snapshot = await this.setupAssistant.skip(capabilityId);
+      const draft = this.drafts.current;
+      if (draft)
+        draft.skippedCapabilities = [
+          ...new Set([...(draft.skippedCapabilities ?? []), capabilityId]),
+        ];
+      return snapshot;
+    },
+    interrupt: (input: Parameters<SetupAssistant['interrupt']>[0]) =>
+      this.setupAssistant.interrupt(input),
+    pendingInterruption: () => this.setupAssistant.pendingInterruption(),
+    resume: () => this.setupAssistant.resume(),
   };
 
   readonly exploration = {

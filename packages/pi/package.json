@@ -1,6 +1,6 @@
 {
   "name": "@houlianpi/maat-pi",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Maat extension for Pi coding-agent",
   "license": "MIT",
   "keywords": [
@@ -25,10 +25,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepack": "npm run build",
-    "test": "node --experimental-strip-types --test ../../test/exec-js-tool.test.ts ../../test/pi-extension.test.ts ../../test/work-mode.test.ts"
+    "test": "node --experimental-strip-types --test ../../test/exec-js-tool.test.ts ../../test/pi-extension.test.ts ../../test/setup-tools.test.ts ../../test/setup-ui.test.ts ../../test/work-mode.test.ts"
   },
   "dependencies": {
-    "@houlianpi/maat-core": "0.2.0"
+    "@houlianpi/maat-core": "0.3.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": "*",

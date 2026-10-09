@@ -122,18 +122,39 @@ Use the capability returned by `find_applications`, for example
 
 Optional Appium Session hints live outside the test tree under `~/.maat/session-hints/<adapter>.json`. The `maat-tests` tree contains Cases only.
 
+### macOS Setup Assistant
+
+Selecting macOS performs a read-only capability check. Use:
+
+```text
+/maat-setup   guided setup with one recommended action
+/maat-status  capability/action panel
+/maat-doctor  redacted engineer diagnostics
+```
+
+Screen Recording controls screenshot Evidence; Accessibility controls reading and operating apps;
+Automation Mode may reduce authentication prompts; Full Disk Access is needed for some XCTest
+video attachments; ffmpeg is optional for video and does not block screenshots or functional tests.
+Maat may open System Settings after confirmation but never grants permissions, runs `tccutil reset`,
+kills processes, or restarts Appium by itself. See [Setup Assistant](docs/setup-assistant.md).
+
 ## Tools
 
-| Tool                                 | Purpose                                                 |
-| ------------------------------------ | ------------------------------------------------------- |
-| `list_platforms` / `select_platform` | Inspect and select an Adapter                           |
-| `configure_session`                  | Supply optional Server/device/App hints                 |
-| `list_devices` / `find_applications` | Assist Appium Session setup                             |
-| `begin_case`                         | Create a Draft with explicit objectives                 |
-| `exe_js`                             | Execute JavaScript in the active persistent UI Session  |
-| `get_case_status`                    | Inspect steps, attempts and Evidence                    |
-| `list/remove/replace_case_step`      | Review and edit formal candidate steps                  |
-| `save_case`                          | Validate with fresh Sessions and promote one Mocha spec |
+| Tool                                 | Purpose                                                  |
+| ------------------------------------ | -------------------------------------------------------- |
+| `list_platforms` / `select_platform` | Inspect and select an Adapter                            |
+| `configure_session`                  | Supply optional Server/device/App hints                  |
+| `list_devices` / `find_applications` | Assist Appium Session setup                              |
+| `begin_case`                         | Create a Draft with explicit objectives                  |
+| `exe_js`                             | Execute JavaScript in the active persistent UI Session   |
+| `get_case_status`                    | Inspect steps, attempts and Evidence                     |
+| `list/remove/replace_case_step`      | Review and edit formal candidate steps                   |
+| `save_case`                          | Validate with fresh Sessions and promote one Mocha spec  |
+| `check_platform_setup`               | Read-only check of platform capabilities                 |
+| `open_setup_step`                    | Open the recommended settings page, without changing it  |
+| `retry_setup_step`                   | Recheck capabilities and resume the interrupted Case     |
+| `continue_without_capability`        | Record an explicit choice to skip an optional capability |
+| `continue_without_capability`        | Record an explicit optional-capability downgrade         |
 
 Assist mode permits Shell/setup work. Case mode blocks Shell and direct file edits while exploration and generation are active.
 

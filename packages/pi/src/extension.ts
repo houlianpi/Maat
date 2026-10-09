@@ -5,6 +5,7 @@ import { createMaatPiTools } from './tools.ts';
 import { MAAT_SYSTEM_PROMPT } from './system-prompt.ts';
 import { maatStatusLines } from './status.ts';
 import { registerWorkModeExtension } from './work-mode.ts';
+import { registerMaatSetupCommands } from './setup-extension.ts';
 
 /** Pi package entry point. Each loaded extension instance owns one Maat lifecycle. */
 export default function maatPiExtension(pi: ExtensionAPI): void {
@@ -27,10 +28,5 @@ export default function maatPiExtension(pi: ExtensionAPI): void {
     systemPrompt: `${event.systemPrompt}\n\n${MAAT_SYSTEM_PROMPT}`,
   }));
 
-  pi.registerCommand('maat-status', {
-    description: 'Show the active Maat platform, Case, and Evidence status',
-    handler: async (_args, ctx) => {
-      ctx.ui.notify(maatStatusLines(maat.platforms.status(), maat.drafts).join('\n'), 'info');
-    },
-  });
+  registerMaatSetupCommands(pi, maat);
 }

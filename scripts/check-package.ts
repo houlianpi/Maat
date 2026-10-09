@@ -15,12 +15,13 @@ type Manifest = {
 
 const workspaces = ['@houlianpi/maat-core', '@houlianpi/maat-pi', '@houlianpi/maat'] as const;
 const manifests = new Map<string, Manifest>();
+const rootManifest = JSON.parse(await readFile('package.json', 'utf8')) as Manifest;
 for (const directory of ['packages/core', 'packages/pi', 'packages/maat']) {
   const manifest = JSON.parse(
     await readFile(path.join(directory, 'package.json'), 'utf8'),
   ) as Manifest;
   manifests.set(manifest.name, manifest);
-  assert.equal(manifest.version, '0.2.0');
+  assert.equal(manifest.version, rootManifest.version);
 }
 assert.equal(
   manifests.get('@houlianpi/maat-core')?.dependencies?.['@earendil-works/pi-coding-agent'],
@@ -164,6 +165,70 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
       await readFile(path.join(piRoot, 'package.json'), 'utf8'),
     ) as Manifest;
     assert.deepEqual(piManifest.pi?.extensions, ['./dist/extension.js']);
+    const extensionSmoke = `
+      import { pathToFileURL } from 'node:url';
+      const extension = (await import(pathToFileURL(process.argv[1] + '/dist/extension.js'))).default;
+      const tools = []; const commands = []; const handlers = new Map();
+      const pi = {
+        registerTool(tool) { tools.push(tool.name); },
+        registerCommand(name) { commands.push(name); },
+        on(event, handler) { handlers.set(event, handler); return () => {}; },
+      };
+      extension(pi);
+      for (const name of ['check_platform_setup', 'open_setup_step', 'retry_setup_step', 'continue_without_capability'])
+        if (!tools.includes(name)) throw new Error('Installed extension missing tool: ' + name);
+      for (const name of ['maat-setup', 'maat-status', 'maat-doctor'])
+        if (!commands.includes(name)) throw new Error('Installed extension missing command: ' + name);
+      await handlers.get('session_shutdown')?.();
+    `;
+    execFileSync(process.execPath, ['--input-type=module', '-e', extensionSmoke, piRoot], {
+      cwd: emptyProject,
+      env: { ...process.env, NODE_PATH: modules },
+      stdio: 'pipe',
+    });
+
+    const setupPersistenceSmoke = `
+      import { pathToFileURL } from 'node:url';
+      import path from 'node:path';
+      const core = await import(pathToFileURL(process.argv[1] + '/dist/index.js'));
+      const preferencesFile = path.join(process.argv[2], 'setup.json');
+      const fingerprint = { appiumPid: 10, appiumStartedAt: 'now', wdaPid: 20, wdaStartedAt: 'now' };
+      const detector = async () => core.aggregateSetup({ platform: 'macos', fingerprint, capabilities: [
+        { id: 'appiumServer', status: 'ready', required: true, summary: 'ready' },
+        { id: 'screenCapture', status: 'action-required', required: false, summary: 'missing', action: { id: 'open-screen-recording', label: 'open' } },
+      ] });
+      const first = new core.SetupAssistant({ preferencesFile, detector });
+      await first.check(); await first.action('open-screen-recording');
+      const second = new core.SetupAssistant({ preferencesFile, detector });
+      const persisted = await second.check();
+      if (persisted.capabilities.find((item) => item.id === 'screenCapture')?.status !== 'restart-required')
+        throw new Error('Installed Core did not preserve pending Setup action');
+    `;
+    execFileSync(
+      process.execPath,
+      ['--input-type=module', '-e', setupPersistenceSmoke, coreRoot, emptyProject],
+      { cwd: emptyProject, env: { ...process.env, NODE_PATH: modules }, stdio: 'pipe' },
+    );
+
+    const dependencyTree = execFileSync(
+      'npm',
+      ['ls', '--prefix', installation, '@earendil-works/pi-coding-agent', '--all', '--parseable'],
+      { encoding: 'utf8' },
+    );
+    const sdkPaths = dependencyTree
+      .trim()
+      .split('\n')
+      .filter((line) => line.endsWith('/node_modules/@earendil-works/pi-coding-agent'));
+    assert.equal(
+      sdkPaths.length,
+      1,
+      `Expected one installed Pi SDK, found: ${sdkPaths.join(', ')}`,
+    );
+    assert.equal(
+      (JSON.parse(await readFile(path.join(sdkPaths[0]!, 'package.json'), 'utf8')) as Manifest)
+        .version,
+      '0.87.0',
+    );
     const piExecutable = path.resolve('node_modules/.bin/pi');
     const piRun = spawnSync(piExecutable, ['--no-extensions', '--extension', piRoot, '--help'], {
       encoding: 'utf8',
@@ -176,7 +241,9 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
     await rm(installation, { recursive: true, force: true });
     await rm(emptyProject, { recursive: true, force: true });
   }
-  process.stdout.write('Verified three Maat 0.2.0 workspace tarballs and installed runtimes.\n');
+  process.stdout.write(
+    `Verified three Maat ${rootManifest.version} workspace tarballs and installed runtimes.\n`,
+  );
 } finally {
   for (const tarball of tarballs) await rm(tarball, { force: true });
 }

@@ -19,6 +19,8 @@ export type SpecModel = {
   suites: string[];
   requirements: CaseDraft['requirements'];
   steps: SpecStep[];
+  requireScreenshotEvidence?: boolean;
+  skippedCapabilities?: CaseDraft['skippedCapabilities'];
 };
 
 export function buildSpecModel(draft: CaseDraft): SpecModel {
@@ -44,6 +46,10 @@ export function buildSpecModel(draft: CaseDraft): SpecModel {
       }
       return requirement;
     }),
+    ...(draft.requireScreenshotEvidence ? { requireScreenshotEvidence: true } : {}),
+    ...(draft.skippedCapabilities?.length
+      ? { skippedCapabilities: draft.skippedCapabilities }
+      : {}),
     steps: draft.steps.map((step) => ({
       number: step.number,
       name: step.name,
