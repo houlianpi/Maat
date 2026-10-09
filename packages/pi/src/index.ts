@@ -3,6 +3,7 @@ export { createMaatPiTools } from './tools.ts';
 export { createExecJsTool } from './tools/exec-js-tool.ts';
 export { createSetupTools } from './tools/setup-tools.ts';
 export { setupDoctor, setupPanel } from './setup-ui.ts';
+export { resolveSetupLocale, setupMessage, type SetupLocale } from './setup-i18n.ts';
 export {
   createMaatSetupExtension,
   notifySetupPanel,

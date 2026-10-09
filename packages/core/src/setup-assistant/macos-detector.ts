@@ -146,16 +146,21 @@ export async function detectMacosSetup(
   const capabilities: SetupCapability[] = [];
   capabilities.push(
     serverReady
-      ? { id: 'appiumServer', status: 'ready', required: true, summary: 'Appium 已连接' }
+      ? {
+          id: 'appiumServer',
+          status: 'ready',
+          required: true,
+          messageKey: 'capability.appium.ready',
+        }
       : {
           id: 'appiumServer',
           status: 'action-required',
           required: true,
-          summary: '需要启动 macOS 测试服务',
+          messageKey: 'capability.appium.start',
           errorCode: 'APPIUM_SERVER_UNAVAILABLE',
           action: {
             id: 'start-appium',
-            label: '查看启动命令',
+            labelKey: 'action.startAppium',
             command: 'appium --address 127.0.0.1 --port 4723',
             estimatedMinutes: 1,
           },
@@ -180,18 +185,18 @@ export async function detectMacosSetup(
           id: 'mac2Driver',
           status: 'ready',
           required: true,
-          summary: 'macOS 自动化组件已安装',
+          messageKey: 'capability.mac2.ready',
           details: { version: mac2Version },
         }
       : {
           id: 'mac2Driver',
           status: 'action-required',
           required: true,
-          summary: '需要安装 macOS 自动化组件',
+          messageKey: 'capability.mac2.install',
           errorCode: 'MAC2_DRIVER_MISSING',
           action: {
             id: 'install-mac2',
-            label: '查看安装命令',
+            labelKey: 'action.installMac2',
             command: 'appium driver install mac2',
             estimatedMinutes: 2,
           },
@@ -207,16 +212,23 @@ export async function detectMacosSetup(
   );
   capabilities.push(
     automationReady && !requiresAuth
-      ? { id: 'automationMode', status: 'ready', required: true, summary: '自动化模式已就绪' }
+      ? {
+          id: 'automationMode',
+          status: 'ready',
+          required: true,
+          messageKey: 'capability.automation.ready',
+        }
       : {
           id: 'automationMode',
           status: automationReady ? 'action-required' : 'unavailable',
           required: !automationReady,
-          summary: automationReady ? '自动化操作可能要求系统确认' : '自动化模式尚未开启',
+          messageKey: automationReady
+            ? 'capability.automation.auth'
+            : 'capability.automation.unavailable',
           errorCode: 'AUTOMATION_MODE_AUTH_REQUIRED',
           action: {
             id: 'authenticate-automation-mode',
-            label: '查看设置方法',
+            labelKey: 'action.automationMode',
             command: 'automationmodetool enable-automationmode-without-authentication',
             requiresConfirmation: true,
           },
@@ -227,16 +239,21 @@ export async function detectMacosSetup(
     const probe = await dependencies.probeSession(serverUrl, input.signal);
     capabilities.push(
       probe.accessibility
-        ? { id: 'accessibility', status: 'ready', required: true, summary: '可以读取界面' }
+        ? {
+            id: 'accessibility',
+            status: 'ready',
+            required: true,
+            messageKey: 'capability.accessibility.ready',
+          }
         : {
             id: 'accessibility',
             status: 'action-required',
             required: true,
-            summary: '需要允许 Maat 操作和读取应用',
+            messageKey: 'capability.accessibility.required',
             errorCode: 'MACOS_ACCESSIBILITY_PERMISSION_REQUIRED',
             action: {
               id: 'open-accessibility',
-              label: '打开辅助功能设置',
+              labelKey: 'action.openAccessibility',
               settingsUrl:
                 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
               estimatedMinutes: 1,
@@ -247,18 +264,18 @@ export async function detectMacosSetup(
             id: 'uiInteraction',
             status: 'ready',
             required: true,
-            summary: '可以操作应用并运行断言',
+            messageKey: 'capability.interaction.ready',
           }
         : {
             id: 'uiInteraction',
             status: 'action-required',
             required: true,
-            summary: '应用操作尚未就绪',
+            messageKey: 'capability.interaction.required',
             errorCode: 'MACOS_ACCESSIBILITY_PERMISSION_REQUIRED',
             details: probe.error ? { error: probe.error } : undefined,
             action: {
               id: 'open-accessibility',
-              label: '打开辅助功能设置',
+              labelKey: 'action.openAccessibility',
               settingsUrl:
                 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
             },
@@ -268,17 +285,17 @@ export async function detectMacosSetup(
             id: 'screenCapture',
             status: 'ready',
             required: false,
-            summary: '可以保存截图 Evidence',
+            messageKey: 'capability.screenshot.ready',
           }
         : {
             id: 'screenCapture',
             status: 'action-required',
             required: false,
-            summary: '截图 Evidence 尚未开启',
+            messageKey: 'capability.screenshot.required',
             errorCode: 'MACOS_SCREEN_CAPTURE_PERMISSION_REQUIRED',
             action: {
               id: 'open-screen-recording',
-              label: '开启截图权限',
+              labelKey: 'action.openScreenRecording',
               settingsUrl:
                 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
               estimatedMinutes: 1,
@@ -295,7 +312,10 @@ export async function detectMacosSetup(
         id: capability,
         status: 'unknown',
         required: capability !== 'screenCapture',
-        summary: capability === 'screenCapture' ? '截图能力尚未检测' : '应用操作能力尚未检测',
+        messageKey:
+          capability === 'screenCapture'
+            ? 'capability.screenshot.unknown'
+            : 'capability.interaction.unknown',
       });
   }
 
@@ -306,14 +326,14 @@ export async function detectMacosSetup(
     id: 'fullDiskAccess',
     status: fullDiskReady ? 'ready' : 'action-required',
     required: false,
-    summary: fullDiskReady ? '测试附件访问正常' : '视频附件需要完全磁盘访问权限',
+    messageKey: fullDiskReady ? 'capability.fullDisk.ready' : 'capability.fullDisk.required',
     ...(fullDiskReady
       ? {}
       : {
           errorCode: 'MACOS_FULL_DISK_ACCESS_REQUIRED' as const,
           action: {
             id: 'open-full-disk-access' as const,
-            label: '打开完全磁盘访问设置',
+            labelKey: 'action.openFullDiskAccess',
             settingsUrl: 'x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles',
           },
         }),
@@ -321,16 +341,21 @@ export async function detectMacosSetup(
   const ffmpeg = await dependencies.command('sh', ['-lc', 'command -v ffmpeg'], input.signal);
   capabilities.push(
     ffmpeg.stdout.trim()
-      ? { id: 'videoRecording', status: 'ready', required: false, summary: '可以录制测试视频' }
+      ? {
+          id: 'videoRecording',
+          status: 'ready',
+          required: false,
+          messageKey: 'capability.video.ready',
+        }
       : {
           id: 'videoRecording',
           status: 'unavailable',
           required: false,
-          summary: '视频录制组件未安装（不影响截图和功能测试）',
+          messageKey: 'capability.video.unavailable',
           errorCode: 'FFMPEG_MISSING',
           action: {
             id: 'install-ffmpeg',
-            label: '查看可选安装命令',
+            labelKey: 'action.installFfmpeg',
             command: 'brew install ffmpeg',
           },
         },

@@ -68,7 +68,14 @@ test('Setup recheck closes only the stale macOS Session after process identity c
       aggregateSetup({
         platform: 'macos',
         fingerprint: { wdaPid, wdaStartedAt: String(wdaPid) },
-        capabilities: [{ id: 'uiInteraction', status: 'ready', required: true, summary: 'ready' }],
+        capabilities: [
+          {
+            id: 'uiInteraction',
+            status: 'ready',
+            required: true,
+            messageKey: 'capability.interaction.ready',
+          },
+        ],
       }),
   });
   try {

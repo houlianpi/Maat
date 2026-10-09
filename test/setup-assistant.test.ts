@@ -17,17 +17,27 @@ function partialSnapshot(): SetupSnapshot {
     fingerprint,
     checkedAt: '2026-10-09T00:00:00.000Z',
     capabilities: [
-      { id: 'appiumServer', status: 'ready', required: true, summary: 'Appium 已连接' },
-      { id: 'uiInteraction', status: 'ready', required: true, summary: '可以操作应用并运行断言' },
+      {
+        id: 'appiumServer',
+        status: 'ready',
+        required: true,
+        messageKey: 'capability.appium.ready',
+      },
+      {
+        id: 'uiInteraction',
+        status: 'ready',
+        required: true,
+        messageKey: 'capability.interaction.ready',
+      },
       {
         id: 'screenCapture',
         status: 'action-required',
         required: false,
-        summary: '截图 Evidence 尚未开启',
+        messageKey: 'capability.screenshot.required',
         errorCode: 'MACOS_SCREEN_CAPTURE_PERMISSION_REQUIRED',
         action: {
           id: 'open-screen-recording',
-          label: '开启截图权限',
+          labelKey: 'action.openScreenRecording',
           settingsUrl: 'x-apple.systempreferences:Privacy_ScreenCapture',
         },
       },
@@ -50,8 +60,8 @@ test('setup aggregation distinguishes ready, partial, and blocked states', () =>
         id: 'appiumServer',
         status: 'action-required',
         required: true,
-        summary: '需要启动 macOS 测试服务',
-        action: { id: 'start-appium', label: '查看启动命令' },
+        messageKey: 'capability.appium.start',
+        action: { id: 'start-appium', labelKey: 'action.startAppium' },
       },
     ],
   });

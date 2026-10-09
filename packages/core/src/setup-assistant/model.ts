@@ -48,40 +48,40 @@ export function aggregateSetup(input: {
           ? 'partially-ready'
           : 'action-required';
   const recommended = [...blocking, ...degraded].find((capability) => capability.action)?.action;
-  const title =
+  const titleKey =
     input.state === 'checking'
-      ? '正在检查 macOS 测试环境'
+      ? 'setup.title.checking'
       : input.state === 'unknown'
-        ? '尚未检查 macOS 测试环境'
+        ? 'setup.title.unknown'
         : readiness === 'ready'
-          ? 'macOS 测试环境已就绪'
+          ? 'setup.title.ready'
           : readiness === 'partially-ready'
-            ? 'macOS 测试环境部分可用'
-            : '完成一个设置后即可测试 macOS';
-  const summary =
+            ? 'setup.title.partial'
+            : 'setup.title.blocked';
+  const summaryKey =
     input.state === 'checking'
-      ? '正在确认应用操作与 Evidence 能力。'
+      ? 'setup.summary.checking'
       : input.state === 'unknown'
-        ? '选择 macOS 后，Maat 会自动检查测试能力。'
+        ? 'setup.summary.unknown'
         : readiness === 'ready'
-          ? '应用操作、业务断言和 Evidence 均可使用。'
+          ? 'setup.summary.ready'
           : readiness === 'partially-ready'
-            ? '功能测试可以继续，部分 Evidence 能力暂不可用。'
-            : (blocking[0]?.summary ?? '需要完成 macOS 测试环境设置。');
+            ? 'setup.summary.partial'
+            : 'setup.summary.blocked';
   return {
     platform: input.platform,
     state,
     readiness,
-    title,
-    summary,
+    titleKey,
+    summaryKey,
     checkedAt: input.checkedAt ?? new Date().toISOString(),
     capabilities: ordered,
     available: ordered
       .filter((capability) => capability.status === 'ready')
-      .map((capability) => capability.summary),
+      .map((capability) => capability.id),
     unavailable: ordered
       .filter((capability) => !['ready', 'skipped'].includes(capability.status))
-      .map((capability) => capability.summary),
+      .map((capability) => capability.id),
     ...(recommended ? { recommendedAction: recommended as SetupAction } : {}),
     canContinue: ordered.length > 0 && !blocking.length,
     restartRequired,

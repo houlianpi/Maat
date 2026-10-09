@@ -28,6 +28,8 @@ unknown → checking → action-required → waiting-for-recheck
 
 默认面板只显示能力和一个下一步，不显示 WDA、TCC、capability、原始 WebDriver 错误或进程路径。`/maat-doctor` 才向工程师展示脱敏技术详情、命令、PID 和路径。用户 prompt、页面文本、图片 payload、token、credential 与截图必须省略或脱敏。
 
+Pi 根据最近一条用户消息选择 Setup 文案语言；`/maat-setup en` 与 `/maat-setup zh-CN` 可显式覆盖。无法判断时依次使用系统语言和英文。Core 只返回稳定消息键，不包含任何 Host 语言文案。
+
 ## 能力降级
 
 截图或视频不可用时，应用操作和业务断言仍可继续。Evidence 状态为：

@@ -1,6 +1,6 @@
 {
   "name": "@houlianpi/maat",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Standalone conversational UI verification Agent and CLI",
   "license": "MIT",
   "type": "module",
@@ -22,8 +22,8 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.87.0",
-    "@houlianpi/maat-core": "0.3.0",
-    "@houlianpi/maat-pi": "0.3.0",
+    "@houlianpi/maat-core": "0.3.1",
+    "@houlianpi/maat-pi": "0.3.1",
     "tsx": "4.23.15"
   },
   "publishConfig": {

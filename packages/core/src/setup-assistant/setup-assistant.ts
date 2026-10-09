@@ -127,7 +127,6 @@ export class SetupAssistant {
         return {
           ...capability,
           status: 'skipped' as const,
-          summary: `${capability.summary}（已暂时跳过）`,
         };
       if (
         ((this.waitingForRecheck && this.lastActionId === 'open-screen-recording') ||
@@ -140,11 +139,11 @@ export class SetupAssistant {
         return {
           ...capability,
           status: 'restart-required' as const,
-          summary: '权限可能已更新，需要重启 macOS 测试服务后生效',
+          messageKey: 'capability.screenshot.restart' as const,
           errorCode: 'MACOS_SCREEN_CAPTURE_RESTART_REQUIRED' as const,
           action: {
             id: 'restart-appium' as const,
-            label: '重启 macOS 测试服务',
+            labelKey: 'action.restartAppium' as const,
             command: 'Stop Appium with Ctrl+C, then run: appium --address 127.0.0.1 --port 4723',
             requiresConfirmation: true,
             estimatedMinutes: 1,

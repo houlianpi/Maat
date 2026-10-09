@@ -5,6 +5,7 @@ import { createPlatformTools } from './tools/platform-tools.ts';
 import { createSetupTools } from './tools/setup-tools.ts';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { setupPanel } from './setup-ui.ts';
+import { resolveSetupLocale } from './setup-i18n.ts';
 
 /** Pi-specific projection of the host-neutral Maat API. */
 export function createMaatPiTools(maat: MaatApi): ToolDefinition<any, any, any>[] {
@@ -21,7 +22,7 @@ export function createMaatPiTools(maat: MaatApi): ToolDefinition<any, any, any>[
         guidelines: ['Use only globals exposed by the active adapter codeContext.'],
       },
       () => maat.exploration.execution(),
-      async (error) => {
+      async (error, ctx) => {
         if (maat.platforms.current().id !== 'macos') return;
         const message = String(error);
         const isScreenshot = message.includes('MACOS_SCREEN_CAPTURE_PERMISSION_REQUIRED');
@@ -38,10 +39,16 @@ export function createMaatPiTools(maat: MaatApi): ToolDefinition<any, any, any>[
           workMode: maat.cases.current() ? 'case' : 'assist',
         });
         const snapshot = await maat.setup.check({ platform: 'macos' });
-        const explanation = isScreenshot
-          ? '已经通过的业务断言仍然有效；只有截图 Evidence 尚未开启。'
-          : 'macOS 测试环境需要完成一个设置。当前 Case 已保留。';
-        return `${explanation}\n${setupPanel(snapshot).join('\n')}`;
+        const locale = resolveSetupLocale(undefined, ctx);
+        const explanation =
+          locale === 'zh-CN'
+            ? isScreenshot
+              ? '已经通过的业务断言仍然有效；只有截图 Evidence 尚未开启。'
+              : 'macOS 测试环境需要完成一个设置。当前 Case 已保留。'
+            : isScreenshot
+              ? 'Previously passed business assertions remain valid; only screenshot Evidence is unavailable.'
+              : 'The macOS test environment needs one setup step. The current Case is preserved.';
+        return `${explanation}\n${setupPanel(snapshot, locale).join('\n')}`;
       },
     ),
     ...createCaseTools(maat),

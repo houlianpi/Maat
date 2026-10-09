@@ -8,7 +8,10 @@ export function createExecJsTool(
   recorder?: StepRecorder,
   context?: { description?: string; guidelines?: string[] },
   execution?: () => StepExecution,
-  actionableError?: (error: unknown) => Promise<string | undefined>,
+  actionableError?: (
+    error: unknown,
+    ctx: Parameters<ToolDefinition<any, any, any>['execute']>[4],
+  ) => Promise<string | undefined>,
 ): ToolDefinition<any, any, any> {
   return defineTool({
     name: 'exe_js',
@@ -41,7 +44,7 @@ export function createExecJsTool(
         Type.String({ description: 'Required human-readable Case step name when record=true.' }),
       ),
     }),
-    execute: async (_toolCallId, params, signal) => {
+    execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
       try {
         if (params.record && !params.stepName?.trim())
           throw new Error('stepName is required when record=true.');
@@ -59,7 +62,7 @@ export function createExecJsTool(
         };
       } catch (error) {
         await recorder?.recordFailedStep(params.code, error, execution?.());
-        const guidance = await actionableError?.(error);
+        const guidance = await actionableError?.(error, ctx);
         if (guidance) throw new Error(guidance, { cause: error });
         throw error;
       }

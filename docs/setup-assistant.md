@@ -28,6 +28,8 @@ Capabilities include Appium, Mac2, Automation Mode, Accessibility, UI interactio
 
 The default panel shows capabilities and one next action. It does not mention WDA, TCC, capabilities, raw WebDriver errors, or paths. `/maat-doctor` exposes redacted technical details, commands, PIDs, and paths for engineers. Prompt/page text, image payloads, tokens, credentials, and screenshots are omitted or redacted.
 
+Pi renders Setup messages in the language of the most recent user message. `/maat-setup en` and `/maat-setup zh-CN` provide explicit overrides; the system locale and then English are fallbacks. Core returns stable message keys and never embeds Host-language copy.
+
 ## Degraded operation
 
 UI interaction and business assertions may continue when optional screenshot/video capabilities are unavailable. Evidence records one of:

@@ -19,14 +19,24 @@ function partialSnapshot(): SetupSnapshot {
     platform: 'macos',
     fingerprint,
     capabilities: [
-      { id: 'appiumServer', status: 'ready', required: true, summary: '测试服务已连接' },
-      { id: 'uiInteraction', status: 'ready', required: true, summary: '可以操作应用并运行断言' },
+      {
+        id: 'appiumServer',
+        status: 'ready',
+        required: true,
+        messageKey: 'capability.appium.ready',
+      },
+      {
+        id: 'uiInteraction',
+        status: 'ready',
+        required: true,
+        messageKey: 'capability.interaction.ready',
+      },
       {
         id: 'screenCapture',
         status: 'action-required',
         required: false,
-        summary: '截图 Evidence 尚未开启',
-        action: { id: 'open-screen-recording', label: '开启截图权限' },
+        messageKey: 'capability.screenshot.required',
+        action: { id: 'open-screen-recording', labelKey: 'action.openScreenRecording' },
       },
     ],
   });
@@ -38,7 +48,23 @@ function toolByName(tools: ReturnType<typeof createSetupTools>, name: string) {
   return tool;
 }
 
-const context = {} as ExtensionContext;
+function languageContext(text: string): ExtensionContext {
+  return {
+    sessionManager: {
+      getEntries: () => [
+        {
+          type: 'message',
+          id: 'user',
+          parentId: null,
+          timestamp: new Date().toISOString(),
+          message: { role: 'user', content: text, timestamp: Date.now() },
+        },
+      ],
+    },
+  } as unknown as ExtensionContext;
+}
+
+const context = languageContext('请检查 macOS 测试环境');
 
 function textContent(result: { content: Array<{ type: string; text?: string }> }): string {
   const content = result.content.find((item) => item.type === 'text');
@@ -164,7 +190,7 @@ test('a Case requiring screenshots cannot choose screenshot degradation', async 
   }
 });
 
-test('/maat-setup in non-TUI mode reports status without confirmation or system changes', async () => {
+test('/maat-setup checks macOS from the default Web platform without switching it', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'maat-setup-command-'));
   const maat = createMaat({
     workspaceRoot: directory,
@@ -185,6 +211,7 @@ test('/maat-setup in non-TUI mode reports status without confirmation or system 
   let confirms = 0;
   const notifications: string[] = [];
   const commandContext = {
+    ...languageContext('请检查 macOS 测试环境'),
     mode: 'print',
     ui: {
       confirm: async () => {
@@ -195,12 +222,19 @@ test('/maat-setup in non-TUI mode reports status without confirmation or system 
     },
   } as unknown as ExtensionContext;
   try {
-    await maat.platforms.select('macos');
+    assert.equal(maat.platforms.current().id, 'web');
     registerMaatSetupCommands(pi, maat);
     await commands.get('maat-setup')?.handler('', commandContext);
     assert.equal(confirms, 0);
     assert.match(notifications.join('\n'), /下一步：开启截图权限/);
+    assert.doesNotMatch(notifications.join('\n'), /已恢复 Case/);
     assert.equal(maat.setup.current().state, 'partially-ready');
+    assert.equal(maat.setup.current().platform, 'macos');
+    assert.equal(maat.platforms.current().id, 'web');
+    await commands.get('maat-doctor')?.handler('', commandContext);
+    assert.match(notifications.at(-1) ?? '', /Maat · macOS 工程诊断/);
+    assert.doesNotMatch(notifications.at(-1) ?? '', /^\s*{/);
+    assert.equal(maat.platforms.current().id, 'web');
   } finally {
     await maat.close();
     await rm(directory, { recursive: true, force: true });

@@ -2,6 +2,7 @@ import { Type } from '@earendil-works/pi-ai';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { browserNames, nativeDeviceKinds, type MaatApi } from '@houlianpi/maat-core';
 import { setupPanel } from '../setup-ui.ts';
+import { resolveSetupLocale } from '../setup-i18n.ts';
 
 export function createPlatformTools(maat: MaatApi): ToolDefinition<any, any, any>[] {
   return [
@@ -12,7 +13,7 @@ export function createPlatformTools(maat: MaatApi): ToolDefinition<any, any, any
       description:
         'Select the active UI platform adapter. Available adapters are returned dynamically by Maat.',
       parameters: Type.Object({ platform: Type.String() }),
-      async execute(_id, input) {
+      async execute(_id, input, _signal, _update, ctx) {
         const state = await maat.platforms.select(input.platform);
         const setup = input.platform === 'macos' ? maat.setup.current() : undefined;
         return {
@@ -20,7 +21,7 @@ export function createPlatformTools(maat: MaatApi): ToolDefinition<any, any, any
             {
               type: 'text',
               text: setup
-                ? `${JSON.stringify(state)}\n\n${setupPanel(setup).join('\n')}`
+                ? `${JSON.stringify(state)}\n\n${setupPanel(setup, resolveSetupLocale(undefined, ctx)).join('\n')}`
                 : JSON.stringify(state),
             },
           ],

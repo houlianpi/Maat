@@ -211,8 +211,8 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
       const preferencesFile = path.join(process.argv[2], 'setup.json');
       const fingerprint = { appiumPid: 10, appiumStartedAt: 'now', wdaPid: 20, wdaStartedAt: 'now' };
       const detector = async () => core.aggregateSetup({ platform: 'macos', fingerprint, capabilities: [
-        { id: 'appiumServer', status: 'ready', required: true, summary: 'ready' },
-        { id: 'screenCapture', status: 'action-required', required: false, summary: 'missing', action: { id: 'open-screen-recording', label: 'open' } },
+        { id: 'appiumServer', status: 'ready', required: true, messageKey: 'capability.appium.ready' },
+        { id: 'screenCapture', status: 'action-required', required: false, messageKey: 'capability.screenshot.required', action: { id: 'open-screen-recording', labelKey: 'action.openScreenRecording' } },
       ] });
       const first = new core.SetupAssistant({ preferencesFile, detector });
       await first.check(); await first.action('open-screen-recording');
