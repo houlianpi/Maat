@@ -18,5 +18,6 @@ The complete workflow is in this loaded file. Do not browse or open this `SKILL.
 8. Capture screenshot Evidence when it supports the objective or the Case requires it.
 9. Call `maat_list_case_steps`; remove or replace diagnostic, duplicated, or unstable steps.
 10. Call `maat_save_case`. If fresh validation fails, preserve the expected outcome, fix the steps, and retry.
+11. When rerunning a native Case whose saved App target is runtime-bound, pass the verified App package or bundle identifier as `appId`. Do not first run it without that required value.
 
 Read [references/case-quality.md](references/case-quality.md) when deciding what belongs in the Case.

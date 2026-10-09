@@ -4,7 +4,10 @@ import { createServer } from 'node:http';
 import { mkdtemp, mkdir, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { startNativeSession } from '../packages/core/src/platforms/appium/runtime/session.ts';
+import {
+  closeAppiumSession,
+  startNativeSession,
+} from '../packages/core/src/platforms/appium/runtime/session.ts';
 import {
   capabilities,
   connection,
@@ -75,6 +78,38 @@ test('native defaults preserve data and device discovery excludes offline device
     parseAndroidDevices('List of devices attached\na device model:Pixel\nb unauthorized\nc offline')
       .length,
     1,
+  );
+});
+
+test('Appium teardown treats an already replaced Session as idempotently closed', async () => {
+  let deleted = false;
+  await closeAppiumSession(
+    {
+      async terminateApp() {
+        throw new Error('A session is either terminated or not started');
+      },
+      async deleteSession() {
+        deleted = true;
+        throw new Error('invalid session id');
+      },
+    } as never,
+    'com.example.app',
+    true,
+  );
+  assert.equal(deleted, true);
+
+  await assert.rejects(
+    closeAppiumSession(
+      {
+        async terminateApp() {
+          throw new Error('permission denied');
+        },
+        async deleteSession() {},
+      } as never,
+      'com.example.app',
+      true,
+    ),
+    /permission denied/,
   );
 });
 
