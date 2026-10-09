@@ -15,6 +15,8 @@
 
 Maat is a conversational UI testing Harness. The Agent explores real interfaces, executes focused JavaScript, records observations and successful steps, validates them with fresh Sessions, and saves one standard Mocha TypeScript Case that runs without an LLM.
 
+The workspace also contains an early Codex Plugin with local tools and focused Setup, Case Builder, and Test Runner Skills. It uses the same host-neutral Core over stdio and does not listen on a network port.
+
 ## Quick start
 
 Install Maat as a Pi package:
@@ -40,8 +42,18 @@ maat
 maat agent --browser chromium --headless "Test the checkout flow"
 ```
 
-Maat is published as three packages: host-neutral `@houlianpi/maat-core`, Pi Extension
-`@houlianpi/maat-pi`, and standalone `@houlianpi/maat`. Published packages contain compiled
+To test the Codex Plugin from this checkout:
+
+```bash
+npm run plugin:stage
+codex plugin marketplace add .
+codex plugin add maat@maat-local
+```
+
+Open a new Codex chat in the target project after installation.
+
+Maat is published as four packages: host-neutral `@houlianpi/maat-core`, Codex Plugin
+`@houlianpi/maat-codex`, Pi Extension `@houlianpi/maat-pi`, and standalone `@houlianpi/maat`. Published packages contain compiled
 JavaScript under `dist`; Core and Platform Adapters do not depend on any Host SDK.
 
 Describe the UI, actions, and explicit business outcome. Maat uses `exe_js` against the active Adapter. Web exposes Playwright `page/context/browser`; Android, iOS and macOS expose WebdriverIO `driver/browser` backed by an Appium Session.
@@ -216,11 +228,12 @@ Exploration Evidence and failed attempts live under `artifacts/cases/<case-id>`.
 ```text
 packages/
 ├── core/          host-neutral API, Adapters, Worker, Case Runner, Evidence and test fixture
+├── codex/         Codex Plugin, local Tool Server and focused Skills
 ├── pi/            Pi Extension, tools, prompt, work mode and status UI
 └── maat/          standalone TUI, Agent, CLI and executable
 ```
 
-Future Codex, Claude Code or DeepSeek integrations are added as parallel Host packages depending
+Future Claude Code or DeepSeek integrations are added as parallel Host packages depending
 on `maat-core`; Core never imports a Host SDK.
 
 The Worker is a killable process boundary with timeout, Abort, code/output limits and sensitive environment filtering. It is not an OS or container sandbox.

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "maat": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${PLUGIN_ROOT}/dist/server.js"]
+    }
+  }
+}

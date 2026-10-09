@@ -13,10 +13,15 @@ type Manifest = {
   version: string;
 };
 
-const workspaces = ['@houlianpi/maat-core', '@houlianpi/maat-pi', '@houlianpi/maat'] as const;
+const workspaces = [
+  '@houlianpi/maat-core',
+  '@houlianpi/maat-codex',
+  '@houlianpi/maat-pi',
+  '@houlianpi/maat',
+] as const;
 const manifests = new Map<string, Manifest>();
 const rootManifest = JSON.parse(await readFile('package.json', 'utf8')) as Manifest;
-for (const directory of ['packages/core', 'packages/pi', 'packages/maat']) {
+for (const directory of ['packages/core', 'packages/codex', 'packages/pi', 'packages/maat']) {
   const manifest = JSON.parse(
     await readFile(path.join(directory, 'package.json'), 'utf8'),
   ) as Manifest;
@@ -26,6 +31,10 @@ for (const directory of ['packages/core', 'packages/pi', 'packages/maat']) {
 assert.equal(
   manifests.get('@houlianpi/maat-core')?.dependencies?.['@earendil-works/pi-coding-agent'],
   undefined,
+);
+assert.equal(
+  manifests.get('@houlianpi/maat-codex')?.dependencies?.['@houlianpi/maat-core'],
+  rootManifest.version,
 );
 assert.equal(
   manifests.get('@houlianpi/maat-pi')?.dependencies?.['@earendil-works/pi-coding-agent'],
@@ -60,6 +69,7 @@ try {
 
   const installation = await mkdtemp(path.join(tmpdir(), 'maat-workspaces-'));
   const piInstallation = await mkdtemp(path.join(tmpdir(), 'maat-pi-host-'));
+  const codexInstallation = await mkdtemp(path.join(tmpdir(), 'maat-codex-host-'));
   const emptyProject = await mkdtemp(path.join(tmpdir(), 'maat-empty-'));
   try {
     execFileSync(
@@ -172,7 +182,7 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
         '--ignore-scripts',
         '@earendil-works/pi-coding-agent@0.87.0',
         tarballs[0]!,
-        tarballs[1]!,
+        tarballs[2]!,
       ],
       { stdio: 'pipe' },
     );
@@ -259,13 +269,51 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
     assert.equal(piRun.status, 0, piRun.stderr);
     assert.match(piRun.stdout, /pi - AI coding assistant/);
     assert.doesNotMatch(piRun.stderr, /Host-provided extension packages must be declared/);
+
+    execFileSync(
+      'npm',
+      [
+        'install',
+        '--prefix',
+        codexInstallation,
+        '--ignore-scripts',
+        '--legacy-peer-deps',
+        tarballs[0]!,
+        tarballs[1]!,
+      ],
+      { stdio: 'pipe' },
+    );
+    const codexRoot = path.join(codexInstallation, 'node_modules', '@houlianpi', 'maat-codex');
+    const codexManifest = JSON.parse(
+      await readFile(path.join(codexRoot, 'plugin.json'), 'utf8'),
+    ) as { name?: string };
+    assert.equal(codexManifest.name, 'maat');
+    assert.ok(
+      (await readFile(path.join(codexRoot, 'mcp.json'), 'utf8')).includes('dist/server.js'),
+    );
+    for (const skill of ['maat-setup', 'maat-case-builder', 'maat-test-runner']) {
+      assert.ok(
+        (await readFile(path.join(codexRoot, 'skills', skill, 'SKILL.md'), 'utf8')).startsWith(
+          '---\n',
+        ),
+      );
+    }
+    const codexServer = spawnSync(process.execPath, [path.join(codexRoot, 'dist', 'server.js')], {
+      input: '',
+      encoding: 'utf8',
+      cwd: emptyProject,
+      timeout: 5_000,
+      env: { ...process.env, MAAT_WORKSPACE_ROOT: emptyProject },
+    });
+    assert.equal(codexServer.status, 0, codexServer.stderr);
   } finally {
     await rm(installation, { recursive: true, force: true });
     await rm(piInstallation, { recursive: true, force: true });
+    await rm(codexInstallation, { recursive: true, force: true });
     await rm(emptyProject, { recursive: true, force: true });
   }
   process.stdout.write(
-    `Verified three Maat ${rootManifest.version} workspace tarballs and installed runtimes.\n`,
+    `Verified four Maat ${rootManifest.version} workspace tarballs and installed runtimes.\n`,
   );
 } finally {
   for (const tarball of tarballs) await rm(tarball, { force: true });

@@ -1,0 +1,4 @@
+interface:
+  display_name: 'Maat Test Runner'
+  short_description: 'Run and diagnose Maat tests'
+  default_prompt: 'Run the requested Maat tests, inspect results and Evidence, and explain failures.'

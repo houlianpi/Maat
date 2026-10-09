@@ -1,0 +1,23 @@
+{
+  "name": "maat",
+  "version": "0.3.1",
+  "description": "Build, run, and diagnose executable UI tests with Maat.",
+  "author": { "name": "houlianpi" },
+  "license": "MIT",
+  "skills": "./skills/",
+  "mcpServers": "./mcp.json",
+  "interface": {
+    "displayName": "Maat",
+    "shortDescription": "Conversational UI testing",
+    "longDescription": "Prepare Web and native UI test platforms, explore persistent Sessions, save executable Maat Cases, and diagnose Evidence.",
+    "developerName": "houlianpi",
+    "category": "Developer Tools",
+    "logo": "./assets/logo.svg",
+    "composerIcon": "./assets/logo.svg",
+    "defaultPrompt": [
+      "Check Maat and the selected platform, then guide setup until it is ready or clearly blocked.",
+      "Explore the target UI, build a minimal Maat Case from my explicit objectives, and validate it in a fresh Session.",
+      "Run the requested Maat tests, inspect the results and Evidence, and explain any failures."
+    ]
+  }
+}

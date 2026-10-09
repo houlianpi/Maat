@@ -11,6 +11,7 @@
     "paths": {
       "@houlianpi/maat-core": ["packages/core/src/index.ts"],
       "@houlianpi/maat-core/test": ["packages/core/src/test/index.ts"],
+      "@houlianpi/maat-codex": ["packages/codex/src/index.ts"],
       "@houlianpi/maat-pi": ["packages/pi/src/index.ts"],
       "@houlianpi/maat": ["packages/maat/src/index.ts"]
     },

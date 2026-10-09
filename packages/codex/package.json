@@ -1,0 +1,42 @@
+{
+  "name": "@houlianpi/maat-codex",
+  "version": "0.3.1",
+  "description": "Maat plugin for Codex and ChatGPT desktop",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist",
+    "plugin.json",
+    "mcp.json",
+    ".codex-plugin",
+    ".mcp.json",
+    "skills",
+    "assets",
+    "README.md"
+  ],
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "bin": {
+    "maat-codex-server": "dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "test": "node --experimental-strip-types --test ../../test/codex-plugin.test.ts"
+  },
+  "dependencies": {
+    "@houlianpi/maat-core": "0.3.1",
+    "@modelcontextprotocol/sdk": "1.31.0",
+    "zod": "4.6.5"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/houlianpi/Maat.git",
+    "directory": "packages/codex"
+  }
+}

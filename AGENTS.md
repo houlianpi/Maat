@@ -7,6 +7,7 @@ Maat is a TypeScript project for conversational UI verification. Exploration use
 ```text
 packages/
   core/         Host-neutral API, Case, Workers, Adapters, Runner, SessionPool and Evidence
+  codex/        Codex Plugin, local stdio Tool Server, and focused Skills
   pi/           Pi Extension, tools, prompt, work mode and status UI
   maat/         Standalone Pi-backed Agent/TUI and thin CLI executable
 examples/      Small, manually runnable demonstrations
