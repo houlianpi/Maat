@@ -7,6 +7,7 @@ import type { SessionSetup, SetupInspection } from '../core/platforms/contracts.
 import { PlatformRegistry } from '../core/platforms/registry.ts';
 import { SetupAssistant, type SetupAssistantOptions } from '../setup-assistant/setup-assistant.ts';
 import type { SetupCapabilityId, SetupAction } from '../setup-assistant/types.ts';
+import { sameFingerprint } from '../setup-assistant/storage.ts';
 
 /** Stable, host-neutral product API. Agent hosts translate this API into their own tools and UI. */
 export class MaatApi {
@@ -64,8 +65,21 @@ export class MaatApi {
 
   readonly setup = {
     current: () => this.setupAssistant.current(),
-    check: (input?: { platform?: string; serverUrl?: string; signal?: AbortSignal }) =>
-      this.setupAssistant.check(input),
+    check: async (input?: { platform?: string; serverUrl?: string; signal?: AbortSignal }) => {
+      const previous = this.setupAssistant.current();
+      const snapshot = await this.setupAssistant.check(input);
+      const previousHasProcess = Boolean(
+        previous.fingerprint.appiumPid || previous.fingerprint.wdaPid,
+      );
+      if (
+        snapshot.platform === 'macos' &&
+        previousHasProcess &&
+        !sameFingerprint(previous.fingerprint, snapshot.fingerprint)
+      ) {
+        await this.registry.get('macos')?.close();
+      }
+      return snapshot;
+    },
     action: (actionId?: SetupAction['id']) => this.setupAssistant.action(actionId),
     skip: async (capabilityId: SetupCapabilityId) => {
       if (capabilityId === 'screenCapture' && this.drafts.current?.requireScreenshotEvidence) {
