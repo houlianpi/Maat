@@ -10,8 +10,6 @@
 
 Maat 是一个对话式 UI 测试 Harness。Agent 探索真实界面、执行 JavaScript、记录 Observation 与成功步骤，并在全新 Session 中验证，最终保存为无需 LLM 的标准 Mocha TypeScript Case。
 
-Workspace 还包含一个早期 Codex Plugin，提供本地 Tools，以及 Setup、Case Builder 和 Test Runner 三个 Skills。它通过 stdio 复用同一个 Host-neutral Core，不监听网络端口。
-
 ## 快速开始
 
 作为 Pi Package 安装：
@@ -35,16 +33,6 @@ npm install --global @houlianpi/maat
 maat
 maat agent --browser chromium --headless "测试结账流程"
 ```
-
-从当前 checkout 测试 Codex Plugin：
-
-```bash
-npm run plugin:stage
-codex plugin marketplace add .
-codex plugin add maat@maat-local
-```
-
-安装后，在目标项目中打开新的 Codex Chat。
 
 Maat 发布为三个包：与 Host 无关的 `@houlianpi/maat-core`、Pi Extension
 `@houlianpi/maat-pi`、独立产品 `@houlianpi/maat`。发布包只包含 `dist` 下的编译后
@@ -200,12 +188,11 @@ cases/<case-id>/*.png
 ```text
 packages/
 ├── core/          与 Host 无关的 API、Adapter、Worker、Runner、Evidence 和 test fixture
-├── codex/         Codex Plugin、本地 Tool Server 与 Skills
 ├── pi/            Pi Extension、工具、提示词、work mode 和状态 UI
 └── maat/          独立 TUI、Agent、CLI 和可执行文件
 ```
 
-未来的 Claude Code 或 DeepSeek 集成作为依赖 `maat-core` 的平行 Host Package 增加；
+未来的 Codex、Claude Code 或 DeepSeek 集成作为依赖 `maat-core` 的平行 Host Package 增加；
 Core 永远不导入具体 Host SDK。
 
 Worker 是具备超时、Abort、代码/输出限制和敏感环境过滤的可终止进程边界，不是 OS 或容器安全沙箱。

@@ -1,4 +1,0 @@
-interface:
-  display_name: 'Maat Setup'
-  short_description: 'Prepare UI test platforms'
-  default_prompt: 'Check Maat and the selected platform, then guide setup until it is ready or clearly blocked.'

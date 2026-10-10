@@ -59,7 +59,7 @@ jobs:
           test "$(node -p "require('./packages/pi/package.json').peerDependencies['@earendil-works/pi-coding-agent']")" = "*"
 
       - name: Maat smoke suite
-        run: npm run maat:test -- --root test/fixtures/maat-tests --project web --suite smoke --browser chromium --workers 2
+        run: npm run maat:test -- --project web --suite smoke --browser chromium --workers 2
 
       - name: Upload Maat report
         if: always()

@@ -1,4 +1,0 @@
-interface:
-  display_name: 'Maat Case Builder'
-  short_description: 'Build executable UI test cases'
-  default_prompt: 'Explore the target UI, build a minimal Maat Case from my explicit objectives, and validate it in a fresh session.'

@@ -3,33 +3,6 @@ import { capabilities, connection, type ResolvedNativeSession } from '../schema.
 import { createExplorationWorker } from '../../../core/exploration/worker-client.ts';
 import type { JavaScriptSession } from '../../../core/exploration/runtime.ts';
 
-function isMissingSessionError(error: unknown): boolean {
-  return /invalid session id|session (?:is )?either terminated or not started|session (?:has been )?(?:terminated|deleted|closed)|no active session/i.test(
-    String(error),
-  );
-}
-
-export async function closeAppiumSession(
-  driver: Pick<Awaited<ReturnType<typeof remote>>, 'terminateApp' | 'deleteSession'>,
-  appId: string | undefined,
-  supportsAppLifecycle: boolean,
-): Promise<void> {
-  let lifecycleError: unknown;
-  if (appId && supportsAppLifecycle) {
-    try {
-      await driver.terminateApp(appId);
-    } catch (error) {
-      if (!isMissingSessionError(error)) lifecycleError = error;
-    }
-  }
-  try {
-    await driver.deleteSession();
-  } catch (error) {
-    if (!isMissingSessionError(error)) throw error;
-  }
-  if (lifecycleError) throw lifecycleError;
-}
-
 export async function startNativeSession(
   target: ResolvedNativeSession,
   timeoutMs = 60_000,
@@ -82,7 +55,11 @@ export async function startNativeSession(
       try {
         await worker.close();
       } finally {
-        await closeAppiumSession(driver, appId, supportsAppLifecycle);
+        try {
+          if (appId && supportsAppLifecycle) await driver.terminateApp(appId);
+        } finally {
+          await driver.deleteSession();
+        }
       }
     },
   };

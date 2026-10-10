@@ -44,7 +44,6 @@ jobs:
           }
           test "$(node -p "require('./packages/pi/package.json').version")" = "$PACKAGE_VERSION"
           test "$(node -p "require('./packages/maat/package.json').version")" = "$PACKAGE_VERSION"
-          test "$(node -p "require('./packages/codex/package.json').version")" = "$PACKAGE_VERSION"
 
       - name: Install dependencies
         run: npm ci
@@ -66,9 +65,6 @@ jobs:
 
       - name: Publish Pi Extension with provenance
         run: npm publish --workspace @houlianpi/maat-pi
-
-      - name: Publish Codex Plugin with provenance
-        run: npm publish --workspace @houlianpi/maat-codex
 
       - name: Publish standalone Maat with provenance
         run: npm publish --workspace @houlianpi/maat
