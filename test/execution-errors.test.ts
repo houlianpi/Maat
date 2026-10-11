@@ -1,7 +1,29 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createExplorationWorker } from '../packages/core/src/core/exploration/worker-client.ts';
 import { ExplorationExecutionError } from '../packages/core/src/core/exploration/runtime.ts';
+
+test('closing a Worker leaves no deadline timers delaying parent process exit', async () => {
+  const workerModule = new URL(
+    '../packages/core/src/core/exploration/worker-client.ts',
+    import.meta.url,
+  ).href;
+  const runtimeModule = new URL('./fixtures/execution-runtime.ts', import.meta.url).href;
+  const source = `
+    import { createExplorationWorker } from ${JSON.stringify(workerModule)};
+    const session = await createExplorationWorker(new URL(${JSON.stringify(runtimeModule)}), {});
+    await Promise.all([session.close(), session.close()]);
+    console.log('closed');
+  `;
+  const result = await promisify(execFile)(
+    process.execPath,
+    ['--experimental-strip-types', '--input-type=module', '-e', source],
+    { timeout: 1_800, maxBuffer: 16 * 1024 },
+  );
+  assert.equal(result.stdout.trim(), 'closed');
+});
 
 test('initialization failure is not a reusable execution error', async () => {
   await assert.rejects(

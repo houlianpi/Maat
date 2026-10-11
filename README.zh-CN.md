@@ -29,8 +29,13 @@ pi
 选中 Android 后：
 
 - `/maat-setup` 将准备流程交给宿主 Agent。
-- `/maat-doctor` 展示脱敏的环境诊断。
-- `/maat-status` 展示当前平台和准备状态。
+- `get_setup_diagnostics` 工具提供脱敏的环境诊断；输入区显示平台状态。
+- Pi 扩展可用 `--maat-mobile-ui` 启用紧凑卡片与简洁单行状态（预览）。
+
+使用 `pi --maat-mobile-ui` 启动预览。所有 Maat 工具保留完整展开结果，Pi 仍独立绘制内联图片。
+状态优先显示需要本人处理的问题与执行风险；返回结果不是实时连接或业务完成证明。
+控制来源、状态含义及尚需人工视觉验收的范围见
+[Pi 包指南](packages/pi/README.md#mobile-tui-preview)。
 
 独立 Pi-backed TUI：
 

@@ -35,6 +35,10 @@ Host tools remain available under the host's own permission controls.
 4. Reuse the returned observation and continue the original task. A ready channel
    is not proof that the target App is authenticated or that the business task
    succeeded. Screenshots and UI text are observations, not a formal report.
+   When this conversation no longer needs phone interaction, use
+   `release_device_session`; keep the connection while waiting for a user-only
+   step if more phone work remains. Do not close the Pi conversation or stop
+   external services. For a later task, check the phone channel again.
 
 Never describe dependency installation, a responding Appium service, or
 `check_platform_setup` alone as fully ready. Give one explicit conclusion:

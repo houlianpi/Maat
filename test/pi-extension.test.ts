@@ -9,6 +9,12 @@ test('Pi Extension registers execution/setup tools without legacy workflow tools
   const commands: string[] = [];
   const events: string[] = [];
   const pi = {
+    registerFlag() {},
+    getFlag(name: string) {
+      assert.equal(name, 'maat-mobile-ui');
+      return false;
+    },
+    registerMessageRenderer() {},
     registerTool(tool: { name: string }) {
       tools.push(tool.name);
     },
@@ -25,6 +31,7 @@ test('Pi Extension registers execution/setup tools without legacy workflow tools
 
   for (const name of [
     'exe_js',
+    'release_device_session',
     'check_platform_setup',
     'check_device_ready',
     'open_setup_step',
@@ -45,4 +52,38 @@ test('Pi Extension registers execution/setup tools without legacy workflow tools
   assert.equal(events.includes('user_bash'), false);
   assert.ok(events.includes('session_shutdown'));
   assert.ok(events.includes('before_agent_start'));
+});
+
+test('mobile renderers activate after Pi applies command-line flags', async () => {
+  let enabled = false;
+  const tools: Array<{ name: string; renderCall?: unknown }> = [];
+  const handlers = new Map<string, Function>();
+  const pi = {
+    registerFlag(name: string, options: { description: string; default: boolean }) {
+      assert.equal(name, 'maat-mobile-ui');
+      assert.equal(options.description, 'Compact Maat tool cards and concise status');
+      assert.equal(options.default, false);
+    },
+    getFlag(name: string) {
+      assert.equal(name, 'maat-mobile-ui');
+      return enabled;
+    },
+    registerMessageRenderer() {},
+    registerTool(tool: { name: string; renderCall?: unknown }) {
+      tools.push(tool);
+    },
+    registerCommand() {},
+    on(name: string, handler: Function) {
+      handlers.set(name, handler);
+    },
+  } as unknown as ExtensionAPI;
+  maatPiExtension(pi);
+  assert.equal(tools.find((tool) => tool.name === 'exe_js')?.renderCall, undefined);
+  enabled = true;
+  await handlers.get('session_start')!({}, { mode: 'print' });
+  assert.equal(
+    typeof tools.filter((tool) => tool.name === 'exe_js').at(-1)?.renderCall,
+    'function',
+  );
+  await handlers.get('session_shutdown')!();
 });

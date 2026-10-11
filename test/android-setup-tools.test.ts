@@ -174,7 +174,7 @@ test('Android setup is the only user command and hands preparation to the host',
     string,
     { handler: (args: string, context: ExtensionContext) => unknown }
   >();
-  const messages: Array<{ content: string; triggerTurn: boolean }> = [];
+  const messages: Array<{ content: string; triggerTurn: boolean; summary: string[] }> = [];
   const pi = {
     registerCommand(
       name: string,
@@ -182,8 +182,15 @@ test('Android setup is the only user command and hands preparation to the host',
     ) {
       commands.set(name, command);
     },
-    sendMessage(message: { content: string }, options: { triggerTurn: boolean }) {
-      messages.push({ content: message.content, triggerTurn: options.triggerTurn });
+    sendMessage(
+      message: { content: string; details: { summary: string[] } },
+      options: { triggerTurn: boolean },
+    ) {
+      messages.push({
+        content: message.content,
+        triggerTurn: options.triggerTurn,
+        summary: message.details.summary,
+      });
     },
   } as unknown as ExtensionAPI;
   registerMaatSetupCommands(pi, maat);
@@ -195,6 +202,10 @@ test('Android setup is the only user command and hands preparation to the host',
   assert.match(messages[0]!.content, /内部准备工作流/);
   assert.match(messages[0]!.content, /maat-setup\/SKILL\.md/);
   assert.match(messages[0]!.content, /继续原任务/);
+  assert.match(messages[0]!.content, /Maat setup facts:/);
+  assert.match(messages[0]!.summary.join('\n'), /APPIUM_SERVER_UNAVAILABLE/);
+  assert.match(messages[0]!.summary.join('\n'), /下一步/);
+  assert.doesNotMatch(messages[0]!.summary.join('\n'), /Maat setup facts:|setupSkill/);
 });
 
 test('the host tool can explicitly clear legacy App routing for readiness recovery', async () => {
@@ -209,4 +220,58 @@ test('the host tool can explicitly clear legacy App routing for readiness recove
   await tool.execute('clear-routing', { clearAppTarget: true }, undefined, undefined, ctx);
   assert.equal(cleared, true);
   assert.equal('cases' in maat, false);
+});
+
+test('phone release closes only the selected Android adapter and surfaces cleanup failure', async () => {
+  const { maat, ctx } = fixture();
+  let closes = 0;
+  const adapter = maat.platforms.current();
+  adapter.close = async () => {
+    closes++;
+  };
+  const tool = createPlatformTools(maat).find((item) => item.name === 'release_device_session');
+  assert.ok(tool);
+  const result = await tool.execute('release', {}, undefined, undefined, ctx);
+  assert.equal(closes, 1);
+  assert.deepEqual(result.details, { released: true, platform: 'android' });
+  assert.match(
+    result.content
+      .filter((item) => item.type === 'text')
+      .map((item) => item.text)
+      .join('\n'),
+    /Pi 对话继续保留/,
+  );
+  const failure = new Error('owned Session DELETE failed');
+  adapter.close = async () => {
+    throw failure;
+  };
+  await assert.rejects(
+    tool.execute('failure', {}, undefined, undefined, ctx),
+    (error) => error === failure,
+  );
+});
+
+test('phone release cannot close an unrelated platform', async () => {
+  const maat = new MaatApi(
+    new PlatformRegistry([
+      {
+        id: 'web',
+        label: 'Web',
+        codeContext: { language: 'javascript', globals: [], guidelines: [] },
+        initialize: async () => {},
+        execute: async () => [],
+        status: () => ({ id: 'web', label: 'Web', session: 'idle' }),
+        close: async () => {
+          assert.fail('Web must not be closed by phone release');
+        },
+      },
+    ]),
+    '/tmp/maat-release-test',
+  );
+  const tool = createPlatformTools(maat).find((item) => item.name === 'release_device_session');
+  assert.ok(tool);
+  await assert.rejects(
+    tool.execute('release-web', {}, undefined, undefined, fixture().ctx),
+    /requires the Android/,
+  );
 });

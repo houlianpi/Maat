@@ -8,6 +8,15 @@ recovery), and `close()`. Execution returns text/image UI observations; a ready 
 does not prove a business outcome. Worker `display()` and `evidence.screenshot()` return
 image observations, not persisted Evidence records.
 
+`close()` attempts cleanup of owned Workers and native Sessions, not external
+Appium or ADB services. Worker exit deadlines are canceled as soon as the child
+exits, so completed cleanup does not leave timers delaying host process exit.
+Android cleanup does not explicitly terminate the App and requests
+`appium:shouldTerminateApp:false`; normal no-reset use preserves App data/login
+and avoids closing its foreground page. iOS App termination behavior is unchanged.
+Session deletion retains bounded network waits; a slow or unavailable server can
+still delay cleanup.
+
 Android `setup.ready({ screenshot?, signal? })` checks `driver.isLocked()` before
 reading the UI and again before returning `proof.phoneUnlocked: true`. Locked or
 screen-off phones fail with `ANDROID_DEVICE_LOCKED`; failed/non-boolean lock queries

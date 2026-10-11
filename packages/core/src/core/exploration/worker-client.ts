@@ -57,6 +57,19 @@ export async function createExplorationWorker(
     });
     child.once('error', () => resolve());
   });
+  const waitForExit = async (timeoutMs: number) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        exited,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, timeoutMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
   const killGroup = () => {
     try {
       if (child.pid && process.platform !== 'win32') process.kill(-child.pid, 'SIGKILL');
@@ -179,15 +192,9 @@ export async function createExplorationWorker(
       closed = true;
       closing = (async () => {
         if (!alreadyClosed && child.connected) child.send({ id: ++id, operation: 'close' });
-        await Promise.race([
-          exited,
-          new Promise((resolve) => setTimeout(resolve, gracefulCloseTimeoutMs)),
-        ]);
+        await waitForExit(gracefulCloseTimeoutMs);
         if (child.exitCode === null && child.signalCode === null) killGroup();
-        await Promise.race([
-          exited,
-          new Promise((resolve) => setTimeout(resolve, forcedCloseTimeoutMs)),
-        ]);
+        await waitForExit(forcedCloseTimeoutMs);
         if (child.connected) child.disconnect();
         child.removeAllListeners();
         child.stderr?.destroy();

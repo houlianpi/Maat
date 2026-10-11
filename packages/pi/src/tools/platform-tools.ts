@@ -7,6 +7,33 @@ import { resolveSetupLocale } from '../setup-i18n.ts';
 export function createPlatformTools(maat: MaatApi): ToolDefinition<any, any, any>[] {
   return [
     defineTool({
+      name: 'release_device_session',
+      label: 'Release Phone Session',
+      executionMode: 'sequential',
+      description:
+        'Release the owned Android Worker and Appium Session when this conversation no longer needs phone interaction. Keep the Pi conversation, App data/login and external Appium/ADB services. Do not release while waiting for a user action followed by more phone work. Never infer business completion from release.',
+      parameters: Type.Object({}, { additionalProperties: false }),
+      async execute(_id, _input, _signal, _update, ctx) {
+        const adapter = maat.platforms.current();
+        if (adapter.id !== 'android')
+          throw new Error('release_device_session requires the Android platform.');
+        await adapter.close();
+        const locale = resolveSetupLocale(undefined, ctx);
+        return {
+          content: [
+            {
+              type: 'text',
+              text:
+                locale === 'zh-CN'
+                  ? '手机操作连接已释放，Pi 对话继续保留。未主动关闭 App 或停止外部连接服务。'
+                  : 'Phone control Session released; the Pi conversation remains available. No explicit App termination or external-service stop was requested.',
+            },
+          ],
+          details: { released: true, platform: 'android' },
+        };
+      },
+    }),
+    defineTool({
       name: 'select_platform',
       label: 'Select Platform',
       executionMode: 'sequential',

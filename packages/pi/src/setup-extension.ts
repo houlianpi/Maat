@@ -4,10 +4,11 @@ import type {
   ExtensionContext,
   InlineExtension,
 } from '@earendil-works/pi-coding-agent';
-import type { MaatApi } from '@houlianpi/maat-core';
+import type { MaatApi, SetupSnapshot } from '@houlianpi/maat-core';
 import { setupAgentContext, setupPanel } from './setup-ui.ts';
 import { resolveSetupLocale, setupMessage } from './setup-i18n.ts';
 import { MAAT_SETUP_SKILL_PATH } from './system-prompt.ts';
+import { preparationSummary } from './mobile-summary.ts';
 
 function setupTarget(args: string, maat: MaatApi) {
   const tokens = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -21,7 +22,11 @@ function setupTarget(args: string, maat: MaatApi) {
   return { platform: requested ?? (current === 'web' ? 'android' : current), language };
 }
 
-export function registerMaatSetupCommands(pi: ExtensionAPI, maat: MaatApi): void {
+export function registerMaatSetupCommands(
+  pi: ExtensionAPI,
+  maat: MaatApi,
+  onPrepared?: (snapshot: SetupSnapshot, ctx: ExtensionContext) => void,
+): void {
   pi.registerCommand('maat-setup', {
     description: 'Prepare Android through the host Agent, or guide macOS setup',
     handler: async (args, ctx) => {
@@ -41,6 +46,7 @@ export function registerMaatSetupCommands(pi: ExtensionAPI, maat: MaatApi): void
       if (platform === 'android') {
         if (maat.platforms.current().id !== 'android') await maat.platforms.select('android');
         const snapshot = await maat.setup.check({ platform: 'android', signal: ctx.signal });
+        onPrepared?.(snapshot, ctx);
         pi.sendMessage(
           {
             customType: 'maat-android-setup',
@@ -52,6 +58,7 @@ export function registerMaatSetupCommands(pi: ExtensionAPI, maat: MaatApi): void
               setupAgentContext(snapshot, locale),
             ].join('\n'),
             display: true,
+            details: { summary: preparationSummary(snapshot, locale) },
           },
           { triggerTurn: true },
         );
@@ -74,6 +81,7 @@ export function registerMaatSetupCommands(pi: ExtensionAPI, maat: MaatApi): void
             };
       if (maat.platforms.current().id !== 'macos') await maat.platforms.select('macos');
       const snapshot = await maat.setup.check({ platform, signal: ctx.signal });
+      onPrepared?.(snapshot, ctx);
       const resumed = maat.setup.resume();
       ctx.ui.notify(
         `${setupPanel(snapshot, locale).join('\n')}${resumed ? `\n\n${copy.resumed}` : ''}`,

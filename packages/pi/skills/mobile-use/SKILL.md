@@ -18,6 +18,29 @@ succeeds.
 - Await every operation. Emit a compact observation with `console.log()` or
   `evidence.screenshot()` when needed.
 
+## Own the connection, not the App
+
+Create a base Android Session without `appPackage`, `appActivity` or `app`
+capabilities. Launch the requested App separately through `exe_js`:
+`await driver.activateApp(packageId)` when its package is known, or use the
+observed launcher/search UI when it is not. A package ID used for activation
+does not bind that App to the Session. Use host-authorized ADB only when the
+existing runtime cannot perform the required launch; never switch devices.
+
+When this conversation no longer needs phone interaction, call
+`release_device_session` before the final reply, including when phone work is
+explicitly abandoned. It releases the owned Worker/Session, not the Pi
+conversation or external Appium/ADB services. Android cleanup does not explicitly
+terminate the foreground App; normal no-reset use retains its page and login.
+Do not reset App data to release a connection.
+
+Keep the connection while waiting for a user action or clarification if the
+task still requires more phone work. A reply, screenshot, successful action or
+business summary alone is not a reliable release boundary. If later phone work
+is requested after release, check the channel and observe current state again;
+do not replay previous actions. Report cleanup failure explicitly rather than
+claiming resources were released.
+
 ## Choose controls before visual coordinates
 
 1. Read the current accessibility tree and use a visible, unambiguous element

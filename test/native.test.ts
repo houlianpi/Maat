@@ -1304,7 +1304,11 @@ test('runtime Android App target drives lifecycle and resource-id namespace', as
     mock.server.close();
   }
   assert.equal(mock.sessionCapabilities[0]?.['appium:appPackage'], 'com.microsoft.emmx.canary');
-  assert.ok(mock.requests.some((request) => request.includes('terminate_app')));
+  assert.equal(
+    mock.requests.some((request) => request.includes('terminate_app')),
+    false,
+  );
+  assert.equal(mock.sessionCapabilities[0]?.['appium:shouldTerminateApp'], false);
   assert.equal(mock.deleted(), 1);
 });
 

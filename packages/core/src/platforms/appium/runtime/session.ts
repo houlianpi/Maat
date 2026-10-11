@@ -45,9 +45,12 @@ export async function startNativeSession(
     AbortSignal.timeout(initializationTimeoutMs),
   ]);
   const remaining = () => Math.max(1, Math.ceil(deadline - Date.now()));
-  const desired = capabilities(target);
+  const desired = {
+    ...capabilities(target),
+    ...(target.environment.platform === 'android' ? { 'appium:shouldTerminateApp': false } : {}),
+  };
   const appId = target.app?.['appium:appPackage'] ?? target.app?.['appium:bundleId'];
-  const supportsAppLifecycle = target.environment.platform !== 'macos';
+  const supportsAppLifecycle = target.environment.platform === 'ios';
   if (target.environment.serverUrl) connection(target.environment.serverUrl);
   if (!target.environment.serverUrl)
     throw new Error('Resolved Appium Session requires a serverUrl.');

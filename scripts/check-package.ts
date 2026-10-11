@@ -176,8 +176,20 @@ try {
           await realpath(skills.skills[1].filePath) !== await realpath(api.MAAT_MOBILE_USE_SKILL_PATH))
         throw new Error('Installed Skill path points outside the package');
       const tools = []; const commands = []; const handlers = new Map();
+      const definitions = new Map();
+      let mobileEnabled = false;
       const pi = {
-        registerTool(tool) { tools.push(tool.name); },
+        registerFlag(name, options) {
+          if (name !== 'maat-mobile-ui' || options.description !== 'Compact Maat tool cards and concise status' ||
+              options.type !== 'boolean' || options.default !== false)
+            throw new Error('Installed compact UI flag contract is incorrect');
+        },
+        getFlag(name) {
+          if (name !== 'maat-mobile-ui') throw new Error('Unexpected flag lookup: ' + name);
+          return mobileEnabled;
+        },
+        registerMessageRenderer() {},
+        registerTool(tool) { tools.push(tool.name); definitions.set(tool.name, tool); },
         registerCommand(name) { commands.push(name); },
         on(event, handler) { handlers.set(event, handler); return () => {}; },
       };
@@ -190,6 +202,35 @@ try {
         throw new Error('Installed extension contains removed work-mode policy');
       if (commands.join(',') !== 'maat-setup')
         throw new Error('Installed extension should register only maat-setup');
+      if (definitions.get('exe_js').renderCall)
+        throw new Error('Installed compact UI must remain opt-in');
+      mobileEnabled = true;
+      const mobileContext = { mode: 'print', sessionManager: {
+        getEntries() { return [{ type: 'message', message: { role: 'user', content: '请检查手机' } }]; }
+      } };
+      await handlers.get('session_start')?.({ reason: 'startup' }, mobileContext);
+      const promptResult = await handlers.get('before_agent_start')?.({ systemPrompt: 'original prompt' }, mobileContext);
+      if (!promptResult.systemPrompt.startsWith('original prompt'))
+        throw new Error('Installed extension lost the host prompt');
+      for (const tool of definitions.values())
+        if (typeof tool.renderCall !== 'function' || typeof tool.renderResult !== 'function' || tool.renderShell !== 'self')
+          throw new Error('Installed compact renderer missing: ' + tool.name);
+      sdk.initTheme('dark');
+      const platforms = definitions.get('list_platforms');
+      const platformResult = await platforms.execute('platforms', {}, undefined, undefined, { mode: 'print' });
+      const card = new sdk.ToolExecutionComponent('list_platforms', 'platforms', {}, { showImages: false },
+        platforms, { requestRender() {} }, process.cwd());
+      card.setArgsComplete();
+      card.markExecutionStarted();
+      card.updateResult({ ...platformResult, isError: false }, false);
+      const compact = card.render(120).join('\\n');
+      if (!compact.includes('Android') || compact.includes('codeContext'))
+        throw new Error('Installed compact platform facts are incorrect');
+      if (!compact.includes('查看可用平台') || compact.includes('Executing') || compact.includes('执行中'))
+        throw new Error('Installed compact card locale/completion is incorrect');
+      card.setExpanded(true);
+      if (!card.render(120).join('\\n').includes('codeContext'))
+        throw new Error('Installed expanded renderer lost model facts');
       await handlers.get('session_shutdown')?.();
     `;
     execFileSync(

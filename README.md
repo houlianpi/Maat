@@ -36,6 +36,11 @@ run on the same computer. Remote preparation is not part of the current scope.
 Status remains visible in the TUI, while diagnostics and packaged workflows are
 internal Agent capabilities rather than additional user commands.
 
+For the opt-in Pi display preview, start `pi --maat-mobile-ui`. All Maat tools use
+compact cards and a concise single-line status. Pi retains inline images and expanded
+raw results. See [the Pi package guide](packages/pi/README.md#mobile-tui-preview)
+for control sources, status semantics and manual visual acceptance boundaries.
+
 To use the standalone Pi-backed TUI:
 
 ```bash

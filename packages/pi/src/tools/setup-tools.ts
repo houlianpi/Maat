@@ -106,7 +106,7 @@ export function createSetupTools(maat: MaatApi): ToolDefinition<any, any, any>[]
                   .join('\n'),
               },
             ],
-            details: action,
+            details: { ...action, systemChangesExecuted: false },
           };
         }
         maat.setup.interrupt({
