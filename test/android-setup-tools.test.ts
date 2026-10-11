@@ -133,9 +133,7 @@ test('Android readiness forwards observations without formal persistence and exp
   assert.equal(requestedScreenshot, false);
   assert.ok(result.content.some((item) => item.type === 'text' && item.text === '<hierarchy />'));
   assert.ok(
-    result.content.some(
-      (item) => item.type === 'text' && item.text.includes('可以开始手机任务'),
-    ),
+    result.content.some((item) => item.type === 'text' && item.text.includes('可以开始手机任务')),
   );
   assert.equal('cases' in maat, false);
   assert.equal('evidence' in maat, false);

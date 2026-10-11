@@ -117,9 +117,10 @@ test('worker classifies code failures and preserves uncertain UI state for obser
         return true;
       },
     );
-    assert.deepEqual(await session.execute(`console.log(await page.locator('h1').textContent());`), [
-      { type: 'text', text: 'possibly changed' },
-    ]);
+    assert.deepEqual(
+      await session.execute(`console.log(await page.locator('h1').textContent());`),
+      [{ type: 'text', text: 'possibly changed' }],
+    );
   } finally {
     await session.close();
   }

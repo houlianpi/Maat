@@ -146,6 +146,11 @@ Old consumers need migration; do not publish this change as a compatible patch r
 
 ## Development and releases
 
+The project `.npmrc` uses the company registry recorded in the lockfile. Keep
+them aligned: npm 12 otherwise treats those tarball URLs as remote dependencies
+and rejects them with `EALLOWREMOTE`. Do not disable remote-package restrictions
+or change global npm settings to work around this.
+
 ```bash
 npm ci
 npm run build
