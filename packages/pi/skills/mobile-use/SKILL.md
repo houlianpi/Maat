@@ -1,6 +1,6 @@
 ---
 name: mobile-use
-description: 'Operate Android apps reliably with Maat in Pi: use isolated exe_js calls, bounded scrolling, current UI observations, and safe recovery from unexpected navigation or gesture results.'
+description: 'Operate Android apps reliably with Maat in Pi: Chinese and Unicode text input through Appium, accessibility-first targeting with visual fallback, calibrated scrolling, isolated exe_js calls, and safe recovery from unexpected menus or navigation.'
 ---
 
 # Operate the phone from current state
@@ -18,10 +18,65 @@ succeeds.
 - Await every operation. Emit a compact observation with `console.log()` or
   `evidence.screenshot()` when needed.
 
+## Choose controls before visual coordinates
+
+1. Read the current accessibility tree and use a visible, unambiguous element
+   when its label, resource ID, bounds and state support the intended action.
+2. If the target is missing, ambiguous, has unusable bounds or the tree is
+   effectively empty, capture a current screenshot and use visual recognition.
+   A nonempty tree is not necessarily sufficient for the specific target.
+   Do not repeatedly dump the same unhelpful tree or toggle accessibility
+   settings to force an App to expose controls.
+3. Use the host model's image understanding. Use OCR or another recognition
+   tool only if already available and permitted; do not invent an image
+   recognition API, install another runtime or upload private screenshots to
+   an external service.
+
+For visual targeting, identify the actual control rather than nearby text.
+Map displayed-image coordinates back to the original screenshot, then to the
+current driver viewport; account for resizing, rotation and offsets. Never
+assume a model-visible image has the same dimensions as the device. If that
+mapping or target is uncertain, obtain a better observation or ask the user.
+Use a short `mobile: clickGesture` for a visually located target, not a long
+press or drag. After navigation, keyboard changes or scrolling, observe again
+before reusing coordinates.
+
+## Enter Chinese text through Appium
+
+For Chinese and other Unicode text, prefer the Appium UiAutomator2 input
+method, not clipboard/paste or shell `input text`. First focus the intended
+editable field using a current element or a verified short tap. Then, within
+the user's authorization:
+
+```javascript
+await driver.execute('mobile: type', { text: '你好' });
+```
+
+The example text is illustrative; enter only the text requested by the user.
+`mobile: type` types into the focused field and does not guarantee replacement
+of existing text. Inspect any draft first; do not clear it, append a duplicate
+or change the system keyboard configuration without understanding the impact.
+
+- A successful command means text was handed to the input channel, not that
+  the intended field contains the correct text. Read its value back through a
+  usable element, or inspect a current screenshot if the tree is insufficient.
+- Verify the exact requested text and intended recipient or destination before
+  any authorized send/submit action. Input authorization is not send authorization.
+- Do not try clipboard transport first for Chinese. If an earlier attempt
+  produced replacement characters, mojibake or unexpected text, stop before
+  sending; inspect the actual draft and correct only the affected input within
+  authorization. Do not assume a base64 clipboard payload proves the UI text.
+- If `mobile: type` is unsupported or fails, report that failure and reread the
+  field before choosing another supported Appium input method. Do not silently
+  fall back to clipboard, replay uncertain input or reinstall helpers.
+
 ## Scroll without overshooting
 
 Keep the complete gesture in the current `exe_js` call. Derive coordinates from
-the current viewport and keep the drag in the center of the screen:
+the current viewport and a safe scrollable content area. Prefer an area whose
+bounds are exposed by the current tree; otherwise locate it visually. The
+following center-screen example is only a starting point when those points are
+inside the observed scrollable area:
 
 ```javascript
 const { x, y, width, height } = await driver.getWindowRect();
@@ -36,7 +91,9 @@ await evidence.screenshot();
 ```
 
 For precise reading, move about 20% to 28% of the viewport at a time. Keep both
-points away from screen edges.
+points away from screen edges, navigation bars, image tiles, selectable text
+and interactive controls. A fixed speed or distance cannot guarantee no inertia
+or long-press interception on every device.
 
 - Observe after every scroll and compare the current screen with the previous
   observation. Do not queue several blind gestures.
@@ -44,9 +101,31 @@ points away from screen edges.
   content.
 - Do not drag into screen edges or hold near an edge. Vendor navigation,
   assistants or content portals may intercept those gestures.
-- If a gesture opens another App or system page, stop. Observe the foreground
-  state, return without accepting terms or changing settings, then reread the
-  target App. Never repeat the gesture blindly.
+- Keep overlap between observations when reading a feed. If content was
+  skipped, make one smaller reverse movement and reread it; reduce distance
+  before continuing. Do not repeatedly jump to the top or queue a long
+  recovery loop.
+- Wait for the view to settle with supported driver waits and a bounded budget,
+  not an assumed `setTimeout` global. If the view does not change, diagnose the
+  scroll area or end of content before repeating a gesture.
+
+## Recover from intercepted gestures
+
+An image long-press menu, text-selection menu or vendor content portal is an
+unexpected interaction, not a successful scroll. Stop and inspect the current
+foreground App and screenshot. Do not accept terms, enable the portal, choose
+save/edit/translate/share, or continue with stale coordinates.
+
+If the observation confirms a dismissible menu or welcome page, use one Back
+action (`await driver.back()`) and reread the foreground state. Do not chain
+blind Back actions: Back can also leave the target screen or discard a draft.
+Resume only after confirming the intended App and screen; change the gesture
+start area, distance or touch method rather than repeating the intercepted
+gesture.
+
+Report what was observed and what was verified after recovery. Returning from
+a menu does not prove that all content was unchanged. Do not claim "no impact"
+or "nothing was modified" without evidence covering that claim.
 
 ## Recovery
 

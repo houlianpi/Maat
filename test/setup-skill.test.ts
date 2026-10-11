@@ -52,6 +52,7 @@ test('standalone loads only its own setup Skill while retaining resource isolati
       settingsManager: SettingsManager.inMemory(),
       ...createMaatResourceOptions([]),
     });
+
     await loader.reload();
     assert.deepEqual(loader.getSkills().diagnostics, []);
     assert.deepEqual(
@@ -63,4 +64,15 @@ test('standalone loads only its own setup Skill while retaining resource isolati
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('Mobile Use guidance covers Unicode input, visual fallback and intercepted gestures', async () => {
+  const skill = await readFile(MAAT_MOBILE_USE_SKILL_PATH, 'utf8');
+  assert.match(skill, /mobile: type/);
+  assert.match(skill, /Input authorization is not send authorization/);
+  assert.match(skill, /Do not try clipboard transport first for Chinese/);
+  assert.match(skill, /tree is\s+effectively empty/);
+  assert.match(skill, /Map displayed-image coordinates back to the original screenshot/);
+  assert.match(skill, /Do not chain\s+blind Back actions/);
+  assert.match(skill, /Returning from\s+a menu does not prove that all content was unchanged/);
 });
