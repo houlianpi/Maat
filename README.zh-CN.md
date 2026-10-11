@@ -137,6 +137,8 @@ npm run package:check
 npm Trusted Publishing 和 provenance。Release 标签必须等于 `v<workspace version>`，
 顺序为 Core → Pi Extension → 独立 Maat。GitHub 预发布进入 npm `next`，
 正式 Release 进入 `latest`。
+手动触发该工作流只重跑验证与当前 `next` 渠道检查，不重复发布包。
+渠道核验最多等待五分钟，让 npm 完成处理，并确认预发布没有改动 `latest`。
 
 `0.3.2` 是用于本地 Android 首用验证的预发布，包含不兼容 API 删除，并不是旧测试 Harness
 的兼容补丁。Pi 自主启动 Appium 的首用验收尚未通过。测试时请明确安装这个版本：

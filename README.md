@@ -163,6 +163,9 @@ Releases use [publish.yml](.github/workflows/publish.yml), matching workspace ve
 npm Trusted Publishing and provenance. The GitHub release tag must equal
 `v<workspace version>`. GitHub prereleases publish to npm `next`; stable releases
 publish to `latest`. Publishing order remains Core → Pi Extension → standalone Maat.
+Manual dispatch reruns validation and checks the current `next` channel without
+publishing packages again. Channel verification waits up to five minutes for
+npm processing and checks that previews do not change `latest`.
 
 The `0.3.2` prerelease is for local Android first-use testing, not a compatible
 patch of the former testing Harness. Autonomous Appium startup in Pi has not
