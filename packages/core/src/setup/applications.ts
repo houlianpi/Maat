@@ -5,18 +5,35 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { NativeEnvironment } from '../platforms/appium/schema.ts';
 import { resolveDevice } from './devices.ts';
+import { assertAdbServerCompatible, resolveAndroidTools } from './android-tools.ts';
 const exec = promisify(execFile);
 
-export async function discoverApplications(input: NativeEnvironment, query: string) {
+export async function discoverApplications(
+  input: NativeEnvironment,
+  query: string,
+  dependencies: {
+    resolveDevice: typeof resolveDevice;
+    resolveAndroidTools: typeof resolveAndroidTools;
+    assertAdbServerCompatible: typeof assertAdbServerCompatible;
+    command(
+      file: string,
+      args: string[],
+      options: { timeout: number },
+    ): Promise<{ stdout: string }>;
+  } = { resolveDevice, resolveAndroidTools, assertAdbServerCompatible, command: exec },
+) {
   if (input.serverUrl && !input.device)
     throw new Error(
       'Remote installed-app discovery is driver-specific. Supply an app identifier or package path.',
     );
-  const target = await resolveDevice(input);
+  const target = await dependencies.resolveDevice(input);
   let apps: Array<{ name: string; id: string }> = [];
   if (target.environment.platform === 'android') {
-    const { stdout } = await exec(
-      'adb',
+    const tools = await dependencies.resolveAndroidTools();
+    if (!tools.adbPath) throw new Error('ADB_MISSING: prepare Android tools before app discovery.');
+    await dependencies.assertAdbServerCompatible(tools.adbPath);
+    const { stdout } = await dependencies.command(
+      tools.adbPath,
       ['-s', String(target.capabilities['appium:udid']), 'shell', 'pm', 'list', 'packages'],
       { timeout: 15_000 },
     );

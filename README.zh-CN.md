@@ -4,229 +4,143 @@
 
 # ⚖️ Maat
 
-### 测试意图 → UI → Evidence → 可执行事实
+### Coding Agent 的真实 UI 执行能力
 
 </div>
 
-Maat 是一个对话式 UI 测试 Harness。Agent 探索真实界面、执行 JavaScript、记录 Observation 与成功步骤，并在全新 Session 中验证，最终保存为无需 LLM 的标准 Mocha TypeScript Case。
+Maat 帮助 Coding Agent 观察和操作真实界面。宿主理解任务并规划动作，Maat 提供设备发现、
+界面观察、执行、取消和失败反馈。当前重点是 Pi 中的 Android Mobile Use；保留 Web、
+iOS 和 macOS 执行 Adapter。
+
+Maat 不再生成或运行正式 Case，不录制 Replay，也不产生业务验证报告。命令成功、连接就绪
+都不等于业务成功。用户需要编写项目测试时，由宿主选择语言和测试框架。
 
 ## 快速开始
-
-作为 Pi Package 安装：
 
 ```bash
 pi install npm:@houlianpi/maat-pi
 pi
-# 在 Pi 中运行：/maat-status
 ```
 
-这会保留 Pi 原本的 UI 与会话，并增加 Maat 的平台、探索、Case 和 Evidence 工具。更新已安装版本：
+当前准备流程限定本地：Pi、Appium 和手机的 ADB 连接在同一台电脑上，暂不处理远程准备。
+向 Pi 描述“帮我准备 Android 手机并读取当前界面”。包内的 `maat-setup` Skill 指导 Agent
+使用宿主已有工具和权限完成必要准备；Maat 不另建安装 Agent 或服务管理器。
 
-```bash
-pi update npm:@houlianpi/maat-pi
-```
+选中 Android 后：
 
-独立运行 Maat TUI 或 Agent：
+- `/maat-setup` 将准备流程交给宿主 Agent。
+- `/maat-doctor` 展示脱敏的环境诊断。
+- `/maat-status` 展示当前平台和准备状态。
+
+独立 Pi-backed TUI：
 
 ```bash
 npm install --global @houlianpi/maat
 maat
-maat agent --browser chromium --headless "测试结账流程"
+maat help
 ```
 
-Maat 发布为三个包：与 Host 无关的 `@houlianpi/maat-core`、Pi Extension
-`@houlianpi/maat-pi`、独立产品 `@houlianpi/maat`。发布包只包含 `dist` 下的编译后
-JavaScript；Core 与 Platform Adapter 不依赖任何具体 Host SDK。
-
-描述目标 UI、操作和明确的业务预期。Maat 使用统一的 `exe_js`：Web Adapter 暴露 Playwright `page/context/browser`；Android、iOS、macOS Adapter 暴露由 Appium Session 支持的 WebdriverIO `driver/browser`。
-
-## 统一 Case
-
-Case 位于 `maat-tests/<所属平台>/cases/<业务模块>`。纯 Web 归属 `web`；Android/iOS 归属各自移动平台；Web + macOS/Windows 混合 Case 归属对应 OS。
-
-```typescript
-await maat.step('打开网页', 'web', async ({ page }) => {
-  /* Playwright */
-});
-await maat.step('桌面确认', 'macos', async ({ driver }) => {
-  /* WebdriverIO */
-});
-await maat.step('网页验证', 'web', async ({ page, expect }) => {
-  /* 复用原 Page */
-});
-```
-
-SessionPool 只创建 Case 实际引用的 Session。纯 Web Case 不创建也不加载 Appium Session；混合 Case 回到 Web 时复用原来的 Playwright Page。
-
-## Harness 流程
-
-```mermaid
-flowchart LR
-  User[用户意图] --> Agent
-  Agent --> Execute[exe_js]
-  Execute --> Worker[统一可终止 Worker Harness]
-  Worker --> Adapter[当前 Platform Runtime]
-  Adapter --> Observation
-  Observation --> Draft
-  Draft --> Candidate[统一 Mocha spec]
-  Candidate --> Validate[全新 SessionPool 验证]
-  Validate --> Case[正式 Case]
-  Case --> Runner[Maat Mocha Runner]
-  Runner --> Report[Evidence + HTML Report]
-```
-
-探索阶段只有一套 Worker Host/Client，每个活跃 Adapter 使用独立 Worker 实例。正式 Case 由 Maat Runner 执行已保存的 TypeScript，不使用探索 Worker。
-
-## Adapter 与 Appium
-
-内置 Web、Android、iOS、macOS Adapter。Core 只依赖 `PlatformAdapter` 与 `PlatformRegistry`；新增 Adapter 不修改 Case、Renderer、Runner、SessionPool 或 Evidence。
-
-Appium 侧，Maat 解析可访问 Server 与设备，然后只创建和删除自己拥有的 Session。Driver 安装、Server 启动、ADB/Xcode、签名、模拟器和系统权限由用户或 Agent 使用 Shell 准备。详见 [Appium Session](docs/native-testing.md)。
-
-本机 macOS Mac2 环境：
+保留一次性 Web Agent 入口：
 
 ```bash
-npm install --global appium
-appium driver install mac2
-appium driver doctor mac2
-appium --address 127.0.0.1 --port 4723
+maat agent --browser chromium --headless "读取页面，说明当前可见内容"
 ```
 
-使用 `find_applications` 返回的 capability，例如
-`{ "appium:bundleId": "com.apple.calculator" }`。Maat 也会兼容旧的裸 `bundleId`，
-但新配置应使用符合 W3C 的 Appium vendor prefix。
+## 准备、观察、操作
 
-可选 Appium Session 提示位于测试目录之外的 `~/.maat/session-hints/<adapter>.json`。`maat-tests` 只保存 Case。
+1. 选择平台和目标设备；多台手机时不能猜测。
+2. 用 `check_platform_setup` 检查准备条件。复用安装、健康服务和正在启动的工作，只补实际缺项。
+3. Android 使用 `check_device_ready` 建立或复用 Session，返回当前控件树和视口；
+   需要视觉观察时传 `screenshot=true`。建立 Session 可能部署辅助组件或触发系统提示。
+4. 用 `exe_js` 执行 UI 代码，唯一输入是 `code`。返回的是观察，不录为正式步骤。
+5. 授权、解锁或认证需要本人完成时暂停；实际完成后重新观察并继续原任务。
 
-### macOS Setup Assistant
+Doctor 检查准备条件，不证明业务结果。Appium 响应不代表手机可操作。连接恢复不得重放
+已可能执行的点击、输入或提交。宿主 Shell 和文件工具始终遵循宿主权限，不再有 Maat 模式切换。
 
-选择 macOS 时会自动执行只读能力检测：
+Maat 动态识别已有 Android 工具与自己的本地缓存。setup Skill 携带的 `android-tools.mjs`
+在授权范围内补齐 ADB/AAPT2，并用同一套路径启动现有 Appium。用户无需配置 SDK 环境变量或
+重启 Pi。下载官方 platform-tools 时需要本人实际接受许可；已有工具优先复用。
+此辅助脚本不安装完整 SDK、Android Studio 或 JDK，但不保证所有 Appium 签名/安装流程都免 Java。
+Appium 引擎没有更换。
+
+继承到的 SDK 环境变量只是候选路径：有效则复用，无效或冲突时明确提示，并继续查找已验证的工具。
+不会为此改写用户配置、要求重启 Pi，或让用户寻找缓存。用户明确指定必须使用某个 SDK 时则保留其要求。
+`/maat-setup` 在首次默认 Web 状态进入 Android；`/maat-setup android` 也可显式选择。
+模型收到的诊断内容包含状态、错误类别和准备动作，不依赖 UI 详情或 MCP 专用字段。
+
+首用体验以真实 Pi/LLM 任务独立验收：累计五分钟、最多两次机会内，提供实际手机观察和低风险结果。
+授权与下载许可由本人处理，但普通配置查找不逐项追问。单元测试或手工预启动服务不能替代此验收。
+当前 Pi 准备流程尚未通过这个验收：宿主没有可跟踪的后台执行机制时，现有前台 Appium
+启动脚本不能独自完成自动准备。人工另开终端只是诊断兜底，不算首用成功。
+
+## 工具与运行时
+
+| 工具                                                                 | 用途                             |
+| -------------------------------------------------------------------- | -------------------------------- |
+| `list_platforms`、`select_platform`                                  | 查看并选择 Adapter               |
+| `list_devices`、`find_applications`、`configure_session`             | 发现设备/App，提供连接提示       |
+| `check_platform_setup`、`get_setup_diagnostics`                      | 准备条件诊断                     |
+| `open_setup_step`、`retry_setup_step`、`continue_without_capability` | 准备指引、授权复查和可选能力选择 |
+| `check_device_ready`                                                 | 检查当前 Android 通道并返回观察  |
+| `configure_browser`、`get_browser_config`                            | Web 配置                         |
+| `exe_js`                                                             | 在当前持久 UI Session 执行代码   |
+
+Web 暴露 Playwright `page/context/browser`，原生平台暴露 WebdriverIO `driver/browser`。
+通过 `list_platforms` 查看具体 globals。文字使用 `console.log`，`display` 接受
+PNG/JPEG/WebP 图片字节或 image data URL。原生 `evidence.screenshot()` 只是截图观察辅助，
+不是正式 Evidence 存储或报告系统。
+
+Appium 提示保存在源码之外。宿主管理服务启动，Maat 清理自己创建的 Session。
+现有原生关闭逻辑可能终止已配置的目标 App，本次清理没有改变这一行为。
+详见 [原生准备](docs/native-testing.md) 与 [Setup Assistant](docs/setup-assistant.zh-CN.md)。
+
+## 架构
 
 ```text
-/maat-setup   一次只展示一个推荐动作的设置向导
-/maat-status  能力与下一步面板
-/maat-doctor  脱敏的工程师诊断
+Coding Agent / Pi
+  ├── 宿主工具 + maat-setup Skill → 已授权的环境准备
+  └── Maat 工具 → Core → Adapter / 可终止 Worker → 真实 UI
 ```
 
-屏幕录制权限控制截图 Evidence；辅助功能控制读取和操作应用；Automation Mode 可减少认证提示；
-完全磁盘访问用于部分 XCTest 视频附件；ffmpeg 仅用于可选视频，不阻止截图和功能测试。Maat
-经确认后可以打开系统设置，但不会自行授权、运行 `tccutil reset`、杀进程或重启 Appium。详见
-[Setup Assistant 产品设计](docs/setup-assistant.zh-CN.md)。
+- `packages/core`：Host-neutral API、Adapter、Worker、setup 检查。
+- `packages/pi`：Pi 工具、setup Skill、UI。
+- `packages/maat`：独立 Pi-backed TUI、一次性 Agent、可执行文件。
 
-## 工具
+Core 不导入 Host SDK。模型代码仅在带超时、Abort 和协议/输出限制的可终止 Worker 中执行；
+这不是文件系统或网络安全沙箱。截图、UI 文本、设备标识和凭据不得随意进入共享日志和源码。
+保留 App 数据和登录，清空需要明确用户意图。
 
-| 工具                                 | 作用                                   |
-| ------------------------------------ | -------------------------------------- |
-| `list_platforms` / `select_platform` | 查看并选择 Adapter                     |
-| `configure_session`                  | 提供可选 Server、设备和 App 提示       |
-| `list_devices` / `find_applications` | 辅助 Appium Session 准备               |
-| `begin_case`                         | 根据明确测试目的创建 Draft             |
-| `exe_js`                             | 在当前持久 UI Session 执行 JavaScript  |
-| `get_case_status`                    | 查看步骤、失败尝试和 Evidence          |
-| `list/remove/replace_case_step`      | 查看、删除和替换正式候选步骤           |
-| `save_case`                          | 全新 Session 验证并保存统一 Mocha Case |
-| `check_platform_setup`               | 只读检测平台能力                       |
-| `open_setup_step`                    | 打开推荐设置页面，不修改权限           |
-| `retry_setup_step`                   | 重新检测并恢复被中断的 Case            |
-| `continue_without_capability`        | 记录用户跳过可选能力的明确选择         |
-| `continue_without_capability`        | 记录用户明确选择的可选能力降级         |
+## 不兼容清理
 
-Assist 模式允许 Shell 和配置排障；Case 模式在探索和生成期间禁止 Shell 与直接文件编辑。
+已移除 Draft/Case API、`@houlianpi/maat-core/test`、Case 工具、模式切换、Runner/报告、
+`maat test`、`maat cases` 和 `maat replay`。`maat-tests/` 原文件保留为历史资产，
+不再由当前产品运行，也不参与项目 typecheck；没有改写或删除。
 
-在 `exe_js` 中，文字使用 `console.log()`；`display()` 只接受 PNG/JPEG/WebP 图片字节或
-base64 data URL。截图优先使用 `await evidence.screenshot('result')`。非法图片会让当前工具调用
-失败，不会写入 Pi transcript。macOS 辅助功能文本可能包含 Unicode 格式控制符，断言可先规范化：
+旧消费者需要迁移，不能把这次改动作为兼容补丁发布。
 
-```javascript
-const value = await result.getAttribute('value');
-expect(value.replace(/\p{Cf}/gu, '').trim()).toBe('7');
-```
-
-`exe_js` 默认只探索。只有最小、可复用的业务操作或断言才使用 `record: true`，并提供简洁
-`stepName`。页面树、元素枚举和配置诊断不得录入 Case。保存前使用 `list_case_steps` 检查步骤。
-
-## 从 0.1.x 迁移
+## 开发与发布
 
 ```bash
-pi remove npm:@houlianpi/maat
-pi install npm:@houlianpi/maat-pi
-```
-
-已有 Case 应将 `@houlianpi/maat/test` 改为 `@houlianpi/maat-core/test`。
-
-## 运行与报告
-
-```bash
-maat test --case calculator-basic-addition
-maat test --suite smoke --browser chrome
-maat test --tag calculator
-maat test --all
-```
-
-对于可以替换不同 App 版本的原生 Case，App 标识在运行时传入。同一个 Android Edge Case
-可以运行 Stable 或 Canary，带包名前缀的 resource-id 也会使用同一个运行时值构造：
-
-```bash
-maat test --project android --case edge-exit-browser-cancel --app-id com.microsoft.emmx
-maat test --project android --case edge-exit-browser-cancel --app-id com.microsoft.emmx.canary
-```
-
-正式输出统一位于 `artifacts/maat/runs/<run-id>`：
-
-```text
-mocha.log
-result.json
-report/index.html
-cases/<case-id>/evidence.json
-cases/<case-id>/*.png
-```
-
-探索 Evidence 与失败 Attempts 位于 `artifacts/cases/<case-id>`。
-
-## 代码结构
-
-```text
-packages/
-├── core/          与 Host 无关的 API、Adapter、Worker、Runner、Evidence 和 test fixture
-├── pi/            Pi Extension、工具、提示词、work mode 和状态 UI
-└── maat/          独立 TUI、Agent、CLI 和可执行文件
-```
-
-未来的 Codex、Claude Code 或 DeepSeek 集成作为依赖 `maat-core` 的平行 Host Package 增加；
-Core 永远不导入具体 Host SDK。
-
-Worker 是具备超时、Abort、代码/输出限制和敏感环境过滤的可终止进程边界，不是 OS 或容器安全沙箱。
-
-## 开发
-
-```bash
-npm install
+npm ci
 npm run build
 npm run typecheck
+npm run format:check
 npm test
 npm run package:check
-maat test --suite smoke --browser chromium
 ```
 
-`package:check` 会构建、打包并在临时目录安装 tarball，然后验证安装后的 CLI 与 Worker，
-用于发现只在 npm 安装包中出现、源码 checkout 无法复现的问题。
+`package:check` 构建、打包并在临时目录安装三个包，验证安装后的 Worker、CLI、Skill 和依赖边界，
+同时检查旧正式测试模块未混入 tarball。Mock 只证明契约；原生平台能力需要真机验证。
 
-## npm 发布
+发布仍使用 [publish.yml](.github/workflows/publish.yml)、一致的 workspace 版本、
+npm Trusted Publishing 和 provenance。Release 标签必须等于 `v<workspace version>`，
+顺序为 Core → Pi Extension → 独立 Maat。GitHub 预发布进入 npm `next`，
+正式 Release 进入 `latest`。
 
-发布由 `.github/workflows/publish.yml` 完成。创建非预发布 GitHub Release，且标签严格等于
-`v<package.json version>` 后，流水线会先执行格式检查、类型检查、全部项目测试和 npm
-三个 tarball 安装检查，再按 Core → Pi Extension → 独立 Maat 的顺序以 provenance 发布。
-
-发布使用 npm Trusted Publishing：仓库 `houlianpi/Maat`、工作流 `publish.yml`、GitHub
-Environment `npm`。不要配置 `NPM_TOKEN`；token 会覆盖 OIDC，并可能触发交互式 OTP 失败。
-需要人工批准时，可给 `npm` Environment 配置 required reviewers。
-
-发布流程：
+`0.3.2` 是用于本地 Android 首用验证的预发布，包含不兼容 API 删除，并不是旧测试 Harness
+的兼容补丁。Pi 自主启动 Appium 的首用验收尚未通过。测试时请明确安装这个版本：
 
 ```bash
-npm version 0.2.1 --workspaces --include-workspace-root
-git push origin main --follow-tags
-# 使用推送的 vX.Y.Z 标签创建对应 GitHub Release。
+pi install npm:@houlianpi/maat-pi@0.3.2
 ```
-
-当前依赖审计仍报告 16 个高危传递依赖。未隐藏审计结果，也未使用强制升级；生产分发前需要跟进上游修复。

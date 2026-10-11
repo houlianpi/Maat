@@ -1,7 +1,7 @@
 {
   "name": "@houlianpi/maat",
-  "version": "0.3.1",
-  "description": "Standalone conversational UI verification Agent and CLI",
+  "version": "0.3.2",
+  "description": "Standalone UI execution Agent and TUI for Maat",
   "license": "MIT",
   "type": "module",
   "files": [
@@ -16,15 +16,14 @@
     ".": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\" && tsc -p tsconfig.json",
     "prepack": "npm run build",
-    "test": "node --experimental-strip-types --test ../../test/agent-options.test.ts ../../test/agent-trace.test.ts ../../test/cli-bin.test.ts ../../test/maat-tui.test.ts ../../test/run-recorder.test.ts"
+    "test": "node --experimental-strip-types --test ../../test/agent-options.test.ts ../../test/agent-trace.test.ts ../../test/cli-bin.test.ts ../../test/maat-tui.test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.87.0",
-    "@houlianpi/maat-core": "0.3.1",
-    "@houlianpi/maat-pi": "0.3.1",
-    "tsx": "4.23.15"
+    "@houlianpi/maat-core": "0.3.2",
+    "@houlianpi/maat-pi": "0.3.2"
   },
   "publishConfig": {
     "access": "public",

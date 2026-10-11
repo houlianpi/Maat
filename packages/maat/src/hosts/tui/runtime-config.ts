@@ -1,6 +1,6 @@
 import type { InlineExtension } from '@earendil-works/pi-coding-agent';
 import type { ThinkingLevel } from '@earendil-works/pi-agent-core';
-import { MAAT_SYSTEM_PROMPT } from '@houlianpi/maat-pi';
+import { MAAT_SYSTEM_PROMPT, MAAT_SETUP_SKILL_PATH } from '@houlianpi/maat-pi';
 
 export type MaatSourceSettings = {
   defaultProvider?: string;
@@ -26,6 +26,7 @@ export type MaatSettings = MaatSourceSettings & {
 export type MaatResourceOptions = {
   noExtensions: true;
   noSkills: true;
+  additionalSkillPaths: string[];
   noPromptTemplates: true;
   noThemes: true;
   noContextFiles: true;
@@ -57,6 +58,7 @@ export function createMaatResourceOptions(
   return {
     noExtensions: true,
     noSkills: true,
+    additionalSkillPaths: [MAAT_SETUP_SKILL_PATH],
     noPromptTemplates: true,
     noThemes: true,
     noContextFiles: true,

@@ -1,61 +1,76 @@
 # Maat Setup Assistant
 
-## Product goal
+## Goal and responsibilities
 
-Users should be able to say “test a macOS app” without knowing Appium, Mac2, XCTest, WDA, TCC, or process paths. Maat checks capabilities, explains what already works, presents one next action, and resumes the current Case after the user finishes macOS authorization.
+The user asks to operate a device, not to manage automation infrastructure.
+The host Coding Agent prepares what it can under authorization and asks the user
+only for actions requiring them. Core returns reliable facts; the packaged
+`maat-setup` Skill describes the Android workflow.
 
-## User journey
+- **Doctor:** inspect preparation and report missing conditions or failed checks.
+- **Setup:** the host reuses tools/services and handles necessary installation,
+  configuration or startup, tracking existing work instead of restarting it.
+- **Ready:** check the actual current Android Session/source/viewport and return
+  observations, with screenshots when requested.
 
-1. Selecting macOS triggers a read-only setup check.
-2. Maat reports `ready`, `partially-ready`, or `blocked` in plain language.
-3. `/maat-setup` presents one recommended action and may open the relevant System Settings page after confirmation.
-4. The user grants permission and runs `/maat-setup` again.
-5. If the same Appium/WDA processes still hold stale permission state, Maat recommends restarting Appium instead of reopening Settings.
-6. The active Case draft and successful steps remain intact; Maat resumes from the interruption.
+A ready channel is not an authenticated App or a successful business outcome.
+There are no Case drafts, work modes, formal validation states or reports.
 
-Restart Appium only when recheck reports `MACOS_SCREEN_CAPTURE_RESTART_REQUIRED`. Restart Pi only if the newly published extension itself was installed or updated; changing Screen Recording permission alone does not normally require it. Maat never performs either restart automatically.
+## User flow
 
-## State machine
+1. Select the platform and intended device.
+2. Diagnose the existing environment; do not reinstall or fully check it for every action.
+3. The Agent handles the actual missing condition with its existing tools.
+4. Wait for the user's actual USB authorization, unlock or authentication when needed.
+5. Recheck the channel, reuse the new observation and continue the original task.
 
-```text
-unknown → checking → action-required → waiting-for-recheck
-                                  ↘ partially-ready → ready
-```
+`/maat-setup` on Android hands this flow to the host. `/maat-doctor` returns
+redacted technical details; `/maat-status` shows platform and preparation state.
+If startup is already running, query the same host task. A timeout is not permission
+to start another service or replay a phone action.
 
-Capabilities include Appium, Mac2, Automation Mode, Accessibility, UI interaction, screen capture, video recording, and Full Disk Access. Process fingerprints invalidate skipped capability choices after Appium/WDA restarts.
+## Android tool preparation
 
-## Copy guidelines
+Users do not need SDK exports. Diagnosis dynamically resolves an existing SDK,
+connection tools or Maat's managed cache. The Skill's `scripts/android-tools.mjs`
+uses the host shell for explicit preparation of actual missing components.
+The next diagnosis in the same Pi process sees the prepared cache, independent
+of a child shell's environment changes.
+An invalid or conflicting inherited SDK is reported, but does not block verified
+alternative tools. Model-visible diagnosis includes status, error category and
+the next preparation action, rather than treating failed checks as missing tools.
+First-use `/maat-setup` defaults to Android and respects explicit platform choices.
 
-The default panel shows capabilities and one next action. It does not mention WDA, TCC, capabilities, raw WebDriver errors, or paths. `/maat-doctor` exposes redacted technical details, commands, PIDs, and paths for engineers. Prompt/page text, image payloads, tokens, credentials, and screenshots are omitted or redacted.
+Official platform-tools downloads require actual SDK license acceptance. Reuse
+existing ADB first; prepare native AAPT2 without Android Studio, a full SDK or a
+JDK. Do not change global configuration.
 
-Pi renders Setup messages in the language of the most recent user message. `/maat-setup en` and `/maat-setup zh-CN` provide explicit overrides; the system locale and then English are fallbacks. Core returns stable message keys and never embeds Host-language copy.
+The same script passes the resolved tool environment only to a new Appium child
+process. Existing services are neither reconfigured nor restarted. A mismatch
+must remain visible and be handled by that service's owner.
 
-## Degraded operation
+## macOS capability checks
 
-UI interaction and business assertions may continue when optional screenshot/video capabilities are unavailable. Evidence records one of:
+Selecting macOS checks Appium, Mac2, automation/Accessibility permissions and optional
+screen capture/video capabilities. The detector may create a temporary Mac2 Session
+and read the source/screenshots; it is not merely a dependency-only check and does
+not execute a business click.
 
-- `captured`
-- `unavailable`
-- `required-but-missing`
-- `skipped-by-user`
+After confirmation, Maat can open the appropriate System Settings page. The user
+grants permission and rechecks. Process fingerprints invalidate outdated skip
+choices and detect when a permission change requires restarting the current
+service. Maat does not restart external services itself.
 
-Cases that explicitly require screenshot Evidence cannot skip screen capture and fail validation when no screenshot is captured. Optional screenshot failure never changes a successful business assertion into a failure.
+Unavailable or skipped optional capabilities remain visible; they are not reported
+as captured observations. Agent decisions depend on the capabilities the task
+actually needs. A screenshot-dependent task cannot proceed on a made-up image.
 
-## Error codes
+## Feedback and safety
 
-- `APPIUM_SERVER_UNAVAILABLE`
-- `MAC2_DRIVER_MISSING`
-- `AUTOMATION_MODE_AUTH_REQUIRED`
-- `MACOS_ACCESSIBILITY_PERMISSION_REQUIRED`
-- `MACOS_SCREEN_CAPTURE_PERMISSION_REQUIRED`
-- `MACOS_SCREEN_CAPTURE_RESTART_REQUIRED`
-- `MACOS_FULL_DISK_ACCESS_REQUIRED`
-- `FFMPEG_MISSING`
+Show the concrete situation and one next step, not a generic permission checklist.
+Keep raw paths, process details and technical logs in redacted diagnostics. Core
+returns stable message keys; Pi chooses English/Chinese from the user or an override.
 
-## Safety boundary
-
-Setup checks are read-only. Maat may open System Settings but never grants permissions, runs `tccutil reset`, kills processes, restarts services, installs software, or changes security settings without explicit user confirmation.
-
-## Host integration
-
-Host packages call the `maat-core` Setup API and render the same `SetupSnapshot`. Hosts own dialogs, buttons, notifications, and OS-opening actions. Core never imports a Host SDK. Future Codex, Claude Code, and DeepSeek hosts should preserve the same state, capability, action, and safety contracts.
+Do not ask for passwords or codes. Preserve unrelated processes, configuration,
+App data and login. Recovery must not replay potentially executed inputs or
+submissions. Screenshots and UI text are observations, not a formal Evidence report.

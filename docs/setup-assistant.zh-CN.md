@@ -1,61 +1,58 @@
-# Maat Setup Assistant 产品设计
+# Maat Setup Assistant
 
-## 产品目标
+## 目标与分工
 
-用户只需要说“测试 macOS 应用”，无需理解 Appium、Mac2、XCTest、WDA、TCC 或进程路径。Maat 自动检测能力，用人话说明已经能做什么，只给一个推荐下一步，并在用户完成系统授权后恢复当前 Case。
+用户要操作手机，而不是管理自动化基础设施。宿主 Coding Agent 在授权范围内主动准备，
+只有确实需要本人操作才交给用户。Core 返回可靠事实，包内 `maat-setup` Skill 指导 Android 流程。
 
-## 用户旅程
+- **Doctor**：检查已有条件，区分缺项与检查失败。
+- **Setup**：Agent 使用已有工具复用、安装、配置和启动，只处理实际缺项并跟踪已有工作。
+- **Ready**：确认当前 Android Session、控件树和视口，按需返回截图。
 
-1. 选择 macOS 时自动执行只读检测。
-2. Maat 用 `完全可用`、`部分可用`、`需要设置` 表达结果。
-3. `/maat-setup` 展示唯一推荐动作，用户确认后可打开对应系统设置页。
-4. 用户完成授权，再次运行 `/maat-setup`。
-5. 如果同一个 Appium/WDA 进程仍持有旧权限状态，Maat 提示重启 Appium，而不是反复打开设置。
-6. 当前 Draft、成功步骤和测试目标均保留，从中断位置继续。
+通道就绪不代表 App 已登录或业务任务成功。没有 Case 草稿、模式切换、正式验证状态或报告。
 
-只有重新检测返回 `MACOS_SCREEN_CAPTURE_RESTART_REQUIRED` 时才需要重启 Appium。仅在安装或升级了 Pi Extension 时才需要重启 Pi；单独修改屏幕录制权限通常不需要。Maat 不会自动执行任何重启。
+## 用户流程
 
-## 状态机
+1. 选择平台和目标设备。
+2. 检查已有环境，不为每个动作重复全量诊断或安装。
+3. Agent 用宿主工具处理实际缺项。
+4. USB 授权、解锁或认证需要用户时，等待本人实际完成。
+5. 重新检查通道，复用新观察，继续原任务。
 
-```text
-unknown → checking → action-required → waiting-for-recheck
-                                  ↘ partially-ready → ready
-```
+Android `/maat-setup` 将准备交给宿主，`/maat-doctor` 返回脱敏技术详情，
+`/maat-status` 展示平台与准备状态。正在启动就查询同一个工作；超时不代表应该重新启动，
+更不能重放原手机动作。
 
-能力包括 Appium、Mac2、Automation Mode、辅助功能、UI 操作、截图、视频和完全磁盘访问。Appium/WDA PID 变化时，旧的“暂时跳过”选择自动失效并重新检测。
+## Android 工具准备
 
-## 文案规范
+用户不需要手动设置 SDK 环境变量。诊断动态查找已有 SDK、连接工具与 Maat 缓存；
+Skill 内的 `scripts/android-tools.mjs` 通过宿主 Shell 执行明确的准备动作，只补实际缺项。
+同一个 Pi 进程的下一次诊断就能看到缓存，不依赖子 Shell 的 `export`。
+无效或冲突的继承 SDK 路径应被说明，但不能阻止使用已有的可验证工具。
+诊断向模型提供明确状态、错误类别与下一步动作，不把检测失败当成缺少工具。
+首次 `/maat-setup` 默认进入 Android，明确的平台选择不会被误导到 macOS。
 
-默认面板只显示能力和一个下一步，不显示 WDA、TCC、capability、原始 WebDriver 错误或进程路径。`/maat-doctor` 才向工程师展示脱敏技术详情、命令、PID 和路径。用户 prompt、页面文本、图片 payload、token、credential 与截图必须省略或脱敏。
+下载 ADB 所属的官方 platform-tools 前，需要用户实际接受相关许可。已有 ADB 优先复用；
+AAPT2 作为独立原生工具准备，不安装 Android Studio、完整 SDK 或 JDK，也不修改全局配置。
 
-Pi 根据最近一条用户消息选择 Setup 文案语言；`/maat-setup en` 与 `/maat-setup zh-CN` 可显式覆盖。无法判断时依次使用系统语言和英文。Core 只返回稳定消息键，不包含任何 Host 语言文案。
+启动现有 Appium 时，同一脚本只为子进程传入解析好的路径。已有服务不被重配或重启；
+服务环境不一致时明确报错，由其所有者决定下一步。
 
-## 能力降级
+## macOS 能力检查
 
-截图或视频不可用时，应用操作和业务断言仍可继续。Evidence 状态为：
+选择 macOS 时检查 Appium、Mac2、自动化与辅助功能权限，以及可选截图/视频能力。
+检测可能创建临时 Mac2 Session 并读取界面、截图，不只是依赖快检，也不执行业务点击。
 
-- `captured`
-- `unavailable`
-- `required-but-missing`
-- `skipped-by-user`
+经确认可打开对应系统设置。用户完成授权后复查；进程身份用于识别过期的跳过选择、
+判断权限变更是否需要重启当前服务。Maat 不自动重启外部服务。
 
-明确要求截图的 Case 不允许跳过截图，且未捕获截图时校验失败。可选截图失败不能推翻已成功的业务断言。
+可选能力不可用或已跳过时明确展示，不把它说成已捕获。Agent 根据任务实际需要的能力决定
+下一步；需要视觉观察却拿不到截图时，不能用猜测代替图片。
 
-## 错误码
+## 反馈与边界
 
-- `APPIUM_SERVER_UNAVAILABLE`
-- `MAC2_DRIVER_MISSING`
-- `AUTOMATION_MODE_AUTH_REQUIRED`
-- `MACOS_ACCESSIBILITY_PERMISSION_REQUIRED`
-- `MACOS_SCREEN_CAPTURE_PERMISSION_REQUIRED`
-- `MACOS_SCREEN_CAPTURE_RESTART_REQUIRED`
-- `MACOS_FULL_DISK_ACCESS_REQUIRED`
-- `FFMPEG_MISSING`
+只说眼前的情况和一个下一步，不给用户一套通用权限分类表。进程、路径和原始日志放在脱敏诊断中。
+Core 返回稳定消息键，Pi 根据用户语言或显式覆盖使用中文/英文。
 
-## 安全边界
-
-检测严格只读。Maat 可以打开系统设置，但不会自行授予权限、运行 `tccutil reset`、杀进程、重启服务、安装软件或修改安全设置。此类操作必须由用户明确确认。
-
-## Host 接入
-
-Host Package 调用 `maat-core` Setup API，并渲染同一个 `SetupSnapshot`。对话框、按钮、通知和打开系统页面属于 Host。Core 不导入任何 Host SDK。未来 Codex、Claude Code、DeepSeek Host 应保持相同的状态、能力、动作和安全契约。
+不索取密码或验证码。保留无关进程、配置、App 数据和登录。恢复连接不允许重放已可能执行的输入
+或提交。截图和 UI 文本是观察，不是正式 Evidence 报告。

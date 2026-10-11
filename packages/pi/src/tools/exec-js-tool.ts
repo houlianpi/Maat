@@ -1,16 +1,19 @@
 import { Type } from '@earendil-works/pi-ai';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 
-import type { JavaScriptSession, StepExecution, StepRecorder } from '@houlianpi/maat-core';
+import type { JavaScriptSession } from '@houlianpi/maat-core';
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export function createExecJsTool(
   session: JavaScriptSession,
-  recorder?: StepRecorder,
   context?: { description?: string; guidelines?: string[] },
-  execution?: () => StepExecution,
   actionableError?: (
     error: unknown,
     ctx: Parameters<ToolDefinition<any, any, any>['execute']>[4],
+    signal?: AbortSignal,
   ) => Promise<string | undefined>,
 ): ToolDefinition<any, any, any> {
   return defineTool({
@@ -23,47 +26,39 @@ export function createExecJsTool(
     promptGuidelines: [
       'Use exe_js for all UI interaction.',
       'Session state persists across exe_js calls.',
-      'Exploration is not recorded by default. Set record=true with a concise stepName only for code that belongs in the formal Case.',
       'Use console.log() for text. display() accepts only image bytes or PNG/JPEG/WebP base64 data URLs.',
-      "Infer assertions only from the user's explicit test objective, expected result, or acceptance criteria.",
-      "Use the active framework's expect assertions for business outcomes so a failed expectation fails exe_js.",
-      'Do not add redundant assertions for navigation, element lookup, or other prerequisites already enforced by Playwright operations.',
+      "Only compare results against the user's declared expected outcome; do not invent business truth.",
       'If the user gives no expected business outcome, do not invent one merely to add an assertion.',
       ...(context?.guidelines ?? []),
     ],
     executionMode: 'sequential',
-    parameters: Type.Object({
-      code: Type.String({
-        description:
-          'Async JavaScript body using page, context, browser, expect, console, and display',
-      }),
-      record: Type.Optional(
-        Type.Boolean({ description: 'Record this successful execution as a formal Case step.' }),
-      ),
-      stepName: Type.Optional(
-        Type.String({ description: 'Required human-readable Case step name when record=true.' }),
-      ),
-    }),
+    parameters: Type.Object(
+      {
+        code: Type.String({
+          description:
+            'Async JavaScript body using the globals exposed by the active platform adapter',
+        }),
+      },
+      { additionalProperties: false },
+    ),
     execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
       try {
-        if (params.record && !params.stepName?.trim())
-          throw new Error('stepName is required when record=true.');
         const observations = await session.execute(params.code, signal);
-        if (params.record)
-          await recorder?.recordSuccessfulStep(
-            params.code,
-            observations,
-            execution?.(),
-            params.stepName!.trim(),
-          );
         return {
           content: observations,
-          details: { observationCount: observations.length, recorded: params.record === true },
+          details: { observationCount: observations.length },
         };
       } catch (error) {
-        await recorder?.recordFailedStep(params.code, error, execution?.());
-        const guidance = await actionableError?.(error, ctx);
-        if (guidance) throw new Error(guidance, { cause: error });
+        let guidance: string | undefined;
+        try {
+          guidance = await actionableError?.(error, ctx, signal);
+        } catch (diagnosticError) {
+          throw new Error(
+            `${errorText(error)}\nSetup diagnosis also failed: ${errorText(diagnosticError)}`,
+            { cause: error },
+          );
+        }
+        if (guidance) throw new Error(`${errorText(error)}\n${guidance}`, { cause: error });
         throw error;
       }
     },

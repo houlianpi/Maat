@@ -1,7 +1,7 @@
 import { Type } from '@earendil-works/pi-ai';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { browserNames, nativeDeviceKinds, type MaatApi } from '@houlianpi/maat-core';
-import { setupPanel } from '../setup-ui.ts';
+import { setupAgentContext, setupPanel } from '../setup-ui.ts';
 import { resolveSetupLocale } from '../setup-i18n.ts';
 
 export function createPlatformTools(maat: MaatApi): ToolDefinition<any, any, any>[] {
@@ -21,7 +21,7 @@ export function createPlatformTools(maat: MaatApi): ToolDefinition<any, any, any
             {
               type: 'text',
               text: setup
-                ? `${JSON.stringify(state)}\n\n${setupPanel(setup, resolveSetupLocale(undefined, ctx)).join('\n')}`
+                ? `${JSON.stringify(state)}\n\n${setupPanel(setup, resolveSetupLocale(undefined, ctx)).join('\n')}\n\n${setupAgentContext(setup, resolveSetupLocale(undefined, ctx))}`
                 : JSON.stringify(state),
             },
           ],
@@ -48,7 +48,7 @@ export function createPlatformTools(maat: MaatApi): ToolDefinition<any, any, any
       label: 'Configure Session',
       executionMode: 'sequential',
       description:
-        'Provide Session hints to the active adapter. Appium adapters determine platformName and automationName; serverUrl, device and app capabilities are optional and resolved when possible.',
+        'Provide connection hints to the active adapter. For Android first-use readiness, configure the selected local device and server only; establish the base phone channel before launching an App through exe_js. App capabilities are optional and may change Session lifecycle.',
       parameters: Type.Object({
         serverUrl: Type.Optional(Type.String()),
         device: Type.Optional(
@@ -59,6 +59,12 @@ export function createPlatformTools(maat: MaatApi): ToolDefinition<any, any, any
         ),
         capabilities: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
         allowDataReset: Type.Optional(Type.Boolean()),
+        clearAppTarget: Type.Optional(
+          Type.Boolean({
+            description:
+              'Clear legacy App routing before a base Android readiness check. Closes the existing Session using its current lifecycle; does not delete App data. Cannot be combined with a new App target.',
+          }),
+        ),
       }),
       async execute(_id, input) {
         await maat.platforms.configureSession(input);

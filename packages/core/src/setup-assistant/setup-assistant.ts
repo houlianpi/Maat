@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { detectMacosSetup, type MacosSetupDetectorDependencies } from './macos-detector.ts';
+import { detectAndroidSetup, type AndroidSetupDetectorDependencies } from './android-detector.ts';
 import { aggregateSetup } from './model.ts';
 import { sameFingerprint, SetupPreferenceStore } from './storage.ts';
 import type {
@@ -9,12 +10,15 @@ import type {
   SetupInterruption,
   SetupPreference,
   SetupSnapshot,
+  AndroidSetupCheckInput,
 } from './types.ts';
 
 export type SetupAssistantOptions = {
   preferencesFile?: string;
   detector?: typeof detectMacosSetup;
   detectorDependencies?: MacosSetupDetectorDependencies;
+  androidDetector?: typeof detectAndroidSetup;
+  androidDetectorDependencies?: AndroidSetupDetectorDependencies;
 };
 
 function unknownSnapshot(platform = 'macos'): SetupSnapshot {
@@ -27,6 +31,8 @@ export class SetupAssistant {
   private readonly store: SetupPreferenceStore;
   private readonly detector: typeof detectMacosSetup;
   private readonly detectorDependencies?: MacosSetupDetectorDependencies;
+  private readonly androidDetector: typeof detectAndroidSetup;
+  private readonly androidDetectorDependencies?: AndroidSetupDetectorDependencies;
   private interruption?: SetupInterruption;
   private actionFingerprint?: SetupSnapshot['fingerprint'];
   private lastActionId?: SetupAction['id'];
@@ -37,6 +43,8 @@ export class SetupAssistant {
     );
     this.detector = options.detector ?? detectMacosSetup;
     this.detectorDependencies = options.detectorDependencies;
+    this.androidDetector = options.androidDetector ?? detectAndroidSetup;
+    this.androidDetectorDependencies = options.androidDetectorDependencies;
   }
 
   current(): SetupSnapshot {
@@ -56,6 +64,16 @@ export class SetupAssistant {
     if (!this.snapshot.canContinue) return undefined;
     const pendingCapability = (() => {
       switch (this.interruption?.pendingAction) {
+        case 'install-adb':
+          return 'adb';
+        case 'configure-android-sdk':
+          return 'androidSdk';
+        case 'install-uiautomator2':
+          return 'uiautomator2Driver';
+        case 'connect-android-device':
+        case 'authorize-android-device':
+        case 'select-android-device':
+          return 'androidDevice';
         case 'screenshot':
         case 'open-screen-recording':
           return 'screenCapture';
@@ -87,9 +105,22 @@ export class SetupAssistant {
     return value;
   }
 
-  async check(
-    input: { platform?: string; serverUrl?: string; signal?: AbortSignal } = {},
-  ): Promise<SetupSnapshot> {
+  async check(input: AndroidSetupCheckInput & { platform?: string } = {}): Promise<SetupSnapshot> {
+    if (input.platform === 'android') {
+      const previous = this.snapshot;
+      this.snapshot = aggregateSetup({ platform: 'android', capabilities: [], state: 'checking' });
+      try {
+        this.snapshot = await this.androidDetector(input, this.androidDetectorDependencies);
+        input.signal?.throwIfAborted();
+        this.waitingForRecheck = false;
+        this.lastActionId = undefined;
+        this.actionFingerprint = undefined;
+        return this.snapshot;
+      } catch (error) {
+        this.snapshot = previous;
+        throw error;
+      }
+    }
     if ((input.platform ?? 'macos') !== 'macos') {
       this.snapshot = aggregateSetup({
         platform: input.platform!,
@@ -190,14 +221,16 @@ export class SetupAssistant {
     this.lastActionId = action.id;
     this.actionFingerprint = this.snapshot.fingerprint;
     this.waitingForRecheck = true;
-    const current = await this.store.read(this.snapshot.fingerprint);
-    const now = new Date().toISOString();
-    await this.store.write({
-      skippedCapabilities: current?.skippedCapabilities ?? [],
-      fingerprint: this.snapshot.fingerprint,
-      pendingAction: { id: action.id, fingerprint: this.snapshot.fingerprint, updatedAt: now },
-      updatedAt: now,
-    });
+    if (this.snapshot.platform === 'macos') {
+      const current = await this.store.read(this.snapshot.fingerprint);
+      const now = new Date().toISOString();
+      await this.store.write({
+        skippedCapabilities: current?.skippedCapabilities ?? [],
+        fingerprint: this.snapshot.fingerprint,
+        pendingAction: { id: action.id, fingerprint: this.snapshot.fingerprint, updatedAt: now },
+        updatedAt: now,
+      });
+    }
     this.snapshot = aggregateSetup({
       platform: this.snapshot.platform,
       capabilities: this.snapshot.capabilities,
@@ -213,6 +246,8 @@ export class SetupAssistant {
     const capability = this.snapshot.capabilities.find((item) => item.id === capabilityId);
     if (!capability) throw new Error(`Unknown setup capability: ${capabilityId}`);
     if (capability.required) throw new Error(`${capabilityId} is required and cannot be skipped.`);
+    if (this.snapshot.platform !== 'macos')
+      throw new Error('Capability skip preferences are only supported for macOS.');
     const current = await this.store.read(this.snapshot.fingerprint);
     const preference: SetupPreference = {
       skippedCapabilities: [...new Set([...(current?.skippedCapabilities ?? []), capabilityId])],

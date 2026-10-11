@@ -57,16 +57,3 @@ jobs:
         run: |
           test -z "$(rg '@earendil-works/pi' packages/core/src || true)"
           test "$(node -p "require('./packages/pi/package.json').peerDependencies['@earendil-works/pi-coding-agent']")" = "*"
-
-      - name: Maat smoke suite
-        run: npm run maat:test -- --project web --suite smoke --browser chromium --workers 2
-
-      - name: Upload Maat report
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: maat-report-${{ github.run_attempt }}
-          path: |
-            artifacts/maat
-          if-no-files-found: ignore
-          retention-days: 14

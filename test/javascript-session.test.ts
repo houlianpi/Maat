@@ -8,6 +8,14 @@ import { createExplorationWorker } from '../packages/core/src/core/exploration/w
 import { parseObservations } from '../packages/core/src/core/exploration/protocol.ts';
 import { findBrowserExecutable } from '../packages/core/src/setup/browser-discovery.ts';
 import { createWebExplorationSession as launchJavaScriptSession } from '../packages/core/src/platforms/web/exploration-session.ts';
+import { WebExplorationManager } from '../packages/core/src/platforms/web/exploration-manager.ts';
+import { WebPlatformAdapter } from '../packages/core/src/platforms/web/web-adapter.ts';
+import { MaatApi } from '../packages/core/src/api/maat-api.ts';
+import { PlatformRegistry } from '../packages/core/src/core/platforms/registry.ts';
+import {
+  WorkerTerminatedError,
+  type JavaScriptSession,
+} from '../packages/core/src/core/exploration/runtime.ts';
 
 async function launch(executionTimeoutMs = 5_000) {
   return launchJavaScriptSession({
@@ -154,6 +162,7 @@ test('timeout terminates a stuck worker and its browser', async () => {
   const session = await launch(200);
 
   await assert.rejects(session.execute(`await new Promise(() => {});`), /exceeded 200ms/);
+  assert.equal(session.isClosed, true);
   await assert.rejects(session.execute(`console.log('too late');`), /exceeded 200ms/);
   await session.close();
 });
@@ -165,6 +174,7 @@ test('abort terminates an active execution', async () => {
   controller.abort();
 
   await assert.rejects(executing, /aborted/);
+  assert.equal(session.isClosed, true);
   await session.close();
 });
 
@@ -188,11 +198,116 @@ test('worker reports an early process exit with bounded stderr instead of timing
     (error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       return (
-        message.includes('code 23') && message.includes('fixture runtime failed during import')
+        error instanceof WorkerTerminatedError &&
+        message.includes('code 23') &&
+        message.includes('fixture runtime failed during import')
       );
     },
   );
   assert.ok(Date.now() - startedAt < 4_000);
+});
+
+test('Web API invalidates terminated Workers, reports idle and recovers only on a new explicit request', async (t) => {
+  const manager = new WebExplorationManager();
+  let launches = 0;
+  t.mock.method(
+    manager as unknown as { launch(signal?: AbortSignal): Promise<JavaScriptSession> },
+    'launch',
+    async (signal?: AbortSignal) => {
+      launches++;
+      return launchJavaScriptSession(
+        {
+          assertionTimeoutMs: 100,
+          executablePath: await findBrowserExecutable(),
+          executionTimeoutMs: 1_000,
+          headless: true,
+        },
+        signal,
+      );
+    },
+  );
+  const adapter = new WebPlatformAdapter('/unused', manager);
+  const api = new MaatApi(new PlatformRegistry([adapter]), '/unused');
+  try {
+    await api.exploration.executeJavaScript("await page.setContent('<h1>retained</h1>');");
+    await assert.rejects(
+      api.exploration.executeJavaScript(
+        "throw new Error('Exploration execution exceeded 1ms; Exploration Worker exited; session closed');",
+      ),
+      /exceeded 1ms/,
+    );
+    assert.equal(api.platforms.status().session, 'ready');
+    assert.equal(launches, 1);
+    assert.deepEqual(
+      await api.exploration.executeJavaScript(
+        "console.log(await page.locator('h1').textContent());",
+      ),
+      [{ type: 'text', text: 'retained' }],
+    );
+    await assert.rejects(
+      api.exploration.executeJavaScript(
+        "await page.setContent('<h1>do not replay</h1>'); while (true) {}",
+      ),
+      WorkerTerminatedError,
+    );
+    assert.equal(api.platforms.status().session, 'idle');
+    assert.equal(launches, 1);
+    assert.deepEqual(
+      await api.exploration.executeJavaScript(
+        "console.log((await page.content()).includes('do not replay'));",
+      ),
+      [{ type: 'text', text: 'false' }],
+    );
+    assert.equal(launches, 2);
+    await assert.rejects(
+      api.exploration.executeJavaScript("Buffer.constructor('return process')().exit(23);"),
+      /Worker exited.*code 23/,
+    );
+    assert.equal(api.platforms.status().session, 'idle');
+    assert.equal(launches, 2);
+    await api.exploration.executeJavaScript("console.log('explicit recovery');");
+    assert.equal(launches, 3);
+    const controller = new AbortController();
+    const executing = api.exploration.executeJavaScript('while (true) {}', controller.signal);
+    const timer = setTimeout(() => controller.abort(new Error('cancel Web execution')), 20);
+    try {
+      await assert.rejects(executing, WorkerTerminatedError);
+    } finally {
+      clearTimeout(timer);
+    }
+    assert.equal(api.platforms.status().session, 'idle');
+    assert.equal(launches, 3);
+  } finally {
+    await api.close();
+  }
+});
+
+test('Web manager preserves a terminated execution error when owned cleanup also fails', async () => {
+  const primary = new WorkerTerminatedError('Exploration execution exceeded 1ms.');
+  const cleanup = new Error('browser cleanup failed');
+  let closed = false;
+  const session: JavaScriptSession = {
+    get isClosed() {
+      return closed;
+    },
+    async execute() {
+      closed = true;
+      throw primary;
+    },
+    async close() {
+      throw cleanup;
+    },
+  };
+  const manager = new WebExplorationManager();
+  (manager as unknown as { session: JavaScriptSession }).session = session;
+  await assert.rejects(manager.execute('void 0;'), (error: unknown) => {
+    assert.ok(error instanceof AggregateError);
+    assert.equal(error.cause, primary);
+    assert.deepEqual(error.errors, [primary, cleanup]);
+    assert.match(error.message, /exceeded 1ms.*browser cleanup failed/s);
+    return true;
+  });
+  assert.equal(manager.isRunning, false);
 });
 
 test('persistent profile keeps browser state between sessions', async () => {

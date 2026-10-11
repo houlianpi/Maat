@@ -16,6 +16,12 @@ export type SetupCapabilityStatus =
   | 'skipped';
 
 export type SetupCapabilityId =
+  | 'adb'
+  | 'androidSdk'
+  | 'appiumCli'
+  | 'adbServer'
+  | 'uiautomator2Driver'
+  | 'androidDevice'
   | 'appiumServer'
   | 'mac2Driver'
   | 'automationMode'
@@ -26,6 +32,16 @@ export type SetupCapabilityId =
   | 'fullDiskAccess';
 
 export type SetupErrorCode =
+  | 'ANDROID_SETUP_CHECK_FAILED'
+  | 'ADB_MISSING'
+  | 'ADB_SERVER_NOT_RUNNING'
+  | 'APPIUM_CLI_MISSING'
+  | 'ANDROID_SDK_REQUIRED'
+  | 'UIAUTOMATOR2_DRIVER_MISSING'
+  | 'ANDROID_DEVICE_MISSING'
+  | 'ANDROID_DEVICE_UNAUTHORIZED'
+  | 'ANDROID_DEVICE_OFFLINE'
+  | 'ANDROID_DEVICE_SELECTION_REQUIRED'
   | 'APPIUM_SERVER_UNAVAILABLE'
   | 'MAC2_DRIVER_MISSING'
   | 'AUTOMATION_MODE_AUTH_REQUIRED'
@@ -48,6 +64,27 @@ export type SetupMessageKey =
   | 'setup.summary.blocked'
   | 'capability.appium.ready'
   | 'capability.appium.start'
+  | 'capability.adb.ready'
+  | 'capability.adb.install'
+  | 'capability.adb.unknown'
+  | 'capability.appiumCli.ready'
+  | 'capability.appiumCli.install'
+  | 'capability.appiumCli.unknown'
+  | 'capability.adbServer.ready'
+  | 'capability.adbServer.start'
+  | 'capability.adbServer.unknown'
+  | 'capability.androidSdk.ready'
+  | 'capability.androidSdk.required'
+  | 'capability.androidSdk.unknown'
+  | 'capability.uiautomator2.ready'
+  | 'capability.uiautomator2.install'
+  | 'capability.uiautomator2.unknown'
+  | 'capability.androidDevice.ready'
+  | 'capability.androidDevice.missing'
+  | 'capability.androidDevice.unauthorized'
+  | 'capability.androidDevice.offline'
+  | 'capability.androidDevice.select'
+  | 'capability.androidDevice.unknown'
   | 'capability.mac2.ready'
   | 'capability.mac2.install'
   | 'capability.automation.ready'
@@ -67,6 +104,14 @@ export type SetupMessageKey =
   | 'capability.video.ready'
   | 'capability.video.unavailable'
   | 'action.startAppium'
+  | 'action.installAdb'
+  | 'action.installAppium'
+  | 'action.startAdb'
+  | 'action.configureAndroidSdk'
+  | 'action.installUiAutomator2'
+  | 'action.connectAndroidDevice'
+  | 'action.authorizeAndroidDevice'
+  | 'action.selectAndroidDevice'
   | 'action.installMac2'
   | 'action.automationMode'
   | 'action.openAccessibility'
@@ -78,6 +123,14 @@ export type SetupMessageKey =
 
 export type SetupAction = {
   id:
+    | 'install-adb'
+    | 'install-appium'
+    | 'start-adb'
+    | 'configure-android-sdk'
+    | 'install-uiautomator2'
+    | 'connect-android-device'
+    | 'authorize-android-device'
+    | 'select-android-device'
     | 'open-screen-recording'
     | 'open-accessibility'
     | 'open-full-disk-access'
@@ -141,8 +194,29 @@ export type SetupPreference = {
 
 export type SetupInterruption = {
   platform: string;
-  caseId?: string;
   pendingAction?: string;
-  workMode?: string;
   interruptedAt: string;
+};
+import type { JavaScriptObservation } from '../core/exploration/protocol.ts';
+import type { NativeDeviceSelector } from '../platforms/appium/schema.ts';
+
+export type AndroidSetupCheckInput = {
+  serverUrl?: string;
+  device?: NativeDeviceSelector;
+  remoteDeviceConfigured?: boolean;
+  signal?: AbortSignal;
+};
+
+export type SetupReadiness = {
+  platform: 'android';
+  ready: true;
+  proof: {
+    /** driver.isLocked() returned false before and after this observation, not a lasting guarantee. */
+    phoneUnlocked: true;
+    sessionUsable: true;
+    sourceReadable: true;
+    viewportReadable: true;
+    screenshotReadable: boolean;
+  };
+  observations: JavaScriptObservation[];
 };

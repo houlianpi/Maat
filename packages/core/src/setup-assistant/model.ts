@@ -1,6 +1,12 @@
 import type { SetupAction, SetupCapability, SetupSnapshot, SetupState } from './types.ts';
 
 const priority: SetupCapability['id'][] = [
+  'adb',
+  'androidSdk',
+  'appiumCli',
+  'uiautomator2Driver',
+  'adbServer',
+  'androidDevice',
   'appiumServer',
   'mac2Driver',
   'accessibility',
@@ -47,7 +53,11 @@ export function aggregateSetup(input: {
         : readiness === 'partially-ready'
           ? 'partially-ready'
           : 'action-required';
-  const recommended = [...blocking, ...degraded].find((capability) => capability.action)?.action;
+  const actionable = [...blocking, ...degraded];
+  const recommended = (
+    actionable.find((capability) => capability.action && capability.action.id !== 'recheck') ??
+    actionable.find((capability) => capability.action)
+  )?.action;
   const titleKey =
     input.state === 'checking'
       ? 'setup.title.checking'

@@ -3,7 +3,6 @@ import { createMaat, type BrowserName } from '@houlianpi/maat-core';
 import { createExecJsTool } from '@houlianpi/maat-pi';
 
 import { createAgentTrace } from './trace.ts';
-import { createRunRecorder } from './run-recorder.ts';
 
 function shortToolCallId(id: string): string {
   return id.split('|', 1)[0].slice(0, 24);
@@ -20,10 +19,7 @@ export type RunAgentOptions = {
 export async function runAgent(prompt: string, options: RunAgentOptions = {}): Promise<void> {
   const trace = createAgentTrace();
   const browser = options.browser ?? 'chrome';
-  const recorder = await createRunRecorder(prompt, undefined, { browser });
   const maat = createMaat({ workspaceRoot: process.cwd() });
-  let initialized = false;
-  let runError: unknown;
   try {
     await maat.platforms.configure({
       browser,
@@ -32,7 +28,6 @@ export async function runAgent(prompt: string, options: RunAgentOptions = {}): P
       profileDirectory: options.profileDirectory,
       userDataDir: options.userDataDir,
     });
-    initialized = true;
     const { session } = await createAgentSession({
       cwd: process.cwd(),
       tools: ['exe_js'],
@@ -42,13 +37,12 @@ export async function runAgent(prompt: string, options: RunAgentOptions = {}): P
             close: () => maat.platforms.current().close(),
             execute: (code, signal) => maat.exploration.executeJavaScript(code, signal),
           },
-          recorder,
           {
             description:
               'Execute asynchronous JavaScript against one persistent Playwright page. The globals page, context, browser, expect, console and display are available.',
             guidelines: [
               'Use Playwright locators.',
-              'Use display(await page.screenshot()) for visual Evidence.',
+              'Use display(await page.screenshot()) for a visual observation.',
             ],
           },
         ),
@@ -129,19 +123,7 @@ export async function runAgent(prompt: string, options: RunAgentOptions = {}): P
       unsubscribe();
       session.dispose();
     }
-  } catch (error) {
-    runError = error;
-    if (!initialized) {
-      await recorder.recordFailedStep('// Browser failed to launch.', error);
-    }
-    throw error;
   } finally {
     await maat.close();
-    const replayPath = await recorder.finalize(runError ? 'failed' : 'completed', runError);
-    process.stderr.write(
-      replayPath
-        ? `\nReplay: ${replayPath}\n`
-        : `\nReplay not generated: run contained a failure. Diagnostics: ${recorder.runDirectory}\n`,
-    );
   }
 }

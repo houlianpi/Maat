@@ -6,15 +6,13 @@ import type { SetupAssistantOptions } from '../setup-assistant/setup-assistant.t
 
 export type CreateMaatOptions = {
   workspaceRoot?: string;
-  testsRoot?: string;
   setupAssistant?: SetupAssistantOptions;
 };
 
 export function createMaat(options: CreateMaatOptions = {}): MaatApi {
   const workspaceRoot = path.resolve(options.workspaceRoot ?? process.cwd());
-  const testsRoot = path.resolve(workspaceRoot, options.testsRoot ?? 'maat-tests');
   return new MaatApi(
-    createDefaultPlatformRegistry(testsRoot),
+    createDefaultPlatformRegistry(workspaceRoot),
     workspaceRoot,
     options.setupAssistant,
   );

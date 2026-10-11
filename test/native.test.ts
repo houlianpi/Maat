@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:http';
-import { mkdtemp, mkdir, rm, readdir } from 'node:fs/promises';
+import { createServer as createNetServer, connect, type Socket } from 'node:net';
+import { mkdtemp, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { startNativeSession } from '../packages/core/src/platforms/appium/runtime/session.ts';
+import {
+  startNativeSession,
+  NativeInitializationCancelledError,
+} from '../packages/core/src/platforms/appium/runtime/session.ts';
 import {
   capabilities,
   connection,
@@ -15,22 +19,105 @@ import {
   parseAndroidDevices,
   parseIosDevices,
 } from '../packages/core/src/setup/devices.ts';
-import { CaseDraftManager } from '../packages/core/src/core/cases/draft-manager.ts';
 import { MaatApi } from '../packages/core/src/api/maat-api.ts';
-import { adapterRoot as platformRoot, casePath } from '../packages/core/src/core/cases/paths.ts';
-import { createPlatformTools } from '../packages/pi/src/tools/platform-tools.ts';
-import { createCaseTools } from '../packages/pi/src/tools/case-tools.ts';
-import { createMaatResourceOptions } from '../packages/maat/src/hosts/tui/runtime-config.ts';
 import { AppiumPlatformAdapter } from '../packages/core/src/platforms/appium/appium-adapter.ts';
+import { resolveAndroidReadinessSession } from '../packages/core/src/platforms/appium/session-resolver.ts';
 import { createDefaultPlatformRegistry } from '../packages/core/src/platforms/default-registry.ts';
-import { createAppiumTestSession } from '../packages/core/src/platforms/appium/test-session.ts';
 import { takeAppiumScreenshot } from '../packages/core/src/platforms/appium/screenshot.ts';
+import { NativeManager } from '../packages/core/src/platforms/appium/runtime/manager.ts';
+import { PlatformRegistry } from '../packages/core/src/core/platforms/registry.ts';
+import { aggregateSetup } from '../packages/core/src/setup-assistant/model.ts';
+import {
+  WorkerTerminatedError,
+  type JavaScriptSession,
+} from '../packages/core/src/core/exploration/runtime.ts';
 
-async function mockAppium() {
+let mockServerId = 0;
+type ReadinessAdbOptions = {
+  devices?: string;
+  power?: string;
+  policy?: string;
+  shellExitCode?: number;
+  stall?: boolean;
+  onRequest?: (request: string) => void;
+};
+
+async function mockReadinessAdb(options: ReadinessAdbOptions = {}) {
+  const requests: string[] = [];
+  const sockets = new Set<Socket>();
+  const server = createNetServer((socket) => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+    socket.on('error', () => {});
+    let buffer = Buffer.alloc(0);
+    socket.on('data', (chunk: Buffer) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      while (buffer.length >= 4) {
+        const length = Number.parseInt(buffer.toString('ascii', 0, 4), 16);
+        if (buffer.length < length + 4) return;
+        const request = buffer.toString('utf8', 4, length + 4);
+        buffer = buffer.subarray(length + 4);
+        requests.push(request);
+        options.onRequest?.(request);
+        if (request === 'host:devices-l') {
+          const devices = options.devices ?? 'MOCK_LOCAL_DEVICE\tdevice model:mock\n';
+          socket.end('OKAY' + Buffer.byteLength(devices).toString(16).padStart(4, '0') + devices);
+        } else if (request === 'host:transport:MOCK_LOCAL_DEVICE') socket.write('OKAY');
+        else if (request.startsWith('shell,v2,raw:dumpsys ')) {
+          socket.write('OKAY');
+          if (options.stall) continue;
+          const output =
+            request === 'shell,v2,raw:dumpsys power'
+              ? (options.power ?? 'mWakefulness=Awake\n')
+              : (options.policy ?? 'KeyguardServiceDelegate\n  showing=false\n');
+          const payload = Buffer.from(output);
+          const frame = Buffer.alloc(5);
+          frame[0] = 1;
+          frame.writeUInt32LE(payload.length, 1);
+          const exit = Buffer.from([3, 1, 0, 0, 0, options.shellExitCode ?? 0]);
+          // Deliberately fragment both status/frame data to exercise the real daemon parser.
+          socket.write(frame.subarray(0, 2));
+          socket.end(Buffer.concat([frame.subarray(2), payload, exit]));
+        } else socket.end('FAIL');
+      }
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('No mock ADB address');
+  let closed = false;
+  return {
+    options,
+    requests,
+    connect: () => connect({ host: '127.0.0.1', port: address.port }),
+    close: () => {
+      if (closed) return;
+      closed = true;
+      for (const socket of sockets) socket.destroy();
+      server.close();
+    },
+  };
+}
+
+async function mockAppium(
+  options: {
+    sessionDelayMs?: number;
+    onSessionRequest?: () => void;
+    afterSession?: () => void;
+    deleteFailure?: boolean;
+    isLocked?: () => unknown;
+    readinessAdb?: ReadinessAdbOptions;
+    statusFailure?: boolean;
+  } = {},
+) {
+  const serverId = ++mockServerId;
   let deletes = 0;
   let creations = 0;
+  let cancelledResponses = 0;
+  let lockQueries = 0;
   const requests: string[] = [];
   const sessionCapabilities: Record<string, unknown>[] = [];
+  const adb = options.readinessAdb ? await mockReadinessAdb(options.readinessAdb) : undefined;
   const server = createServer(async (req, res) => {
     requests.push(`${req.method} ${req.url}`);
     let raw = '';
@@ -40,18 +127,64 @@ async function mockAppium() {
     if (req.url === '/session' && req.method === 'POST') {
       creations++;
       sessionCapabilities.push(body.capabilities.alwaysMatch);
-      value = { sessionId: 'owned-' + creations, capabilities: body.capabilities.alwaysMatch };
-    } else if (req.method === 'DELETE') deletes++;
-    else if (req.url?.endsWith('/element'))
+      options.onSessionRequest?.();
+      res.on('close', () => {
+        if (!res.writableFinished) cancelledResponses++;
+      });
+      if (options.sessionDelayMs)
+        await new Promise((resolve) => setTimeout(resolve, options.sessionDelayMs));
+      value = {
+        sessionId: `owned-${serverId}-${creations}`,
+        capabilities: body.capabilities.alwaysMatch,
+      };
+    } else if (req.method === 'DELETE') {
+      deletes++;
+      if (options.deleteFailure) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({ value: { error: 'unknown error', message: 'delete Session failed' } }),
+        );
+        return;
+      }
+    } else if (req.url === '/status') {
+      if (options.statusFailure) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ value: { ready: false } }));
+        return;
+      }
+      value = { ready: true };
+    } else if (
+      req.url?.endsWith('/appium/device/is_locked') ||
+      (req.url?.endsWith('/execute/sync') && body.script === 'mobile: isLocked')
+    ) {
+      lockQueries++;
+      try {
+        value = options.isLocked ? options.isLocked() : false;
+      } catch (error) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            value: {
+              error: 'unknown error',
+              message: error instanceof Error ? error.message : String(error),
+            },
+          }),
+        );
+        return;
+      }
+    } else if (req.url?.endsWith('/element'))
       value = { 'element-6066-11e4-a52e-4f735466cecf': 'button-1' };
     else if (req.url?.endsWith('/text')) value = 'Welcome';
     else if (req.url?.endsWith('/displayed')) value = true;
     else if (req.url?.endsWith('/screenshot')) value = 'iVBORw0KGgo=';
     else if (req.url?.endsWith('/source')) value = '<Application name="Demo" />';
+    else if (req.url?.endsWith('/window/rect')) value = { x: 0, y: 0, width: 360, height: 800 };
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ value }));
+    if (req.url === '/session' && req.method === 'POST') options.afterSession?.();
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  server.on('close', () => adb?.close());
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('No address');
   return {
@@ -59,9 +192,49 @@ async function mockAppium() {
     server,
     deleted: () => deletes,
     created: () => creations,
+    cancelledResponses: () => cancelledResponses,
+    lockQueries: () => lockQueries,
     sessionCapabilities,
     requests,
+    adb,
   };
+}
+
+function androidReadinessApi(root: string, connectAdb: () => Socket) {
+  class ReadinessAdapter extends AppiumPlatformAdapter {
+    protected override resolveReadiness(signal?: AbortSignal) {
+      return resolveAndroidReadinessSession(this.sessionHints!, signal, connectAdb);
+    }
+  }
+  return new MaatApi(
+    new PlatformRegistry(
+      [
+        new ReadinessAdapter({
+          id: 'android',
+          label: 'Android',
+          platformName: 'Android',
+          automationName: 'UiAutomator2',
+        }),
+      ],
+      'android',
+    ),
+    root,
+    {
+      androidDetector: async () =>
+        aggregateSetup({
+          platform: 'android',
+          capabilities: [
+            {
+              id: 'uiInteraction',
+              status: 'ready',
+              required: true,
+              messageKey: 'capability.interaction.ready',
+            },
+          ],
+          technicalDetails: { serverScope: 'remote' },
+        }),
+    },
+  );
 }
 
 test('native defaults preserve data and device discovery excludes offline devices', () => {
@@ -72,11 +245,958 @@ test('native defaults preserve data and device discovery excludes offline device
   );
   assert.equal(connection('http://localhost:4723/wd/hub').path, '/wd/hub');
   assert.equal(
+    'appium:skipUnlock' in capabilities({ platform: 'android', capabilities: {} }),
+    false,
+  );
+  assert.equal(
     parseAndroidDevices('List of devices attached\na device model:Pixel\nb unauthorized\nc offline')
       .length,
     1,
   );
 });
+
+test('Android ready reuses its unlock-safe Session and guards a locked new Session after becoming idle', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ready-skip-unlock-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  let locked = false;
+  const mock = await mockAppium({ isLocked: () => locked, readinessAdb: {} });
+  const api = androidReadinessApi(root, mock.adb!.connect);
+  const hints = { 'appium:deviceName': 'mock' };
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock' },
+      capabilities: hints,
+    });
+    const result = await api.setup.ready();
+    assert.deepEqual(result.proof, {
+      phoneUnlocked: true,
+      sessionUsable: true,
+      sourceReadable: true,
+      viewportReadable: true,
+      screenshotReadable: false,
+    });
+    const observation = result.observations.find((item) => item.type === 'text');
+    assert.ok(observation && observation.type === 'text');
+    assert.equal(JSON.parse(observation.text).phoneUnlocked, true);
+    assert.equal(mock.sessionCapabilities[0]?.['appium:skipUnlock'], true);
+    assert.equal('appium:skipDeviceInitialization' in mock.sessionCapabilities[0]!, false);
+    assert.equal('appium:skipServerInstallation' in mock.sessionCapabilities[0]!, false);
+    const adapter = api.registry.current as AppiumPlatformAdapter;
+    assert.deepEqual(adapter.sessionHints?.capabilities, hints);
+    assert.deepEqual(adapter.runtime.currentEnvironment?.capabilities, hints);
+    assert.equal((await api.setup.ready()).proof.phoneUnlocked, true);
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.deleted(), 0);
+    assert.equal(mock.lockQueries(), 4);
+    assert.equal(
+      mock.requests.some((request) => /\/(unlock|lock|press_keycode|keyevent)$/.test(request)),
+      false,
+    );
+    await adapter.runtime.close();
+    assert.equal(api.platforms.status().session, 'idle');
+    locked = true;
+    mock.adb!.options.power = 'mWakefulness=Asleep\n';
+    const beforeRecheck = mock.requests.length;
+    await assert.rejects(api.setup.ready({ screenshot: true }), /ANDROID_DEVICE_LOCKED/);
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.lockQueries(), 4);
+    assert.equal(
+      mock.requests
+        .slice(beforeRecheck)
+        .some((request) =>
+          /\/(source|screenshot|unlock|lock|press_keycode|keyevent)$/.test(request),
+        ),
+      false,
+    );
+    assert.deepEqual(adapter.sessionHints?.capabilities, hints);
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Android ready refuses conflicting unlock hints before POST and never overwrites explicit intent', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ready-unlock-conflict-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const mock = await mockAppium({ readinessAdb: {} });
+  const api = androidReadinessApi(root, mock.adb!.connect);
+  try {
+    for (const skipUnlock of [false, 'false', null]) {
+      await api.platforms.configureSession({
+        serverUrl: mock.url,
+        device: { kind: 'device', name: 'mock' },
+        capabilities: { 'appium:deviceName': 'mock', 'appium:skipUnlock': skipUnlock },
+      });
+      await assert.rejects(api.setup.ready(), /ANDROID_READINESS_UNLOCK_UNSAFE/);
+      const adapter = api.registry.current as AppiumPlatformAdapter;
+      assert.equal(adapter.sessionHints?.capabilities['appium:skipUnlock'], skipUnlock);
+      assert.equal(api.platforms.status().session, 'idle');
+      assert.equal(mock.created(), 0);
+      assert.equal(mock.deleted(), 0);
+    }
+    for (const options of [
+      { skipUnlock: false },
+      { skipUnlock: 'false' },
+      { skipUnlock: null },
+      { 'appium:skipUnlock': false },
+    ]) {
+      await api.platforms.configureSession({
+        capabilities: { 'appium:skipUnlock': true, 'appium:options': options },
+      });
+      await assert.rejects(api.setup.ready(), /ANDROID_READINESS_UNLOCK_UNSAFE/);
+      const adapter = api.registry.current as AppiumPlatformAdapter;
+      assert.deepEqual(adapter.sessionHints?.capabilities['appium:options'], options);
+      assert.equal(mock.created(), 0);
+    }
+    await api.platforms.configureSession({
+      capabilities: {
+        'appium:skipUnlock': true,
+        'appium:options': { skipUnlock: true },
+      },
+    });
+    assert.equal((await api.setup.ready()).ready, true);
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.sessionCapabilities[0]?.['appium:skipUnlock'], true);
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Android ready reuses a healthy Session with explicit unlock hints but refuses new bootstrap after idle', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ready-healthy-session-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const mock = await mockAppium({ readinessAdb: {} });
+  const api = androidReadinessApi(root, mock.adb!.connect);
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      capabilities: { 'appium:deviceName': 'mock', 'appium:skipUnlock': false },
+    });
+    const adapter = api.registry.current as AppiumPlatformAdapter;
+    // Transport stand-in for an externally initialized, already healthy Session.
+    await adapter.runtime.configureResolved({
+      environment: adapter.sessionHints!,
+      capabilities: { 'appium:deviceName': 'mock', 'appium:skipUnlock': false },
+    });
+    await adapter.runtime.execute("console.log('existing mock Session');");
+    assert.equal(mock.sessionCapabilities[0]?.['appium:skipUnlock'], false);
+    assert.equal((await api.setup.ready()).proof.phoneUnlocked, true);
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.deleted(), 0);
+    assert.equal(adapter.sessionHints?.capabilities['appium:skipUnlock'], false);
+    assert.equal(adapter.runtime.currentTarget?.capabilities['appium:skipUnlock'], false);
+    await adapter.runtime.close();
+    assert.equal(api.platforms.status().session, 'idle');
+    const beforeRecheck = mock.requests.length;
+    await assert.rejects(api.setup.ready(), /ANDROID_READINESS_UNLOCK_UNSAFE/);
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.lockQueries(), 3);
+    assert.equal(mock.requests.length, beforeRecheck);
+    assert.equal(adapter.sessionHints?.capabilities['appium:skipUnlock'], false);
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Android ready locked/unknown states cross the Worker boundary visibly without source/image or replay', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ready-locked-worker-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  let locked: unknown = true;
+  const mock = await mockAppium({ isLocked: () => locked, readinessAdb: {} });
+  const api = androidReadinessApi(root, mock.adb!.connect);
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock' },
+      capabilities: { 'appium:deviceName': 'mock' },
+    });
+    for (const state of [true, null, undefined, 'false']) {
+      locked = state;
+      await assert.rejects(
+        api.setup.ready({ screenshot: true }),
+        state === true
+          ? /ANDROID_DEVICE_LOCKED: phone locked or screen off; unlock\/wake yourself then recheck/
+          : /ANDROID_DEVICE_LOCK_STATE_UNKNOWN/,
+      );
+    }
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.sessionCapabilities[0]?.['appium:skipUnlock'], true);
+    assert.equal(mock.lockQueries(), 4);
+    assert.equal(
+      mock.requests.some((request) => /\/(source|screenshot)$/.test(request)),
+      false,
+    );
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Android ready lock command failure exposes a bounded redacted driver reason across real Worker IPC without retry', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ready-lock-query-error-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const serial = 'SYNTHETIC_LOCK_QUERY_SERIAL';
+  const privatePath = '/Users/synthetic-private/lock-query';
+  const token = 'synthetic-lock-query-token';
+  const endpoint = 'https://synthetic.example/private-lock-query';
+  const failure = new Error(
+    `ELOCK_QUERY: read-only driver query failed\nserial=${serial} ${privatePath} token=${token} ${endpoint}\n${'bounded reason '.repeat(200)}END_OF_OVERSIZED_REASON`,
+  );
+  const mock = await mockAppium({
+    readinessAdb: {},
+    isLocked: () => {
+      throw failure;
+    },
+  });
+  const api = androidReadinessApi(root, mock.adb!.connect);
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock' },
+      capabilities: { 'appium:deviceName': 'mock' },
+    });
+    await assert.rejects(api.setup.ready({ screenshot: true }), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /ANDROID_DEVICE_LOCK_STATE_UNKNOWN/);
+      assert.match(error.message, /ELOCK_QUERY: read-only driver query failed/);
+      assert.match(error.message, /unlock\/wake yourself then recheck/);
+      assert.match(error.message, /serial=\[redacted\]/);
+      assert.match(error.message, /token=\[redacted\]/);
+      assert.match(error.message, /\[path\]/);
+      assert.match(error.message, /\[endpoint\]/);
+      for (const sensitive of [serial, privatePath, token, endpoint])
+        assert.equal(error.message.includes(sensitive), false);
+      assert.equal(error.message.includes('END_OF_OVERSIZED_REASON'), false);
+      assert.equal(error.message.includes('\n'), false);
+      assert.ok(
+        error.message.length <= 'Android setup readiness observation failed: '.length + 1_000,
+      );
+      // Worker IPC guarantees visible message content, not original Error/cause identity.
+      return true;
+    });
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.lockQueries(), 1);
+    assert.equal(
+      mock.requests.some((request) =>
+        /\/(source|screenshot|unlock|lock|press_keycode|keyevent)$/.test(request),
+      ),
+      false,
+    );
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('cold Android ready blocks locked/off/unknown device states before POST, helper or UI reads', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ready-cold-state-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  let helperStarts = 0;
+  const mock = await mockAppium({
+    readinessAdb: {},
+    onSessionRequest: () => helperStarts++,
+  });
+  const api = androidReadinessApi(root, mock.adb!.connect);
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock' },
+      capabilities: {},
+    });
+    for (const state of [
+      { power: 'mWakefulness=Asleep\n', code: 'ANDROID_DEVICE_LOCKED' },
+      { power: 'mWakefulness=Dozing\n', code: 'ANDROID_DEVICE_LOCKED' },
+      { power: 'mWakefulness=Dreaming\n', code: 'ANDROID_DEVICE_LOCKED' },
+      { policy: 'KeyguardServiceDelegate\n  showing=true\n', code: 'ANDROID_DEVICE_LOCKED' },
+      {
+        policy: 'KeyguardServiceDelegate\n  showing=false\n  screenState=SCREEN_STATE_OFF\n',
+        code: 'ANDROID_DEVICE_LOCKED',
+      },
+      { power: '', code: 'ANDROID_DEVICE_LOCK_STATE_UNKNOWN' },
+      { power: 'mWakefulness=Unknown\n', code: 'ANDROID_DEVICE_LOCK_STATE_UNKNOWN' },
+      { policy: '', code: 'ANDROID_DEVICE_LOCK_STATE_UNKNOWN' },
+      { policy: 'showing=false\n', code: 'ANDROID_DEVICE_LOCK_STATE_UNKNOWN' },
+      {
+        policy: 'KeyguardServiceDelegate\n  showing=false\n  showing=false\n',
+        code: 'ANDROID_DEVICE_LOCK_STATE_UNKNOWN',
+      },
+      { shellExitCode: 1, code: 'ANDROID_DEVICE_LOCK_STATE_UNKNOWN' },
+      {
+        devices: 'OTHER_PRIVATE_DEVICE\tdevice model:other\n',
+        code: 'ANDROID_DEVICE_LOCK_STATE_UNKNOWN',
+      },
+    ]) {
+      Object.assign(mock.adb!.options, {
+        power: 'mWakefulness=Awake\n',
+        policy: 'KeyguardServiceDelegate\n  showing=false\n',
+        shellExitCode: 0,
+        devices: 'MOCK_LOCAL_DEVICE\tdevice model:mock\n',
+        ...state,
+      });
+      await assert.rejects(api.setup.ready({ screenshot: true }), new RegExp(state.code));
+      assert.equal(api.platforms.status().session, 'idle');
+      assert.equal(mock.created(), 0);
+      assert.equal(mock.lockQueries(), 0);
+      assert.equal(helperStarts, 0);
+    }
+    assert.equal(
+      mock.requests.some((request) => /\/(source|screenshot)$/.test(request)),
+      false,
+    );
+    assert.ok(
+      mock.adb!.requests.every((request) =>
+        [
+          'host:devices-l',
+          'host:transport:MOCK_LOCAL_DEVICE',
+          'shell,v2,raw:dumpsys power',
+          'shell,v2,raw:dumpsys window policy',
+        ].includes(request),
+      ),
+    );
+    assert.equal(
+      mock.adb!.requests.some((request) => /OTHER_PRIVATE_DEVICE/.test(request)),
+      false,
+    );
+    assert.deepEqual(
+      (api.registry.current as AppiumPlatformAdapter).sessionHints?.capabilities,
+      {},
+    );
+    assert.deepEqual(await readdir(root), []);
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.adb!.close();
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('cold Android ready timeout/Abort stay fail-closed before POST without replay or helper initialization', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ready-cold-timeout-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const mock = await mockAppium({ readinessAdb: { stall: true } });
+  const api = androidReadinessApi(root, mock.adb!.connect);
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock' },
+      capabilities: {},
+    });
+    await assert.rejects(api.setup.ready(), /ANDROID_DEVICE_LOCK_STATE_UNKNOWN.*timed out/);
+    assert.equal(mock.created(), 0);
+    const controller = new AbortController();
+    mock.adb!.options.onRequest = (request) => {
+      if (request.startsWith('shell,v2,raw:')) controller.abort(new Error('cancelled preflight'));
+    };
+    await assert.rejects(
+      api.setup.ready({ signal: controller.signal }),
+      /readiness cancelled: cancelled preflight/,
+    );
+    assert.equal(mock.created(), 0);
+    assert.equal(mock.lockQueries(), 0);
+    assert.equal(
+      mock.adb!.requests.filter((request) => request === 'shell,v2,raw:dumpsys power').length,
+      2,
+    );
+    assert.equal(
+      mock.adb!.requests.some((request) => request === 'shell,v2,raw:dumpsys window policy'),
+      false,
+    );
+    mock.adb!.close();
+    await assert.rejects(api.setup.ready(), /ANDROID_DEVICE_LOCK_STATE_UNKNOWN.*unavailable/);
+    assert.equal(mock.created(), 0);
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.adb!.close();
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('cold Android ready refuses remote/ambiguous routing; a healthy remote Session uses only its driver', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ready-cold-routing-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const mock = await mockAppium({ readinessAdb: {} });
+  const apis: MaatApi[] = [];
+  try {
+    for (const route of [
+      { serverUrl: 'https://remote.example/' },
+      { capabilities: { 'appium:remoteAdbHost': 'remote.example' } },
+      { capabilities: { 'appium:adbPort': 5038 } },
+      { capabilities: { 'appium:avd': 'OTHER_EMULATOR' } },
+      { capabilities: { 'appium:options': { remoteAdbHost: 'remote.example' } } },
+      { capabilities: { 'appium:options': { udid: 'OTHER_PRIVATE_DEVICE' } } },
+    ]) {
+      const api = androidReadinessApi(root, mock.adb!.connect);
+      apis.push(api);
+      await api.platforms.configureSession({
+        serverUrl: mock.url,
+        device: { kind: 'device', name: 'mock' },
+        capabilities: {},
+        ...route,
+      });
+      await assert.rejects(api.setup.ready(), /ANDROID_READINESS_COLD_UNSUPPORTED/);
+      await assert.rejects(
+        api.exploration.executeJavaScript("await driver.$('~send').click();"),
+        /ANDROID_READINESS_COLD_UNSUPPORTED/,
+      );
+      assert.equal(mock.created(), 0);
+      assert.equal(
+        mock.adb!.requests.some((request) => request.startsWith('shell,')),
+        false,
+      );
+    }
+    const remote = apis[0]!;
+    const adapter = remote.registry.current as AppiumPlatformAdapter;
+    await adapter.runtime.configureResolved({
+      environment: {
+        platform: 'android',
+        serverUrl: mock.url, // Transport stand-in for the healthy remote Session.
+        capabilities: { 'appium:deviceName': 'mock' },
+      },
+      capabilities: { 'appium:deviceName': 'mock' },
+    });
+    await adapter.runtime.execute("console.log('healthy remote transport mock');");
+    const priorAdbReads = mock.adb!.requests.length;
+    assert.equal((await remote.setup.ready()).proof.phoneUnlocked, true);
+    assert.equal(mock.adb!.requests.length, priorAdbReads);
+    assert.equal(mock.lockQueries(), 3);
+    assert.equal(mock.created(), 1);
+    await adapter.runtime.close();
+    await assert.rejects(remote.setup.ready(), /ANDROID_READINESS_COLD_UNSUPPORTED/);
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.adb!.requests.length, priorAdbReads);
+  } finally {
+    for (const api of apis) await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.adb!.close();
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('cold Android ready never falls back from an unavailable configured endpoint', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ready-no-server-fallback-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const mock = await mockAppium({ readinessAdb: {}, statusFailure: true });
+  const api = androidReadinessApi(root, mock.adb!.connect);
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock' },
+      capabilities: {},
+    });
+
+    await assert.rejects(api.setup.ready(), /No Appium server responded/);
+    assert.deepEqual(mock.requests, ['GET /status']);
+    assert.deepEqual(mock.adb!.requests, []);
+    assert.equal(mock.created(), 0);
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.adb!.close();
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('ordinary Android cold execution preserves App intent, exact phone/endpoint and blocks locked/off/unknown before POST', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-execute-cold-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const mock = await mockAppium({ readinessAdb: {} });
+  const api = androidReadinessApi(root, mock.adb!.connect);
+  const adapter = api.registry.current as AppiumPlatformAdapter;
+  const target = { 'appium:appPackage': 'com.example.target', 'appium:appActivity': '.Main' };
+  const code = "await driver.$('~send').click();";
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock' },
+      capabilities: target,
+    });
+    for (const state of [
+      { power: 'mWakefulness=Asleep\n', code: 'ANDROID_DEVICE_LOCKED' },
+      { policy: 'KeyguardServiceDelegate\n  showing=true\n', code: 'ANDROID_DEVICE_LOCKED' },
+      { power: '', code: 'ANDROID_DEVICE_LOCK_STATE_UNKNOWN' },
+      { policy: '', code: 'ANDROID_DEVICE_LOCK_STATE_UNKNOWN' },
+    ]) {
+      Object.assign(mock.adb!.options, {
+        power: 'mWakefulness=Awake\n',
+        policy: 'KeyguardServiceDelegate\n  showing=false\n',
+        ...state,
+      });
+      await assert.rejects(api.exploration.executeJavaScript(code), new RegExp(state.code));
+      assert.equal(mock.created(), 0);
+      assert.deepEqual(adapter.appTarget, target);
+    }
+    Object.assign(mock.adb!.options, {
+      power: 'mWakefulness=Awake\n',
+      policy: 'KeyguardServiceDelegate\n  showing=false\n',
+    });
+    const transportsBefore = mock.adb!.requests.filter((item) =>
+      item.startsWith('host:transport:'),
+    ).length;
+    await api.platforms.configureSession({ device: { kind: 'device', name: 'requestedPhone' } });
+    await assert.rejects(api.exploration.executeJavaScript(code), /no other device was selected/);
+    assert.equal(mock.created(), 0);
+    assert.equal(
+      mock.adb!.requests.filter((item) => item.startsWith('host:transport:')).length,
+      transportsBefore,
+    );
+    await api.platforms.configureSession({ device: { kind: 'device', name: 'mock' } });
+    const readsBefore = mock.adb!.requests.length;
+    await api.platforms.configureSession({ serverUrl: 'http://127.0.0.1:1/' });
+    await assert.rejects(api.exploration.executeJavaScript(code), /server.*responded/i);
+    assert.equal(mock.adb!.requests.length, readsBefore);
+    assert.equal(mock.created(), 0);
+    assert.equal(
+      mock.requests.some((request) => /\/(element|click|activate_app)$/.test(request)),
+      false,
+    );
+    await api.platforms.configureSession({ serverUrl: mock.url });
+    assert.deepEqual(await adapter.execute('console.log(app.id);'), [
+      { type: 'text', text: 'com.example.target' },
+    ]);
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.sessionCapabilities[0]?.['appium:skipUnlock'], true);
+    assert.equal(mock.sessionCapabilities[0]?.['appium:appActivity'], '.Main');
+    assert.deepEqual(adapter.appTarget, target);
+    assert.equal(
+      mock.requests.some((request) => /\/(unlock|lock|press_keycode)$/.test(request)),
+      false,
+    );
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('ordinary healthy Android guards every Core execution; locked/unknown/Abort never dispatch or replay user actions', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-execute-guard-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  let locked: unknown = false;
+  const controller = new AbortController();
+  let abortAtGuard = false;
+  const mock = await mockAppium({
+    readinessAdb: {},
+    isLocked: () => {
+      if (abortAtGuard) controller.abort(new Error('cancelled lock guard'));
+      return locked;
+    },
+  });
+  const api = androidReadinessApi(root, mock.adb!.connect);
+  const adapter = api.registry.current as AppiumPlatformAdapter;
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock' },
+      capabilities: { 'appium:appPackage': 'com.example.target' },
+    });
+    await adapter.execute("console.log('healthy');");
+    const code = "await driver.$('~send').click();";
+    for (const state of [true, undefined, 'false']) {
+      locked = state;
+      await assert.rejects(adapter.execute(code), /ANDROID_DEVICE_LOCK/);
+      assert.equal(mock.created(), 1);
+      assert.equal(mock.deleted(), 0);
+    }
+    assert.equal(mock.lockQueries(), 4);
+    assert.equal(
+      mock.requests.some((request) => /\/(element|click)$/.test(request)),
+      false,
+    );
+    locked = false;
+    await assert.rejects(
+      adapter.execute("throw new Error('app activity failure');"),
+      /app activity failure/,
+    );
+    assert.equal(adapter.runtime.isRunning, true);
+    assert.equal(mock.created(), 1);
+    abortAtGuard = true;
+    await assert.rejects(adapter.execute(code, controller.signal), /abort|cancel/i);
+    assert.equal(adapter.runtime.isRunning, false);
+    assert.equal(mock.deleted(), 1);
+    assert.equal(mock.created(), 1);
+    assert.equal(
+      mock.requests.some((request) => /\/(element|click)$/.test(request)),
+      false,
+    );
+    assert.deepEqual(adapter.appTarget, { 'appium:appPackage': 'com.example.target' });
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('native bootstrap cancels the actual slow POST without retry and reports unknown remote ownership', async () => {
+  const reason = new Error('cancelled during POST');
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const mock = await mockAppium({
+    sessionDelayMs: 300,
+    onSessionRequest: () => {
+      timer = setTimeout(() => controller.abort(reason), 100);
+    },
+  });
+  const started = Date.now();
+  try {
+    await assert.rejects(
+      startNativeSession(
+        {
+          environment: { platform: 'android', serverUrl: mock.url, capabilities: {} },
+          capabilities: {},
+        },
+        5_000,
+        { signal: controller.signal },
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof NativeInitializationCancelledError);
+        assert.match(error.message, /POST \/session may have completed remotely/);
+        assert.match(error.message, /cleanup cannot be confirmed/);
+        assert.equal(error.abortReason, reason);
+        assert.ok(error.cause instanceof Error);
+        return true;
+      },
+    );
+    assert.ok(Date.now() - started < 2_000);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.cancelledResponses(), 1);
+    assert.equal(mock.deleted(), 0); // Never delete a guessed/foreign Session ID.
+    assert.equal(
+      mock.requests.some((request) => request.endsWith('/source')),
+      false,
+    );
+  } finally {
+    clearTimeout(timer);
+    mock.server.close();
+  }
+});
+
+test('native bootstrap deadline bounds slow HTTP even without a caller AbortSignal', async () => {
+  const mock = await mockAppium({ sessionDelayMs: 250 });
+  const started = Date.now();
+  try {
+    await assert.rejects(
+      startNativeSession(
+        {
+          environment: { platform: 'ios', serverUrl: mock.url, capabilities: {} },
+          capabilities: {},
+        },
+        5_000,
+        { initializationTimeoutMs: 100 },
+      ),
+      /cleanup cannot be confirmed/,
+    );
+    assert.ok(Date.now() - started < 2_000);
+    assert.equal(mock.created(), 1);
+  } finally {
+    mock.server.close();
+  }
+});
+
+test('a Session result obtained before cancellation is deleted after Worker initialization abort', async () => {
+  const controller = new AbortController();
+  const reason = new Error('cancelled after POST result');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const mock = await mockAppium({
+    afterSession: () => {
+      timer = setTimeout(() => controller.abort(reason), 50);
+    },
+  });
+  try {
+    await assert.rejects(
+      startNativeSession(
+        {
+          environment: { platform: 'android', serverUrl: mock.url, capabilities: {} },
+          capabilities: {},
+        },
+        5_000,
+        { signal: controller.signal },
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof WorkerTerminatedError);
+        assert.match(error.message, /initialization aborted/);
+        assert.equal((error.cause as Error).cause, reason);
+        return true;
+      },
+    );
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.deleted(), 1);
+    assert.equal(
+      mock.requests.some((request) => request.endsWith('/source')),
+      false,
+    );
+    assert.equal(mock.server.listening, true);
+  } finally {
+    clearTimeout(timer);
+    mock.server.close();
+  }
+});
+
+test('Worker initialization and DELETE failures retain the primary error/cause and surface cleanup failure', async () => {
+  const controller = new AbortController();
+  const reason = new Error('cancelled Worker initialization');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const mock = await mockAppium({
+    deleteFailure: true,
+    afterSession: () => {
+      timer = setTimeout(() => controller.abort(reason), 50);
+    },
+  });
+  try {
+    await assert.rejects(
+      startNativeSession(
+        {
+          environment: { platform: 'android', serverUrl: mock.url, capabilities: {} },
+          capabilities: {},
+        },
+        5_000,
+        { signal: controller.signal },
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof AggregateError);
+        assert.ok(error.cause instanceof WorkerTerminatedError);
+        assert.equal((error.cause.cause as Error).cause, reason);
+        assert.match(error.message, /initialization aborted/);
+        assert.match(error.message, /cleanup also failed:.*delete Session failed/s);
+        assert.equal(error.errors[0], error.cause);
+        return true;
+      },
+    );
+    assert.equal(mock.deleted(), 1);
+    assert.equal(mock.created(), 1);
+  } finally {
+    clearTimeout(timer);
+    mock.server.close();
+  }
+});
+
+test('Native API timeout/Worker exit invalidate Sessions without replay; ordinary script errors retain reuse', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-native-recovery-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const mock = await mockAppium({ readinessAdb: {} });
+  class Adapter extends AppiumPlatformAdapter {
+    override readonly runtime = new NativeManager(1_000);
+    protected override resolveReadiness(signal?: AbortSignal) {
+      return resolveAndroidReadinessSession(this.sessionHints!, signal, mock.adb!.connect);
+    }
+  }
+  const adapter = new Adapter({
+    id: 'android',
+    label: 'Android',
+    platformName: 'Android',
+    automationName: 'UiAutomator2',
+  });
+  const api = new MaatApi(new PlatformRegistry([adapter], 'android'), root);
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock' },
+      capabilities: { 'appium:deviceName': 'mock', 'appium:appPackage': 'com.example.target' },
+    });
+    await api.exploration.executeJavaScript("console.log('first');");
+    await assert.rejects(
+      api.exploration.executeJavaScript(
+        "throw new Error('Exploration execution exceeded 1ms; Exploration Worker exited; session closed');",
+      ),
+      /exceeded 1ms/,
+    );
+    assert.equal(api.platforms.status().session, 'ready');
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.deleted(), 0);
+    await assert.rejects(
+      api.exploration.executeJavaScript('await driver.getPageSource(); while (true) {}'),
+      WorkerTerminatedError,
+    );
+    assert.equal(api.platforms.status().session, 'idle');
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.deleted(), 1);
+    assert.deepEqual(adapter.appTarget, { 'appium:appPackage': 'com.example.target' });
+    assert.deepEqual(await api.exploration.executeJavaScript("console.log('fresh');"), [
+      { type: 'text', text: 'fresh' },
+    ]);
+    assert.equal(mock.created(), 2);
+    assert.equal(mock.requests.filter((request) => request.endsWith('/source')).length, 1);
+    await assert.rejects(
+      api.exploration.executeJavaScript("Buffer.constructor('return process')().exit(23);"),
+      /Worker exited.*code 23/,
+    );
+    assert.equal(api.platforms.status().session, 'idle');
+    assert.equal(mock.deleted(), 2);
+    await api.exploration.executeJavaScript("console.log('next explicit request');");
+    assert.equal(mock.created(), 3);
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('Native manager cancellation cleanup failure preserves the exact primary execution error', async () => {
+  const manager = new NativeManager();
+  await manager.configureResolved({
+    environment: { platform: 'ios', serverUrl: 'http://127.0.0.1:1/', capabilities: {} },
+    capabilities: {},
+  });
+  const controller = new AbortController();
+  const originalCause = new Error('original cause');
+  const primary = new Error('primary execution cancelled', { cause: originalCause });
+  const cleanup = new Error('owned DELETE failed');
+  const session: JavaScriptSession = {
+    async execute() {
+      controller.abort(primary);
+      throw primary;
+    },
+    async close() {
+      throw cleanup;
+    },
+  };
+  // Inject only an owned session at the existing lifecycle boundary.
+  (manager as unknown as { session: JavaScriptSession }).session = session;
+  await assert.rejects(manager.execute('void 0;', controller.signal), (error: unknown) => {
+    assert.ok(error instanceof AggregateError);
+    assert.equal(error.cause, primary);
+    assert.equal(primary.cause, originalCause);
+    assert.deepEqual(error.errors, [primary, cleanup]);
+    assert.match(error.message, /primary execution cancelled.*owned DELETE failed/s);
+    return true;
+  });
+  assert.equal(manager.isRunning, false);
+});
+
+test('native timeout plus remote DELETE failure is visible at API level and never triggers App fallback', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-native-double-failure-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const options = { deleteFailure: true, readinessAdb: {} };
+  const mock = await mockAppium(options);
+  class Adapter extends AppiumPlatformAdapter {
+    override readonly runtime = new NativeManager(1_000);
+    protected override resolveReadiness(signal?: AbortSignal) {
+      return resolveAndroidReadinessSession(this.sessionHints!, signal, mock.adb!.connect);
+    }
+  }
+  const adapter = new Adapter({
+    id: 'android',
+    label: 'Android',
+    platformName: 'Android',
+    automationName: 'UiAutomator2',
+  });
+  const api = new MaatApi(new PlatformRegistry([adapter], 'android'), root);
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock' },
+      capabilities: { 'appium:deviceName': 'mock', 'appium:appPackage': 'com.example.target' },
+    });
+    await assert.rejects(api.exploration.executeJavaScript('while (true) {}'), (error: unknown) => {
+      assert.ok(error instanceof AggregateError);
+      assert.ok(error.cause instanceof WorkerTerminatedError);
+      assert.match(error.message, /exceeded 1000ms/);
+      assert.match(error.message, /delete Session failed/);
+      return true;
+    });
+    assert.equal(api.platforms.status().session, 'idle');
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.deleted(), 1);
+    assert.deepEqual(adapter.appTarget, { 'appium:appPackage': 'com.example.target' });
+    options.deleteFailure = false;
+    await api.exploration.executeJavaScript("console.log('explicit recovery');");
+    assert.equal(mock.created(), 2);
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test(
+  'Android ready 15-second observation budget reaches the first POST and leaves status idle on cancellation',
+  { timeout: 25_000 },
+  async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'maat-ready-bootstrap-'));
+    const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+    process.env.MAAT_SESSION_HINTS_DIR = root;
+    const mock = await mockAppium({ sessionDelayMs: 15_200, readinessAdb: {} });
+    const api = androidReadinessApi(root, mock.adb!.connect);
+    try {
+      await api.platforms.configureSession({
+        serverUrl: mock.url,
+        device: { kind: 'device', name: 'mock' },
+        capabilities: { 'appium:deviceName': 'mock' },
+      });
+      const started = Date.now();
+      await assert.rejects(api.setup.ready(), (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /readiness timed out/);
+        assert.ok(error.cause instanceof Error);
+        assert.match(error.cause.message, /cleanup cannot be confirmed/);
+        return true;
+      });
+      assert.ok(Date.now() - started < 20_000);
+      assert.equal(api.platforms.status().session, 'idle');
+      assert.equal(mock.created(), 1);
+      assert.equal(mock.sessionCapabilities[0]?.['appium:skipUnlock'], true);
+      assert.equal(mock.deleted(), 0);
+      assert.equal(
+        mock.requests.some((request) => request.endsWith('/source')),
+        false,
+      );
+    } finally {
+      await api.close();
+      if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+      else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+      mock.server.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test('native target persists stable environment and resolves changing device UUIDs', () => {
   const split = splitCapabilities({
@@ -122,10 +1242,12 @@ test('derived native capabilities never leak unprefixed WebDriver fields', () =>
 
 test('legacy App capability names normalize and invalid configuration is recoverable', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'maat-native-config-'));
-  const adapter = new AppiumPlatformAdapter(
-    { id: 'macos', label: 'macOS', platformName: 'Mac', automationName: 'Mac2' },
-    root,
-  );
+  const adapter = new AppiumPlatformAdapter({
+    id: 'macos',
+    label: 'macOS',
+    platformName: 'Mac',
+    automationName: 'Mac2',
+  });
   try {
     await adapter.configureSession({ capabilities: { bundleId: 'com.example.old' } });
     assert.deepEqual(adapter.appTarget, { 'appium:bundleId': 'com.example.old' });
@@ -162,43 +1284,43 @@ test('iOS discovery keeps simulators listed after offline devices', () => {
 
 test('runtime Android App target drives lifecycle and resource-id namespace', async () => {
   const mock = await mockAppium();
-  const session = await createAppiumTestSession(
-    {
-      environment: { platform: 'android', serverUrl: mock.url, capabilities: {} },
-      capabilities: {},
-    },
-    { 'appium:appPackage': 'com.microsoft.emmx.canary' },
-  );
+  const session = await startNativeSession({
+    environment: { platform: 'android', serverUrl: mock.url, capabilities: {} },
+    capabilities: {},
+    app: { 'appium:appPackage': 'com.microsoft.emmx.canary' },
+  });
   try {
-    assert.equal((session.context.app as { id: string }).id, 'com.microsoft.emmx.canary');
-    assert.equal(
-      (session.context.app as { resourceId(name: string): string }).resourceId(
-        'edge_ntp_scrollview',
+    assert.deepEqual(
+      await session.execute(
+        "console.log(app.id); console.log(app.resourceId('edge_ntp_scrollview'));",
       ),
-      'id=com.microsoft.emmx.canary:id/edge_ntp_scrollview',
+      [
+        { type: 'text', text: 'com.microsoft.emmx.canary' },
+        { type: 'text', text: 'id=com.microsoft.emmx.canary:id/edge_ntp_scrollview' },
+      ],
     );
-    await session.setup();
   } finally {
-    await session.teardown();
+    await session.close();
     mock.server.close();
   }
   assert.equal(mock.sessionCapabilities[0]?.['appium:appPackage'], 'com.microsoft.emmx.canary');
+  assert.ok(mock.requests.some((request) => request.includes('terminate_app')));
   assert.equal(mock.deleted(), 1);
 });
 
 test('macOS App target relies on Session capabilities instead of unsupported app lifecycle APIs', async () => {
   const mock = await mockAppium();
-  const session = await createAppiumTestSession(
-    {
-      environment: { platform: 'macos', serverUrl: mock.url, capabilities: {} },
-      capabilities: {},
-    },
-    { 'appium:bundleId': 'com.apple.calculator' },
-  );
+  const session = await startNativeSession({
+    environment: { platform: 'macos', serverUrl: mock.url, capabilities: {} },
+    capabilities: {},
+    app: { 'appium:bundleId': 'com.apple.calculator' },
+  });
   try {
-    await session.setup();
+    assert.deepEqual(await session.execute('console.log(app.id);'), [
+      { type: 'text', text: 'com.apple.calculator' },
+    ]);
   } finally {
-    await session.teardown();
+    await session.close();
     mock.server.close();
   }
   assert.equal(mock.sessionCapabilities[0]?.['appium:bundleId'], 'com.apple.calculator');
@@ -249,6 +1371,10 @@ test('WDIO worker executes TypeScript and assertions, owns only its remote sessi
     );
     assert.equal(second[0].type, 'image');
     assert.equal((await session.execute("await evidence.screenshot('result');"))[0].type, 'image');
+    await assert.rejects(session.execute("expect('Welcome').toBe('Wrong');"), /Wrong/);
+    assert.deepEqual(await session.execute("console.log(await driver.$('~welcome').getText());"), [
+      { type: 'text', text: 'Welcome' },
+    ]);
     assert.equal(mock.created(), 1);
   } finally {
     await session.close();
@@ -303,77 +1429,40 @@ test('native execution enforces code/output limits and a parent deadline', async
   assert.equal(mock.deleted(), 1);
 });
 
-test('Agent project flow saves a verified TypeScript native Case and retains remote server', async () => {
-  const mock = await mockAppium();
-  await mkdir('artifacts/native-tests', { recursive: true });
-  const base = await mkdtemp(path.resolve('artifacts/native-tests/layout-'));
-  const hints = await mkdtemp(path.resolve('artifacts/native-tests/hints-'));
+test('native API reuses its Session after execution failure and retains the external server', async () => {
+  const mock = await mockAppium({ readinessAdb: {} });
+  const base = await mkdtemp(path.join(tmpdir(), 'maat-native-api-'));
+  const hints = await mkdtemp(path.join(tmpdir(), 'maat-native-hints-'));
   const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
-  const projects = new MaatApi(createDefaultPlatformRegistry(base), base);
-  const cases = projects.drafts;
-  const root = path.join(base, 'android');
+  const projects = androidReadinessApi(base, mock.adb!.connect);
   try {
     process.env.MAAT_SESSION_HINTS_DIR = hints;
     await projects.platforms.select('android');
     await projects.platforms.configureSession({
       serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock' },
       capabilities: { 'appium:deviceName': 'mock', 'appium:appPackage': 'example.welcome' },
     });
-    const configure = createPlatformTools(projects).find(
-      (tool) => tool.name === 'configure_session',
-    )!;
-    await configure.execute(
-      'update',
-      { capabilities: { 'appium:newCommandTimeout': 180 } },
-      undefined,
-      undefined,
-      {} as never,
-    );
+    await projects.platforms.configureSession({
+      capabilities: { 'appium:newCommandTimeout': 180 },
+    });
     assert.ok(projects.platforms.current() instanceof AppiumPlatformAdapter);
     const adapter = projects.platforms.current() as AppiumPlatformAdapter;
     assert.equal(adapter.sessionHints?.serverUrl, mock.url);
     assert.equal(adapter.sessionHints?.capabilities['appium:deviceName'], 'mock');
-    const draft = cases.begin({
-      id: 'welcome',
-      module: 'account/login',
-      name: 'Welcome',
-      description: 'Welcome is shown',
-      objectives: ['Welcome'],
-      rootDirectory: root,
-    });
     const code = `await expect(driver.$('~welcome')).toHaveText('Welcome');`;
-    await cases.recordSuccessfulStep(code, await projects.exploration.executeJavaScript(code), {
-      adapterId: 'android',
-      bindings: ['driver', 'browser', 'expect', 'display', 'evidence'],
-      requirement: projects.platforms.current().runtimeRequirement(),
-    });
-    draft.steps.push({
-      number: 2,
-      name: 'Failing assertion',
-      adapterId: 'android',
-      bindings: ['expect'],
-      observations: [],
-      code: `await expect(1).toBe(2);`,
-    });
-    await assert.rejects(projects.cases.save(), /Clean validation failed/);
+    await projects.exploration.executeJavaScript(code);
+    await assert.rejects(projects.exploration.executeJavaScript('expect(1).toBe(2);'), /2/);
     assert.equal(adapter.runtime.isRunning, true);
+    assert.equal(mock.deleted(), 0);
+    await projects.exploration.executeJavaScript(code);
+    assert.equal(mock.created(), 1);
+    assert.deepEqual(await readdir(base), []);
+    assert.deepEqual(await readdir(hints), ['android.json']);
+    await projects.close();
     assert.equal(mock.deleted(), 1);
-    draft.steps.pop();
-    const saved = await projects.cases.save();
-    const { readFile } = await import('node:fs/promises');
-    const spec = await readFile(saved.testPath, 'utf8');
-    assert.match(spec, /createMaatTest/);
-    assert.equal(mock.created(), 3);
-    assert.equal(mock.deleted(), 3);
     assert.equal(adapter.runtime.isRunning, false);
-    assert.equal(saved.testPath, path.join(root, 'cases/account/login/welcome.spec.ts'));
-    assert.match(spec, /maat\.step\("Recorded step 001", "android"/);
-    assert.doesNotMatch(spec, /node:fs|mkdirSync|writeFileSync|randomUUID|path.resolve/);
     assert.equal(mock.server.listening, true);
-    assert.ok(!spec.includes(mock.url));
-    assert.equal(await readFile(saved.testPath, 'utf8'), spec);
-    const runs = path.resolve('artifacts/maat/runs');
-    assert.ok((await readdir(runs)).length > 0);
   } finally {
     if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
     else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
@@ -384,28 +1473,14 @@ test('Agent project flow saves a verified TypeScript native Case and retains rem
   }
 });
 
-test('platform layout is enforced by schema and manager, not model naming', async () => {
-  const projects = new MaatApi(createDefaultPlatformRegistry(), path.resolve('maat-tests'));
+test('platform IDs are selected through the registry without formal platform roots', async () => {
+  const projects = new MaatApi(createDefaultPlatformRegistry(), process.cwd());
   await assert.rejects(projects.platforms.select('iphone-calculator'), /Unknown platform/);
   assert.equal(projects.platforms.current().id, 'web');
-  for (const platform of ['web', 'android', 'ios', 'macos'])
-    assert.equal(platformRoot('maat-tests', platform), path.resolve('maat-tests', platform));
-  assert.throws(() => platformRoot('maat-tests', '../escape'));
-  assert.throws(() => casePath('/root/ios', '../escape'));
-  assert.throws(() => casePath('/root/ios', 'case', '../escape'));
-  const tools = createPlatformTools(projects);
-  assert.equal(
-    tools.find((tool) => tool.name === 'select_platform')!.parameters.properties.platform.type,
-    'string',
+  assert.deepEqual(
+    projects.platforms.list().map((adapter) => adapter.id),
+    ['web', 'android', 'ios', 'macos'],
   );
-  const caseTools = createCaseTools(projects);
-  assert.equal(
-    caseTools.find((tool) => tool.name === 'begin_case')!.parameters.properties.rootDirectory,
-    undefined,
-  );
-  assert.ok(
-    createMaatResourceOptions([]).systemPrompt.includes(
-      'maat-tests/<owner-platform>/cases/<module>/<case-id>.spec.ts',
-    ),
-  );
+  for (const adapter of projects.platforms.list()) assert.equal('root' in adapter, false);
+  await projects.close();
 });

@@ -35,12 +35,12 @@ test('setup panel uses user language and one next action without implementation 
     ],
   });
   const panel = setupPanel(snapshot, 'zh-CN').join('\n');
-  assert.match(panel, /测试能力：部分可用/);
+  assert.match(panel, /操作能力：部分可用/);
   assert.match(panel, /1\. 读取界面：尚未检测/);
-  assert.match(panel, /2\. 操作应用和断言：正常/);
-  assert.match(panel, /3\. 截图 Evidence：截图 Evidence 尚未开启/);
-  assert.match(panel, /4\. 可选增强：Automation Mode、视频录制尚未配置（不影响测试）/);
-  assert.match(panel, /下一步：开启截图权限/);
+  assert.match(panel, /2\. 操作应用：正常/);
+  assert.match(panel, /3\. 截图观察：截图能力尚未开启/);
+  assert.match(panel, /4\. 可选增强：Automation Mode、视频录制尚未配置/);
+  assert.match(panel, /下一步：读取当前界面后继续任务/);
   assert.doesNotMatch(panel, /WebDriverAgent|TCC|capability/);
 });
 
@@ -70,7 +70,7 @@ test('setup doctor exposes technical details while redacting secret-shaped field
   assert.match(doctor, /进程、版本与检测依据/);
 });
 
-test('setup panel treats optional automation and video improvements as test-ready', () => {
+test('setup panel agrees with partial readiness when optional capabilities are unavailable', () => {
   const snapshot = aggregateSetup({
     platform: 'macos',
     capabilities: [
@@ -108,21 +108,21 @@ test('setup panel treats optional automation and video improvements as test-read
     ],
   });
   const panel = setupPanel(snapshot, 'zh-CN').join('\n');
-  assert.match(panel, /测试能力：完全可用/);
+  assert.match(panel, /操作能力：部分可用/);
   assert.match(panel, /1\. 读取界面：正常/);
-  assert.match(panel, /2\. 操作应用和断言：正常/);
-  assert.match(panel, /3\. 截图 Evidence：正常/);
-  assert.match(panel, /4\. 可选增强：Automation Mode、视频录制尚未配置（不影响测试）/);
-  assert.match(panel, /下一步：开始测试/);
+  assert.match(panel, /2\. 操作应用：正常/);
+  assert.match(panel, /3\. 截图观察：正常/);
+  assert.match(panel, /4\. 可选增强：Automation Mode、视频录制尚未配置/);
+  assert.match(panel, /下一步：读取当前界面后继续任务/);
   assert.doesNotMatch(panel, /查看设置方法/);
   const english = setupPanel(snapshot, 'en').join('\n');
-  assert.match(english, /Test capability: Ready/);
+  assert.match(english, /Execution capability: Partially ready/);
   assert.match(english, /1\. Read the UI: Ready/);
   assert.match(
     english,
     /4\. Optional enhancements: Automation Mode, video recording not configured/,
   );
-  assert.match(english, /Next: Start testing/);
+  assert.match(english, /Next: Read the current UI and continue/);
   assert.doesNotMatch(english, /[测试正常尚未配置]/);
 });
 
@@ -142,4 +142,25 @@ test('setup locale follows explicit override, recent user language, then system 
   assert.equal(resolveSetupLocale(undefined, context('Check the environment')), 'en');
   assert.equal(resolveSetupLocale('en', context('请检查环境')), 'en');
   assert.equal(resolveSetupLocale('中文', context('Check it')), 'zh-CN');
+});
+
+test('Android unknown or blocked preparation never suggests starting a test', () => {
+  const unknown = aggregateSetup({ platform: 'android', capabilities: [], state: 'unknown' });
+  const panel = setupPanel(unknown, 'zh-CN').join('\n');
+  assert.match(panel, /尚未检查准备条件/);
+  assert.match(panel, /检查环境，确认具体缺项/);
+  assert.doesNotMatch(panel, /开始测试|完全可用|macOS/);
+  const ready = aggregateSetup({
+    platform: 'android',
+    capabilities: [
+      {
+        id: 'appiumServer',
+        status: 'ready',
+        required: true,
+        messageKey: 'capability.appium.ready',
+      },
+    ],
+  });
+  assert.match(setupPanel(ready, 'zh-CN').join('\n'), /手机操作通道尚需确认/);
+  assert.match(setupDoctor(ready, 'en'), /does not create a phone Session/);
 });

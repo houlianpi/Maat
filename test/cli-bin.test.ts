@@ -14,9 +14,9 @@ test('maat shows command help', async () => {
     cwd: repositoryRoot,
   });
 
-  assert.match(stdout, /Maat - conversational UI verification/);
-  assert.match(stdout, /maat test --suite smoke/);
-  assert.match(stdout, /--app-id com\.microsoft\.emmx\.canary/);
+  assert.match(stdout, /Maat - UI execution for Coding Agents/);
+  assert.match(stdout, /maat agent/);
+  assert.doesNotMatch(stdout, /maat (test|cases|replay)/);
 });
 
 test('maat rejects unknown commands', async () => {
@@ -26,11 +26,10 @@ test('maat rejects unknown commands', async () => {
   );
 });
 
-test('maat test dispatches the Case runner and preserves failure status', async () => {
-  await assert.rejects(
-    execFileAsync(process.execPath, [cli, 'test', '--case', 'does-not-exist'], {
-      cwd: repositoryRoot,
-    }),
-    /Unknown Case: does-not-exist/,
-  );
+test('removed formal-test and replay commands fail explicitly', async () => {
+  for (const command of ['test', 'cases', 'replay'])
+    await assert.rejects(
+      execFileAsync(process.execPath, [cli, command], { cwd: repositoryRoot }),
+      new RegExp(`Unknown command: ${command}`),
+    );
 });

@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 
 import { browserChannel, type BrowserName } from './config.ts';
 import type { JavaScriptSession } from '../../core/exploration/runtime.ts';
+import { errorWithCleanupFailure } from '../../core/exploration/runtime.ts';
 import { createWebExplorationSession } from './exploration-session.ts';
 
 export type BrowserProfile = {
@@ -40,7 +41,7 @@ export class WebExplorationManager implements JavaScriptSession {
   }
 
   get isRunning(): boolean {
-    return this.session !== undefined;
+    return this.session !== undefined && !this.session.isClosed;
   }
 
   async configure(next: Partial<BrowserConfig>): Promise<BrowserConfig> {
@@ -51,8 +52,21 @@ export class WebExplorationManager implements JavaScriptSession {
   }
 
   async execute(code: string, signal?: AbortSignal) {
-    const session = await this.getSession();
-    return session.execute(code, signal);
+    signal?.throwIfAborted();
+    try {
+      const session = await this.getSession(signal);
+      signal?.throwIfAborted();
+      return await session.execute(code, signal);
+    } catch (error) {
+      if (this.session?.isClosed || signal?.aborted) {
+        try {
+          await this.close();
+        } catch (cleanup) {
+          throw errorWithCleanupFailure(error, cleanup);
+        }
+      }
+      throw error;
+    }
   }
 
   async close(): Promise<void> {
@@ -61,12 +75,9 @@ export class WebExplorationManager implements JavaScriptSession {
     await session?.close();
   }
 
-  async createValidationSession(): Promise<JavaScriptSession> {
-    return this.launch();
-  }
-
-  private async getSession(): Promise<JavaScriptSession> {
-    this.session ??= await this.launch();
+  private async getSession(signal?: AbortSignal): Promise<JavaScriptSession> {
+    if (this.session?.isClosed) await this.close();
+    this.session ??= await this.launch(signal);
     return this.session;
   }
 
@@ -81,15 +92,19 @@ export class WebExplorationManager implements JavaScriptSession {
     return profile;
   }
 
-  private async launch(): Promise<JavaScriptSession> {
+  private async launch(signal?: AbortSignal): Promise<JavaScriptSession> {
     const profile = await this.readProfile();
+    signal?.throwIfAborted();
     const browser = profile?.browser ?? this.config.browser;
-    return createWebExplorationSession({
-      channel: browserChannel(browser),
-      executablePath: this.config.executablePath,
-      headless: this.config.headless,
-      profileDirectory: profile?.profileDirectory ?? this.config.profileDirectory,
-      userDataDir: profile?.userDataDir ?? this.config.userDataDir,
-    });
+    return createWebExplorationSession(
+      {
+        channel: browserChannel(browser),
+        executablePath: this.config.executablePath,
+        headless: this.config.headless,
+        profileDirectory: profile?.profileDirectory ?? this.config.profileDirectory,
+        userDataDir: profile?.userDataDir ?? this.config.userDataDir,
+      },
+      signal,
+    );
   }
 }

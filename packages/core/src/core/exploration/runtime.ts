@@ -5,12 +5,26 @@ export interface ExplorationRuntime {
 }
 
 export type JavaScriptSession = {
+  /** Authoritative Worker lifecycle state, when supplied by a managed session. */
+  readonly isClosed?: boolean;
   execute(
     code: string,
     signal?: AbortSignal,
   ): Promise<import('./protocol.ts').JavaScriptObservation[]>;
   close(): Promise<void>;
 };
+
+/** Only parent-side lifecycle failures use this type; script errors remain ordinary Errors. */
+export class WorkerTerminatedError extends Error {}
+
+export function errorWithCleanupFailure(primary: unknown, cleanup: unknown): AggregateError {
+  const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+  return new AggregateError(
+    [primary, cleanup],
+    `${message(primary)}; Owned Session cleanup also failed: ${message(cleanup)}`,
+    { cause: primary },
+  );
+}
 
 export type JavaScriptSessionOptions = {
   assertionTimeoutMs?: number;

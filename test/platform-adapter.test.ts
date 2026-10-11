@@ -7,30 +7,21 @@ import {
   SessionSetupError,
   type SessionResolverDependencies,
 } from '../packages/core/src/platforms/appium/session-resolver.ts';
-import { renderSpec } from '../packages/core/src/core/cases/spec-renderer.ts';
-import { buildSpecModel } from '../packages/core/src/core/cases/spec-model.ts';
-import { CaseDraftManager } from '../packages/core/src/core/cases/draft-manager.ts';
 
 function adapter(id: string, events: string[]): PlatformAdapter {
   return {
     id,
     label: id,
-    root: `/tmp/${id}`,
     codeContext: { language: 'javascript', globals: [], guidelines: [] },
     async initialize() {
       events.push(`init:${id}`);
     },
     async execute() {
-      return [];
-    },
-    runtimeRequirement() {
-      return { adapterId: id };
-    },
-    async createTestSession() {
-      throw new Error('unused');
+      events.push(`execute:${id}`);
+      return [{ type: 'text', text: id }];
     },
     status() {
-      return { id, label: id, root: `/tmp/${id}`, session: 'idle' };
+      return { id, label: id, session: 'idle' };
     },
     async close() {
       events.push(`close:${id}`);
@@ -91,42 +82,57 @@ test('Appium resolver requires user selection when multiple devices remain', asy
   );
 });
 
-test('spec metadata identifies every Adapter used by a mixed Case', () => {
-  const draft = new CaseDraftManager().begin({
-    id: 'mixed',
-    name: 'Mixed',
-    description: 'Mixed',
-    objectives: ['Done'],
-  });
-  draft.steps.push(
-    {
-      name: 'Web',
-      number: 1,
-      adapterId: 'web',
-      bindings: ['page'],
-      code: 'void page;',
-      observations: [],
-    },
-    {
-      name: 'macOS',
-      number: 2,
-      adapterId: 'macos',
-      bindings: ['driver'],
-      code: 'void driver;',
-      observations: [],
-    },
-  );
-  assert.match(renderSpec(buildSpecModel(draft), './fixture.ts'), /@maat-adapters web macos/);
-});
-
-test('Case owner remains stable while active Adapter changes', async () => {
+test('platform switching routes execution without closing other adapter Sessions', async () => {
   const events: string[] = [];
   const web = adapter('web', events);
   const macos = adapter('macos', events);
   const registry = new PlatformRegistry([web, macos]);
+  assert.deepEqual(await registry.current.execute('console.log("web");'), [
+    { type: 'text', text: 'web' },
+  ]);
   await registry.select('macos');
-  const ownerRoot = registry.current.root;
+  assert.deepEqual(await registry.current.execute('console.log("macos");'), [
+    { type: 'text', text: 'macos' },
+  ]);
   await registry.select('web');
-  assert.equal(ownerRoot, '/tmp/macos');
-  assert.equal(registry.current.root, '/tmp/web');
+  assert.deepEqual(await registry.current.execute('console.log("web");'), [
+    { type: 'text', text: 'web' },
+  ]);
+  assert.deepEqual(events, [
+    'execute:web',
+    'init:macos',
+    'execute:macos',
+    'init:web',
+    'execute:web',
+  ]);
+  await registry.close();
+  assert.deepEqual(events.slice(-2), ['close:web', 'close:macos']);
+});
+
+test('Appium resolution forwards cancellation to the actual readiness probe and does not fall back or discover devices', async () => {
+  const controller = new AbortController();
+  const reason = new Error('cancel resolver');
+  let probes = 0;
+  let discoveries = 0;
+  await assert.rejects(
+    resolveAppiumSession(
+      { platform: 'android', serverUrl: 'http://127.0.0.1:9999/', capabilities: {} },
+      {
+        async serverReady(_url, signal) {
+          assert.equal(signal, controller.signal);
+          probes++;
+          controller.abort(reason);
+          return false;
+        },
+        async discoverDevices() {
+          discoveries++;
+          return [];
+        },
+      },
+      controller.signal,
+    ),
+    (error: unknown) => error === reason,
+  );
+  assert.equal(probes, 1);
+  assert.equal(discoveries, 0);
 });

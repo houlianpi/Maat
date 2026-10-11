@@ -263,10 +263,10 @@ test('setup interruption resumes only after the interrupted capability recovers'
     detector: async () => partialSnapshot(),
   });
   try {
-    assistant.interrupt({ platform: 'macos', caseId: 'calculator', pendingAction: 'screenshot' });
+    assistant.interrupt({ platform: 'macos', pendingAction: 'screenshot' });
     await assistant.check();
     assert.equal(assistant.resume(), undefined);
-    assert.equal(assistant.pendingInterruption()?.caseId, 'calculator');
+    assert.equal(assistant.pendingInterruption()?.pendingAction, 'screenshot');
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

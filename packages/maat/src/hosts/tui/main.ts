@@ -18,7 +18,6 @@ import {
   createMaatExtension,
   createMaatPiTools,
   createMaatSetupExtension,
-  createWorkModeExtension,
 } from '@houlianpi/maat-pi';
 
 import { createMaatResourceOptions, createMaatSettings } from './runtime-config.ts';
@@ -59,7 +58,7 @@ const modelRuntime = await ModelRuntime.create({
   authPath: path.join(piAgentDir, 'auth.json'),
   modelsPath: path.join(piAgentDir, 'models.json'),
 });
-const maatExtension = createMaatExtension(maat.drafts, () => maat.platforms.status());
+const maatExtension = createMaatExtension(() => maat.platforms.status());
 
 const createRuntime: CreateAgentSessionRuntimeFactory = async ({
   cwd: runtimeCwd,
@@ -74,7 +73,6 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
     resourceLoaderOptions: createMaatResourceOptions([
       maatExtension,
       createMaatSetupExtension(maat),
-      createWorkModeExtension(),
       {
         name: 'maat-cleanup',
         hidden: true,
@@ -99,7 +97,6 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
         'grep',
         'find',
         'ls',
-        'set_work_mode',
         ...customTools.map((tool) => tool.name),
       ],
       customTools,

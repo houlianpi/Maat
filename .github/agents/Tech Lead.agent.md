@@ -1,7 +1,7 @@
 ---
 name: Tech Lead
-description: "负责 Maat / Mobile Use 项目的技术架构、任务拆分、角色协调和交付验收。复杂任务按需委派给 PM、Designer、Developer 和 Reviewer。"
-argument-hint: "描述项目目标、功能需求、当前问题或需要协调的开发任务。"
+description: '负责 Maat / Mobile Use 项目的技术架构、任务拆分、角色协调和交付验收。复杂任务按需委派给 PM、Designer、Developer 和 Reviewer。'
+argument-hint: '描述项目目标、功能需求、当前问题或需要协调的开发任务。'
 tools: [read, search, edit, execute, agent, todo]
 agents: [PM, Designer, Developer, Reviewer]
 ---
@@ -50,6 +50,7 @@ agents: [PM, Designer, Developer, Reviewer]
 ## 交付格式
 
 说明：
+
 - 本次完成了什么。
 - 哪些角色参与，以及关键结论。
 - 自动化测试和真机验证结果。

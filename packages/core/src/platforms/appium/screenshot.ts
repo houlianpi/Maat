@@ -14,7 +14,7 @@ export async function takeAppiumScreenshot(
   const selected = screenshots.find((item) => item.isMain === true) ?? screenshots[0];
   if (!selected || typeof selected.payload !== 'string' || !selected.payload) {
     throw new Error(
-      'MACOS_SCREEN_CAPTURE_PERMISSION_REQUIRED: App control and assertions remain available, but screenshot Evidence needs macOS Screen Recording permission. Open /maat-setup to continue.',
+      'MACOS_SCREEN_CAPTURE_PERMISSION_REQUIRED: App control remains available, but screenshot UI observations need macOS Screen Recording permission. Open /maat-setup to continue.',
     );
   }
   return { data: selected.payload, mimeType: 'image/png' };

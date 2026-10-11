@@ -1,6 +1,6 @@
 {
   "name": "maat-monorepo",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -11,12 +11,9 @@
   "scripts": {
     "agent": "node --experimental-strip-types packages/maat/src/cli/agent.ts",
     "build": "npm run build --workspace @houlianpi/maat-core && npm run build --workspace @houlianpi/maat-pi && npm run build --workspace @houlianpi/maat",
-    "cases": "node --experimental-strip-types packages/maat/src/cli/cases.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "maat:test": "node --experimental-strip-types packages/maat/src/cli/cases.ts",
     "package:check": "node --experimental-strip-types scripts/check-package.ts",
-    "replay": "node --experimental-strip-types",
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "test:workspaces": "npm test --workspace @houlianpi/maat-core && npm test --workspace @houlianpi/maat-pi && npm test --workspace @houlianpi/maat",
     "tui": "node --experimental-strip-types packages/maat/src/hosts/tui/main.ts",
@@ -24,7 +21,6 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.87.0",
-    "@types/mocha": "10.0.10",
     "@types/node": "^24.0.0",
     "prettier": "3.6.2",
     "typescript": "5.9.3"

@@ -15,10 +15,11 @@ permissions:
 jobs:
   publish:
     name: Verify and publish
-    if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: npm
+    env:
+      NPM_DIST_TAG: ${{ github.event.release.prerelease && 'next' || 'latest' }}
 
     steps:
       - name: Checkout release tag
@@ -60,11 +61,44 @@ jobs:
       - name: Verify package contents
         run: npm run package:check
 
+      - name: Record current npm channels
+        run: |
+          node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process';
+          import { writeFileSync } from 'node:fs';
+          import path from 'node:path';
+          const packages = ['@houlianpi/maat-core', '@houlianpi/maat-pi', '@houlianpi/maat'];
+          const channels = Object.fromEntries(packages.map((name) => [
+            name,
+            JSON.parse(execFileSync('npm', ['view', name, 'dist-tags', '--json'], { encoding: 'utf8' })),
+          ]));
+          writeFileSync(path.join(process.env.RUNNER_TEMP, 'maat-npm-channels.json'), JSON.stringify(channels));
+          console.log(JSON.stringify(channels));
+          NODE
+
       - name: Publish Core with provenance
-        run: npm publish --workspace @houlianpi/maat-core
+        run: npm publish --workspace @houlianpi/maat-core --tag "$NPM_DIST_TAG"
 
       - name: Publish Pi Extension with provenance
-        run: npm publish --workspace @houlianpi/maat-pi
+        run: npm publish --workspace @houlianpi/maat-pi --tag "$NPM_DIST_TAG"
 
       - name: Publish standalone Maat with provenance
-        run: npm publish --workspace @houlianpi/maat
+        run: npm publish --workspace @houlianpi/maat --tag "$NPM_DIST_TAG"
+
+      - name: Verify published npm channel
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { execFileSync } from 'node:child_process';
+          import { readFileSync } from 'node:fs';
+          import path from 'node:path';
+          const before = JSON.parse(readFileSync(path.join(process.env.RUNNER_TEMP, 'maat-npm-channels.json'), 'utf8'));
+          const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
+          for (const name of Object.keys(before)) {
+            const after = JSON.parse(execFileSync('npm', ['view', name, 'dist-tags', '--json'], { encoding: 'utf8' }));
+            assert.equal(after[process.env.NPM_DIST_TAG], version, `${name}: wrong release channel`);
+            if (process.env.NPM_DIST_TAG === 'next')
+              assert.equal(after.latest, before[name].latest, `${name}: prerelease changed latest`);
+            console.log(JSON.stringify({ package: name, version, channels: after }));
+          }
+          NODE

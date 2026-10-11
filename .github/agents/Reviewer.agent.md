@@ -1,7 +1,7 @@
 ---
 name: Reviewer
-description: "独立审查 Maat / Mobile Use 的代码改动，检查正确性、行为回归、设备操作可靠性、异常证据和测试缺口。"
-argument-hint: "提供要审查的改动、需求、验收标准和重点风险。"
+description: '独立审查 Maat / Mobile Use 的代码改动，检查正确性、行为回归、设备操作可靠性、异常证据和测试缺口。'
+argument-hint: '提供要审查的改动、需求、验收标准和重点风险。'
 tools: [read, search]
 ---
 
@@ -25,6 +25,7 @@ tools: [read, search]
 ## 重点检查
 
 按改动涉及的范围检查：
+
 - MCP 参数校验和结果协议。
 - session 创建、复用、失效和清理。
 - 超时预算、只读重试和动作防重放。
@@ -56,6 +57,7 @@ tools: [read, search]
 ## 输出格式
 
 每条发现包含：
+
 - 严重程度。
 - 文件和位置。
 - 问题描述。

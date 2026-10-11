@@ -10,16 +10,14 @@ import {
   type NativePlatform,
 } from './schema.ts';
 import { NativeManager } from './runtime/manager.ts';
+import { NativeInitializationCancelledError } from './runtime/session.ts';
+import { WorkerTerminatedError } from '../../core/exploration/runtime.ts';
+import { isRecord } from '../../core/exploration/protocol.ts';
 import type { PlatformAdapter } from '../../core/platforms/contracts.ts';
-import { resolveAppiumSession } from './session-resolver.ts';
+import { resolveAppiumSession, resolveAndroidReadinessSession } from './session-resolver.ts';
 import { discoverDevices } from '../../setup/devices.ts';
 import { discoverApplications } from '../../setup/applications.ts';
-import type {
-  RuntimeRequirement,
-  SessionSetup,
-  SetupInspection,
-} from '../../core/platforms/contracts.ts';
-import { createAppiumTestSession } from './test-session.ts';
+import type { SessionSetup, SetupInspection } from '../../core/platforms/contracts.ts';
 
 export type AppiumAdapterDefinition = {
   id: NativePlatform;
@@ -30,7 +28,6 @@ export type AppiumAdapterDefinition = {
 
 export class AppiumPlatformAdapter implements PlatformAdapter {
   readonly id: NativePlatform;
-  readonly root: string;
   readonly label: string;
   get codeContext() {
     return {
@@ -43,21 +40,21 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
           name: 'app',
           description: 'Runtime App target with id and package-aware resourceId(name)',
         },
-        { name: 'display', description: 'Return screenshot Evidence' },
-        { name: 'evidence', description: 'Capture screenshot Evidence through the Adapter' },
+        { name: 'display', description: 'Return a screenshot UI observation' },
+        { name: 'evidence', description: 'Capture a screenshot UI observation with screenshot()' },
       ],
       guidelines: [
         'Use WebdriverIO APIs through driver.$() and driver.$$(); there are no global $ or $$.',
         ...(this.id === 'macos'
           ? [
               'Mac2 attributes include identifier, label, title and value; do not request name.',
-              'macOS accessibility text may contain Unicode Cf controls; remove /\p{Cf}/gu before business assertions.',
+              'macOS accessibility text may contain Unicode Cf controls; remove /\p{Cf}/gu before checking user-declared outcomes.',
               'Capture screenshots with evidence.screenshot(), not driver.takeScreenshot().',
             ]
           : []),
         'Use app.resourceId(name) for Android resource IDs; never hardcode an App package prefix.',
         'Await every operation.',
-        'Assert only explicit test objectives.',
+        'Observe actual UI state; check only user-declared outcomes.',
       ],
     };
   }
@@ -74,10 +71,9 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     return path.join(directory, `${this.id}.json`);
   }
 
-  constructor(definition: AppiumAdapterDefinition, root: string) {
+  constructor(definition: AppiumAdapterDefinition) {
     this.definition = definition;
     this.id = definition.id;
-    this.root = root;
     this.label = definition.label;
   }
   get sessionHints(): Readonly<NativeEnvironment> | undefined {
@@ -99,8 +95,12 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   }
 
   async configureSession(input: SessionSetup): Promise<void> {
+    if (input.clearAppTarget !== undefined && typeof input.clearAppTarget !== 'boolean')
+      throw new Error('clearAppTarget must be a boolean.');
     if (!this.environment) await this.initialize();
     const split = splitCapabilities(input.capabilities ?? {});
+    if (input.clearAppTarget && Object.keys(split.app).length)
+      throw new Error('clearAppTarget cannot be combined with App target capabilities.');
     if (
       (split.environment['appium:noReset'] === false ||
         split.environment['appium:fullReset'] === true) &&
@@ -118,7 +118,11 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       device: (input.device as NativeEnvironment['device']) ?? base.device,
       capabilities: { ...sanitizedBase, ...split.environment },
     };
-    const nextApp = Object.keys(split.app).length ? split.app : this.app;
+    const nextApp = input.clearAppTarget
+      ? undefined
+      : Object.keys(split.app).length
+        ? split.app
+        : this.app;
     capabilities({
       environment: nextEnvironment,
       capabilities: nextEnvironment.capabilities,
@@ -138,10 +142,15 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     return apps.map((app) => ({ ...app, capabilities: { [appCapability]: app.id } }));
   }
 
-  private async prepare(): Promise<void> {
+  private async prepare(signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     if (!this.environment) await this.initialize();
     try {
-      const resolved = await resolveAppiumSession(this.environment!);
+      const safeAndroid = this.id === 'android';
+      const resolved = safeAndroid
+        ? await this.resolveReadiness(signal)
+        : await resolveAppiumSession(this.environment!, undefined, signal);
+      signal?.throwIfAborted();
       const definition = this.definition;
       await this.runtime.configureResolved({
         ...resolved,
@@ -150,6 +159,7 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
           ...resolved.capabilities,
           platformName: definition.platformName,
           'appium:automationName': definition.automationName,
+          ...(safeAndroid ? { 'appium:skipUnlock': true } : {}),
         },
       });
       this.environment = resolved.environment;
@@ -161,14 +171,74 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     }
   }
 
+  protected resolveReadiness(signal?: AbortSignal) {
+    return resolveAndroidReadinessSession(this.environment!, signal);
+  }
+
+  async executeReadiness(code: string, signal?: AbortSignal) {
+    if (this.id !== 'android') throw new Error('Only Android supports setup readiness.');
+    signal?.throwIfAborted();
+    if (!this.environment) await this.initialize();
+    const options = this.environment!.capabilities['appium:options'];
+    if (
+      (this.app && Object.keys(this.app).length > 0) ||
+      (isRecord(options) &&
+        ['app', 'appPackage', 'appActivity', 'bundleId'].some(
+          (key) => options[key] !== undefined || options[`appium:${key}`] !== undefined,
+        )) ||
+      (this.runtime.isRunning &&
+        this.runtime.currentApp &&
+        Object.keys(this.runtime.currentApp).length > 0)
+    )
+      throw new Error('Android setup readiness requires a base Session without an App target.');
+    await this.prepareAndroidExecution(signal);
+    return this.executePrepared(code, signal);
+  }
+
+  private async prepareAndroidExecution(signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    if (!this.environment) await this.initialize();
+    signal?.throwIfAborted();
+    if (!this.runtime.isRunning) {
+      const skipUnlock = this.environment!.capabilities['appium:skipUnlock'];
+      const options = this.environment!.capabilities['appium:options'];
+      // Appium promotes these nested values over top-level capabilities.
+      const unlockHints = [
+        skipUnlock,
+        ...(isRecord(options) ? [options.skipUnlock, options['appium:skipUnlock']] : []),
+      ];
+      if (unlockHints.some((value) => value !== undefined && value !== true))
+        throw new Error(
+          'ANDROID_READINESS_UNLOCK_UNSAFE: ready cannot create a Session with an explicit skipUnlock value other than true; set appium:skipUnlock to true and unlock/wake the phone yourself, then recheck.',
+        );
+      // Transient Session capability only: preserve user hints and healthy Sessions.
+      await this.prepare(signal);
+    }
+  }
+
   async execute(code: string, signal?: AbortSignal) {
-    if (!this.runtime.isRunning) await this.prepare();
+    signal?.throwIfAborted();
+    if (this.id === 'android') {
+      const bounded = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(60_000)]);
+      await this.prepareAndroidExecution(bounded);
+      return this.executePrepared(code, bounded);
+    }
+    if (!this.runtime.isRunning) await this.prepare(signal);
+    return this.executePrepared(code, signal);
+  }
+
+  private async executePrepared(code: string, signal?: AbortSignal) {
     let observations;
     try {
       observations = await this.runtime.execute(code, signal);
     } catch (error) {
       if (
+        this.id !== 'android' &&
         !this.runtime.isRunning &&
+        !signal?.aborted &&
+        !(error instanceof WorkerTerminatedError) &&
+        !(error instanceof NativeInitializationCancelledError) &&
+        !(error instanceof AggregateError) &&
         this.app &&
         Object.keys(this.app).length > 0 &&
         /app|bundle|package|activity/i.test(String(error))
@@ -176,10 +246,10 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         const rejected = JSON.stringify(this.app);
         this.app = undefined;
         await this.runtime.close();
-        await this.prepare();
+        await this.prepare(signal);
         observations = await this.runtime.execute(code, signal);
         this.notices.push(
-          `The configured App target ${rejected} could not create a Session. Maat created a base Session without it; discover or provide the App before saving.`,
+          `The configured App target ${rejected} could not create a Session. Maat created a base Session without it; discover or provide the App before further execution.`,
         );
       } else throw error;
     }
@@ -194,46 +264,10 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       : observations;
   }
 
-  runtimeRequirement(): RuntimeRequirement {
-    return { adapterId: this.id, ...(this.app ? { setup: { app: this.app } } : {}) };
-  }
-  async createTestSession(requirement = this.runtimeRequirement()) {
-    if (!this.environment) await this.initialize();
-    const resolved = await resolveAppiumSession(this.environment!);
-    const definition = this.definition;
-    const declaredApp = requirement.setup?.app;
-    const runtimeAppId = process.env.MAAT_APP_ID?.trim();
-    const app =
-      declaredApp === 'runtime'
-        ? runtimeAppId
-          ? this.id === 'android'
-            ? ({ 'appium:appPackage': runtimeAppId } satisfies NativeAppTarget)
-            : ({ 'appium:bundleId': runtimeAppId } satisfies NativeAppTarget)
-          : undefined
-        : (declaredApp as NativeAppTarget | undefined);
-    if (declaredApp === 'runtime' && !app) {
-      throw new Error(
-        `Case requires a runtime App target. Pass --app-id for ${this.label} or set MAAT_APP_ID.`,
-      );
-    }
-    return createAppiumTestSession(
-      {
-        ...resolved,
-        capabilities: {
-          ...resolved.capabilities,
-          platformName: definition.platformName,
-          'appium:automationName': definition.automationName,
-        },
-      },
-      app,
-    );
-  }
-
   status() {
     return {
       id: this.id,
       label: this.label,
-      root: this.root,
       session: this.runtime.isRunning ? ('ready' as const) : ('idle' as const),
       detail: this.issue ?? this.environment?.device?.name ?? 'device auto',
     };

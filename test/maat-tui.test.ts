@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { CaseDraftManager } from '../packages/core/src/core/cases/draft-manager.ts';
 import { maatStatusLines } from '../packages/pi/src/status.ts';
 import {
   createMaatResourceOptions,
@@ -26,24 +25,26 @@ test('Maat isolates Pi resources while copying initial model preferences', () =>
   assert.equal(settings.enableInstallTelemetry, false);
   assert.equal(resources.noExtensions, true);
   assert.equal(resources.noSkills, true);
+  assert.equal(resources.additionalSkillPaths.length, 1);
+  assert.match(resources.additionalSkillPaths[0]!, /skills\/maat-setup\/SKILL\.md$/);
   assert.equal(resources.noContextFiles, true);
   assert.equal(resources.noPromptTemplates, true);
 });
 
-test('Maat status lines show browser, Case, and Evidence state', () => {
-  const caseManager = new CaseDraftManager();
-  caseManager.begin({
-    id: 'login-case',
-    name: 'Login Case',
-    description: 'Verify login',
-    objectives: ['Dashboard is visible'],
-  });
+test('Android status presents execution without Case or Evidence counts', () => {
+  const lines = maatStatusLines({ id: 'android', label: 'Android', session: 'idle' });
+  assert.match(lines[1]!, /UI execution/);
+  assert.doesNotMatch(lines.join('\n'), /no active Case|Evidence 0/);
+});
 
-  const lines = maatStatusLines(
-    { id: 'web', label: 'Web', root: '/tmp/web', session: 'idle', detail: 'chrome · headless' },
-    caseManager,
-  );
+test('Maat status lines show the selected platform and observation boundary', () => {
+  const lines = maatStatusLines({
+    id: 'web',
+    label: 'Web',
+    session: 'idle',
+    detail: 'chrome · headless',
+  });
   assert.match(lines[0]!, /Platform Web · chrome · headless · idle/);
-  assert.match(lines[1]!, /Case     login-case · 0 steps/);
-  assert.match(lines[2]!, /Evidence 0 items · 1 objectives/);
+  assert.match(lines[1]!, /observations are not business validation/);
+  assert.doesNotMatch(lines.join('\n'), /Case|Evidence/);
 });

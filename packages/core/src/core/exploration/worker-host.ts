@@ -83,6 +83,7 @@ process.on(
             data,
           });
         };
+        // In-memory screenshot observations only; this global does not persist Evidence records.
         const evidence = {
           screenshot: async () => {
             const shot = await runtime!.screenshot();

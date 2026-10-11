@@ -1,10 +1,9 @@
 import type { MaatApi } from '@houlianpi/maat-core';
-import { createCaseTools } from './tools/case-tools.ts';
 import { createExecJsTool } from './tools/exec-js-tool.ts';
 import { createPlatformTools } from './tools/platform-tools.ts';
 import { createSetupTools } from './tools/setup-tools.ts';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import { setupPanel } from './setup-ui.ts';
+import { setupAgentContext, setupPanel } from './setup-ui.ts';
 import { resolveSetupLocale } from './setup-i18n.ts';
 
 /** Pi-specific projection of the host-neutral Maat API. */
@@ -15,43 +14,51 @@ export function createMaatPiTools(maat: MaatApi): ToolDefinition<any, any, any>[
         close: () => maat.platforms.current().close(),
         execute: (code, signal) => maat.exploration.executeJavaScript(code, signal),
       },
-      maat.drafts,
       {
         description:
           'Execute JavaScript against the active Platform Adapter. Call list_platforms after switching to see the available runtime globals.',
         guidelines: ['Use only globals exposed by the active adapter codeContext.'],
       },
-      () => maat.exploration.execution(),
-      async (error, ctx) => {
-        if (maat.platforms.current().id !== 'macos') return;
+      async (error, ctx, signal) => {
+        const platform = maat.platforms.current().id;
+        if (platform !== 'macos' && platform !== 'android') return;
         const message = String(error);
         const isScreenshot = message.includes('MACOS_SCREEN_CAPTURE_PERMISSION_REQUIRED');
         const isSetupFailure =
           isScreenshot ||
-          /ECONNREFUSED|connection refused|Appium.*(?:unavailable|not reachable)|Mac2.*(?:missing|not installed)|Could not find.*driver/i.test(
+          /ECONNREFUSED|connection refused|No Appium server responded|Appium.*(?:unavailable|not reachable)|Mac2.*(?:missing|not installed)|Could not find.*driver/i.test(
             message,
           );
         if (!isSetupFailure) return;
+        if (platform === 'android') {
+          const snapshot = await maat.setup.check({ platform, signal });
+          const locale = resolveSetupLocale(undefined, ctx);
+          return [
+            locale === 'zh-CN'
+              ? 'Android 连接准备尚未完成。按 maat-setup Skill 使用已授权的宿主工具处理，不要重放之前的手机动作。'
+              : 'Android preparation is incomplete. Follow the maat-setup Skill using authorized host tools; do not replay previous phone actions.',
+            ...setupPanel(snapshot, locale),
+            setupAgentContext(snapshot, locale),
+            `Execution error: ${message}`,
+          ].join('\n');
+        }
         maat.setup.interrupt({
           platform: 'macos',
-          caseId: maat.cases.current()?.id,
           pendingAction: isScreenshot ? 'screenshot' : 'session',
-          workMode: maat.cases.current() ? 'case' : 'assist',
         });
-        const snapshot = await maat.setup.check({ platform: 'macos' });
+        const snapshot = await maat.setup.check({ platform: 'macos', signal });
         const locale = resolveSetupLocale(undefined, ctx);
         const explanation =
           locale === 'zh-CN'
             ? isScreenshot
-              ? '已经通过的业务断言仍然有效；只有截图 Evidence 尚未开启。'
-              : 'macOS 测试环境需要完成一个设置。当前 Case 已保留。'
+              ? '当前截图能力不可用，请按提示完成权限设置。'
+              : 'macOS 操作环境需要完成一个设置。'
             : isScreenshot
-              ? 'Previously passed business assertions remain valid; only screenshot Evidence is unavailable.'
-              : 'The macOS test environment needs one setup step. The current Case is preserved.';
+              ? 'Screenshot observation is unavailable; complete the requested permission step.'
+              : 'The macOS execution environment needs one setup step.';
         return `${explanation}\n${setupPanel(snapshot, locale).join('\n')}`;
       },
     ),
-    ...createCaseTools(maat),
     ...createPlatformTools(maat),
     ...createSetupTools(maat),
   ];

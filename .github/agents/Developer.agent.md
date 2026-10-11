@@ -1,7 +1,7 @@
 ---
 name: Developer
-description: "负责 Maat 项目的功能实现、相关测试和直接相关文档，处理 MCP、设备控制、传输和异常恢复等开发任务。"
-argument-hint: "提供要实现的需求、修改范围、技术约束和验收标准。"
+description: '负责 Maat 项目的功能实现、相关测试和直接相关文档，处理 MCP、设备控制、传输和异常恢复等开发任务。'
+argument-hint: '提供要实现的需求、修改范围、技术约束和验收标准。'
 tools: [read, search, edit, execute, todo]
 ---
 

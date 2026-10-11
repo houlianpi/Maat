@@ -9,11 +9,5 @@ export {
   notifySetupPanel,
   registerMaatSetupCommands,
 } from './setup-extension.ts';
-export { MAAT_SYSTEM_PROMPT } from './system-prompt.ts';
+export { MAAT_SYSTEM_PROMPT, MAAT_SETUP_SKILL_PATH } from './system-prompt.ts';
 export { createMaatExtension, maatStatusLines } from './status.ts';
-export {
-  createWorkModeExtension,
-  registerWorkModeExtension,
-  WorkModePolicy,
-  type WorkMode,
-} from './work-mode.ts';

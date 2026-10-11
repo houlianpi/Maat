@@ -1,88 +1,208 @@
 import type { SetupCapability, SetupCapabilityId, SetupSnapshot } from '@houlianpi/maat-core';
 import { setupMessage, type SetupLocale } from './setup-i18n.ts';
+import { MAAT_SETUP_SKILL_PATH } from './system-prompt.ts';
+import path from 'node:path';
 
 const ui = {
   en: {
     title: 'Maat · macOS',
-    capability: 'Test capability',
+    capability: 'Execution capability',
     ready: 'Ready',
     partial: 'Partially ready',
     needsSetup: 'Setup required',
     reading: 'Read the UI',
-    interaction: 'Interact with apps and run assertions',
-    screenshot: 'Screenshot Evidence',
+    interaction: 'Interact with apps',
+    screenshot: 'Screenshot observation',
     optional: 'Optional enhancements',
     normal: 'Ready',
     unknown: 'Not checked',
     skipped: 'Skipped for now',
     automation: 'Automation Mode',
     video: 'video recording',
-    optionalMissing: (items: string) => `${items} not configured (does not affect testing)`,
+    optionalMissing: (items: string) => `${items} not configured`,
     optionalReady: 'All configured',
     next: 'Next',
-    start: 'Start testing',
+    start: 'Read the current UI and continue',
     minutes: (value: number) => `about ${value} min`,
     separator: ': ',
     aside: (value: string) => ` (${value})`,
     doctorTitle: 'Maat · macOS engineering diagnostics',
     conclusion: 'Conclusion',
     conclusions: {
-      blocked: 'The test environment needs attention',
-      partial: 'Core testing is available; optional enhancements remain',
-      ready: 'The test environment is fully ready',
+      blocked: 'The execution environment needs attention',
+      partial: 'Core execution is available; optional capabilities remain',
+      ready: 'The execution environment is ready',
     },
     checkedAt: 'Checked at',
     core: 'Core capabilities',
-    optionalSection: 'Optional enhancements (do not affect normal functional testing)',
+    optionalSection: 'Optional capabilities',
     details: 'Processes, versions, and detection evidence',
     commands: 'Suggested commands',
   },
   'zh-CN': {
     title: 'Maat · macOS',
-    capability: '测试能力',
+    capability: '操作能力',
     ready: '完全可用',
     partial: '部分可用',
     needsSetup: '需要设置',
     reading: '读取界面',
-    interaction: '操作应用和断言',
-    screenshot: '截图 Evidence',
+    interaction: '操作应用',
+    screenshot: '截图观察',
     optional: '可选增强',
     normal: '正常',
     unknown: '尚未检测',
     skipped: '已暂时跳过',
     automation: 'Automation Mode',
     video: '视频录制',
-    optionalMissing: (items: string) => `${items}尚未配置（不影响测试）`,
+    optionalMissing: (items: string) => `${items}尚未配置`,
     optionalReady: '均已配置',
     next: '下一步',
-    start: '开始测试',
+    start: '读取当前界面后继续任务',
     minutes: (value: number) => `约 ${value} 分钟`,
     separator: '：',
     aside: (value: string) => `（${value}）`,
     doctorTitle: 'Maat · macOS 工程诊断',
     conclusion: '结论',
     conclusions: {
-      blocked: '测试环境需要处理',
-      partial: '核心测试可用，存在可选增强项',
-      ready: '测试环境完全就绪',
+      blocked: '操作环境需要处理',
+      partial: '核心操作可用，存在未就绪的可选能力',
+      ready: '操作环境已就绪',
     },
     checkedAt: '检查时间',
     core: '核心能力',
-    optionalSection: '可选增强（不影响普通功能测试）',
+    optionalSection: '可选能力',
     details: '进程、版本与检测依据',
     commands: '建议命令',
   },
 } as const;
 
+export function setupAgentContext(snapshot: SetupSnapshot, locale: SetupLocale = 'en'): string {
+  const script = path.join(path.dirname(MAAT_SETUP_SKILL_PATH), 'scripts', 'android-tools.mjs');
+  const quoted =
+    process.platform === 'win32'
+      ? `'${script.replace(/'/g, "''")}'`
+      : `'${script.replace(/'/g, "'\\''")}'`;
+  const commands: Record<string, string> = {
+    'install-adb': `node ${quoted} prepare`,
+    'configure-android-sdk': `node ${quoted} prepare`,
+    'start-adb': `node ${quoted} adb`,
+    'start-appium': `node ${quoted} appium`,
+    'install-appium': 'npm install --global appium@3.7.0',
+    'install-uiautomator2': 'appium driver install uiautomator2@8.7.0',
+  };
+  const facts = snapshot.technicalDetails ?? {};
+  const inheritedWarnings = Array.isArray(facts.androidToolsWarnings)
+    ? facts.androidToolsWarnings.flatMap((item: unknown) => {
+        if (!item || typeof item !== 'object' || !('code' in item)) return [];
+        if (item.code !== 'ANDROID_SDK_INVALID' && item.code !== 'ANDROID_SDK_ROOT_CONFLICT')
+          return [];
+        return [
+          {
+            code: item.code,
+            summary:
+              locale === 'zh-CN'
+                ? '继承的 SDK 路径不可用；保留原配置，按当前工具检查结果继续准备。'
+                : 'The inherited SDK path is unusable; preserve it and continue preparation using the current tool checks.',
+          },
+        ];
+      })
+    : [];
+  const action = snapshot.recommendedAction;
+  const command = action
+    ? snapshot.platform === 'android'
+      ? commands[action.id]
+      : action.command
+    : undefined;
+  return `Maat setup facts:\n${JSON.stringify({
+    platform: snapshot.platform,
+    preparationOnly: true,
+    canContinue: snapshot.canContinue,
+    capabilities: snapshot.capabilities.map((item) => ({
+      id: item.id,
+      status: item.status,
+      ...(item.errorCode ? { errorCode: item.errorCode } : {}),
+      message: setupMessage(locale, item.messageKey),
+    })),
+    ...(snapshot.platform === 'android'
+      ? {
+          toolsSource: facts.androidToolsSource,
+          toolsReason: facts.androidToolsReason,
+          inheritedSdkWarnings: inheritedWarnings,
+          adbServer: facts.adbServer,
+          appiumCli: facts.appiumCli,
+          setupSkill: MAAT_SETUP_SKILL_PATH,
+        }
+      : {}),
+    nextStep: action
+      ? {
+          id: action.id,
+          ...(command ? { command } : {}),
+          instruction: setupMessage(locale, action.labelKey),
+        }
+      : snapshot.canContinue
+        ? {
+            tool: snapshot.platform === 'android' ? 'check_device_ready' : 'exe_js',
+            instruction: 'Read the current UI before continuing.',
+          }
+        : {
+            instruction:
+              'Use the setup Skill to diagnose the failed check; do not ask the user to locate SDK paths or inspect project source.',
+          },
+    ...(snapshot.platform === 'android'
+      ? {
+          preparationGuidance:
+            'Inherited SDK variables are candidates, not user requirements. Explain their warning and use verified tools. Do authorized preparation directly. Ask only for user-only actions or actual license acceptance. Do not modify global configuration, request repeated permission to look for tools, or read Maat source to recover.',
+          serviceStartup:
+            'This appium command is foreground. Use the host-supported background mechanism if available and retain its handle. If no background mechanism is available, report that exact host limitation; do not repeatedly run the foreground command with a timeout or falsely claim autonomous setup passed.',
+        }
+      : {}),
+  })}`;
+}
+
 export function setupPanel(snapshot: SetupSnapshot, locale: SetupLocale = 'en'): string[] {
+  if (snapshot.platform === 'android') {
+    const chinese = locale === 'zh-CN';
+    const summary =
+      snapshot.state === 'checking'
+        ? chinese
+          ? '正在检查准备条件'
+          : 'Checking preparation conditions'
+        : snapshot.state === 'unknown'
+          ? chinese
+            ? '尚未检查准备条件'
+            : 'Preparation has not been checked'
+          : snapshot.canContinue
+            ? chinese
+              ? '准备条件已满足；手机操作通道尚需确认'
+              : 'Preparation conditions are satisfied; verify the phone control channel next'
+            : chinese
+              ? '还需完成准备'
+              : 'Preparation needs attention';
+    const next = snapshot.recommendedAction
+      ? setupMessage(locale, snapshot.recommendedAction.labelKey)
+      : snapshot.canContinue
+        ? chinese
+          ? '检查手机通道并读取当前界面'
+          : 'Check the phone channel and read its current UI'
+        : chinese
+          ? '检查环境，确认具体缺项'
+          : 'Check the environment for the specific missing condition';
+    return [
+      'Maat · Android',
+      summary,
+      ...(Array.isArray(snapshot.technicalDetails?.androidToolsWarnings) &&
+      snapshot.technicalDetails.androidToolsWarnings.length > 0
+        ? [
+            chinese
+              ? '旧 SDK 路径不可用，保留原配置并继续检查可用的连接工具。'
+              : 'The old SDK path is unusable; preserve it and continue checking available connection tools.',
+          ]
+        : []),
+      ...snapshot.capabilities.map((item) => `- ${setupMessage(locale, item.messageKey)}`),
+      `${chinese ? '下一步：' : 'Next: '}${next}`,
+    ];
+  }
   const text = ui[locale];
-  const visibleCapabilityIds = new Set(['uiInteraction', 'accessibility', 'screenCapture']);
-  const visibleCapabilities = snapshot.capabilities.filter((capability) =>
-    visibleCapabilityIds.has(capability.id),
-  );
-  const coreReady =
-    visibleCapabilities.length === visibleCapabilityIds.size &&
-    visibleCapabilities.every((capability) => ['ready', 'skipped'].includes(capability.status));
   const capability = (id: SetupCapabilityId) =>
     snapshot.capabilities.find((candidate) => candidate.id === id);
   const userStatus = (item: SetupCapability | undefined) => {
@@ -99,17 +219,17 @@ export function setupPanel(snapshot: SetupSnapshot, locale: SetupLocale = 'en'):
   return [
     text.title,
     '',
-    `${text.capability}${text.separator}${coreReady || snapshot.readiness === 'ready' ? text.ready : snapshot.readiness === 'partially-ready' ? text.partial : text.needsSetup}`,
+    `${text.capability}${text.separator}${snapshot.readiness === 'ready' ? text.ready : snapshot.readiness === 'partially-ready' ? text.partial : text.needsSetup}`,
     `1. ${text.reading}${text.separator}${userStatus(capability('accessibility'))}`,
     `2. ${text.interaction}${text.separator}${userStatus(capability('uiInteraction'))}`,
     `3. ${text.screenshot}${text.separator}${userStatus(capability('screenCapture'))}`,
     `4. ${text.optional}${text.separator}${optionalMissing.length ? text.optionalMissing(optionalMissing.join(locale === 'zh-CN' ? '、' : ', ')) : text.optionalReady}`,
     '',
-    coreReady
+    snapshot.canContinue
       ? `${text.next}${text.separator}${text.start}`
       : snapshot.recommendedAction
         ? `${text.next}${text.separator}${setupMessage(locale, snapshot.recommendedAction.labelKey)}${snapshot.recommendedAction.estimatedMinutes ? text.aside(text.minutes(snapshot.recommendedAction.estimatedMinutes)) : ''}`
-        : `${text.next}${text.separator}${text.start}`,
+        : `${text.next}${text.separator}${text.unknown}`,
   ];
 }
 
@@ -136,21 +256,33 @@ function redact(value: unknown): unknown {
 const capabilityLabels: Record<SetupLocale, Record<SetupCapabilityId, string>> = {
   en: {
     appiumServer: 'Appium service',
+    appiumCli: 'Appium installation',
+    adbServer: 'ADB connection daemon',
+    adb: 'ADB',
+    androidSdk: 'Android tools',
+    uiautomator2Driver: 'Android automation driver',
+    androidDevice: 'Android phone',
     mac2Driver: 'Mac2 Driver',
     automationMode: 'Automation Mode',
     accessibility: 'Read the UI',
-    uiInteraction: 'App interaction and assertions',
-    screenCapture: 'Screenshot Evidence',
+    uiInteraction: 'App interaction',
+    screenCapture: 'Screenshot observation',
     videoRecording: 'Video recording',
     fullDiskAccess: 'Attachment access',
   },
   'zh-CN': {
     appiumServer: 'Appium 服务',
+    appiumCli: '连接服务软件',
+    adbServer: 'Android 连接服务',
+    adb: 'Android 连接工具',
+    androidSdk: 'Android 工具',
+    uiautomator2Driver: 'Android 自动化驱动',
+    androidDevice: 'Android 手机',
     mac2Driver: 'Mac2 Driver',
     automationMode: 'Automation Mode',
     accessibility: '读取界面',
-    uiInteraction: '操作应用和断言',
-    screenCapture: '截图 Evidence',
+    uiInteraction: '操作应用',
+    screenCapture: '截图观察',
     videoRecording: '视频录制',
     fullDiskAccess: '附件访问',
   },
@@ -201,6 +333,23 @@ function detailLines(value: unknown, prefix = ''): string[] {
 }
 
 export function setupDoctor(snapshot: SetupSnapshot, locale: SetupLocale = 'en'): string {
+  if (snapshot.platform === 'android')
+    return [
+      ...setupPanel(snapshot, locale),
+      '',
+      `${locale === 'zh-CN' ? '检查时间：' : 'Checked at: '}${snapshot.checkedAt}`,
+      locale === 'zh-CN'
+        ? '诊断不会创建手机 Session，也不代表手机操作或业务结果已验证。'
+        : 'Diagnosis does not create a phone Session or prove phone operation or business outcomes.',
+      ...snapshot.capabilities.map(
+        (item) =>
+          `- ${item.id}: ${statusLabels[locale][item.status]}${item.errorCode ? ` · ${item.errorCode}` : ''}`,
+      ),
+      ...detailLines(snapshot.technicalDetails),
+      ...snapshot.capabilities.flatMap((item) =>
+        item.action?.command ? [`- ${item.action.command}`] : [],
+      ),
+    ].join('\n');
   const text = ui[locale];
   const coreIds = new Set<SetupCapabilityId>([
     'appiumServer',

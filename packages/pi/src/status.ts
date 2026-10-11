@@ -4,26 +4,16 @@ import type {
   InlineExtension,
 } from '@earendil-works/pi-coding-agent';
 
-import type { CaseDraftManager, PlatformStatus } from '@houlianpi/maat-core';
+import type { PlatformStatus } from '@houlianpi/maat-core';
 
-export function maatStatusLines(platform: PlatformStatus, caseManager: CaseDraftManager): string[] {
-  const draft = caseManager.current;
+export function maatStatusLines(platform: PlatformStatus): string[] {
   const platformLine = [`Platform ${platform.label}`, platform.detail, platform.session]
     .filter(Boolean)
     .join(' · ');
-  const caseLine = draft
-    ? `Case     ${draft.id} · ${draft.steps.length} steps · ${draft.failures.length} failed attempts`
-    : 'Case     no active Case';
-  const evidenceLine = draft
-    ? `Evidence ${draft.evidence.length} items · ${draft.objectives.length} objectives`
-    : 'Evidence 0 items';
-  return [platformLine, caseLine, evidenceLine];
+  return [platformLine, 'UI execution · observations are not business validation'];
 }
 
-export function createMaatExtension(
-  caseManager: CaseDraftManager,
-  platformStatus: () => PlatformStatus,
-): InlineExtension {
+export function createMaatExtension(platformStatus: () => PlatformStatus): InlineExtension {
   const factory = (pi: ExtensionAPI) => {
     const applyUi = (ctx: ExtensionContext) => {
       if (ctx.mode !== 'tui') return;
@@ -34,13 +24,13 @@ export function createMaatExtension(
           const title = theme.bold(theme.fg('accent', 'Maat'));
           const subtitle = theme.fg(
             'muted',
-            'Conversational UI verification · intent → evidence → executable truth',
+            'UI execution for Coding Agents · observe → act → inspect',
           );
           return ['', `  ${title}`, `  ${subtitle}`];
         },
         invalidate() {},
       }));
-      ctx.ui.setWidget('maat-status', maatStatusLines(platformStatus(), caseManager), {
+      ctx.ui.setWidget('maat-status', maatStatusLines(platformStatus()), {
         placement: 'aboveEditor',
       });
     };

@@ -3,21 +3,17 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { createMaat } from '../packages/core/src/api/create-maat.ts';
 import { aggregateSetup } from '../packages/core/src/setup-assistant/model.ts';
-import type { SetupSnapshot } from '../packages/core/src/setup-assistant/types.ts';
 import { createPlatformTools } from '../packages/pi/src/tools/platform-tools.ts';
 import { createSetupTools } from '../packages/pi/src/tools/setup-tools.ts';
 import { registerMaatSetupCommands } from '../packages/pi/src/setup-extension.ts';
 
-const fingerprint = { appiumPid: 10, appiumStartedAt: 'now', wdaPid: 20, wdaStartedAt: 'now' };
-
-function partialSnapshot(): SetupSnapshot {
+function partialSnapshot() {
   return aggregateSetup({
     platform: 'macos',
-    fingerprint,
+    fingerprint: { appiumPid: 10, appiumStartedAt: 'now', wdaPid: 20, wdaStartedAt: 'now' },
     capabilities: [
       {
         id: 'appiumServer',
@@ -42,37 +38,15 @@ function partialSnapshot(): SetupSnapshot {
   });
 }
 
-function toolByName(tools: ReturnType<typeof createSetupTools>, name: string) {
-  const tool = tools.find((candidate) => candidate.name === name);
-  assert.ok(tool, `${name} was not created`);
-  return tool;
-}
+const context = {
+  mode: 'print',
+  waitForIdle: async () => {},
+  sessionManager: {
+    getEntries: () => [{ type: 'message', message: { role: 'user', content: '请检查操作环境' } }],
+  },
+} as unknown as ExtensionContext;
 
-function languageContext(text: string): ExtensionContext {
-  return {
-    sessionManager: {
-      getEntries: () => [
-        {
-          type: 'message',
-          id: 'user',
-          parentId: null,
-          timestamp: new Date().toISOString(),
-          message: { role: 'user', content: text, timestamp: Date.now() },
-        },
-      ],
-    },
-  } as unknown as ExtensionContext;
-}
-
-const context = languageContext('请检查 macOS 测试环境');
-
-function textContent(result: { content: Array<{ type: string; text?: string }> }): string {
-  const content = result.content.find((item) => item.type === 'text');
-  assert.ok(content?.text);
-  return content.text;
-}
-
-test('select_platform automatically returns the macOS setup action panel', async () => {
+test('select_platform returns the macOS setup action panel without a test draft', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'maat-setup-tools-'));
   const maat = createMaat({
     workspaceRoot: directory,
@@ -81,10 +55,9 @@ test('select_platform automatically returns the macOS setup action panel', async
       detector: async () => partialSnapshot(),
     },
   });
+
   try {
-    const tool = createPlatformTools(maat).find(
-      (candidate) => candidate.name === 'select_platform',
-    );
+    const tool = createPlatformTools(maat).find((item) => item.name === 'select_platform');
     assert.ok(tool);
     const result = await tool.execute(
       'select',
@@ -93,15 +66,20 @@ test('select_platform automatically returns the macOS setup action panel', async
       undefined,
       context,
     );
-    assert.match(textContent(result), /Maat · macOS/);
-    assert.match(textContent(result), /下一步：开启截图权限/);
+    const text = result.content
+      .filter((item) => item.type === 'text')
+      .map((item) => item.text)
+      .join('\n');
+    assert.match(text, /Maat · macOS/);
+    assert.match(text, /截图/);
+    assert.equal('drafts' in maat, false);
   } finally {
     await maat.close();
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-test('setup tools persist degradation in the Draft and resume the interrupted Case', async () => {
+test('optional capabilities and permission recheck are independent of Case state', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'maat-setup-tools-'));
   const maat = createMaat({
     workspaceRoot: directory,
@@ -112,43 +90,19 @@ test('setup tools persist degradation in the Draft and resume the interrupted Ca
   });
   try {
     await maat.platforms.select('macos');
-    maat.cases.begin({
-      id: 'calculator',
-      name: 'Calculator',
-      description: 'Verify a calculation',
-      objectives: ['Result is 7'],
-    });
     const tools = createSetupTools(maat);
-    await toolByName(tools, 'check_platform_setup').execute(
-      'check',
-      {},
-      undefined,
-      undefined,
-      context,
-    );
-    await toolByName(tools, 'continue_without_capability').execute(
-      'skip',
-      { capability: 'screenCapture' },
-      undefined,
-      undefined,
-      context,
-    );
-    assert.deepEqual(maat.cases.current()?.skippedCapabilities, ['screenCapture']);
-
-    maat.setup.interrupt({
-      platform: 'macos',
-      caseId: 'calculator',
-      pendingAction: 'screenshot',
-      workMode: 'case',
-    });
-    const retried = await toolByName(tools, 'retry_setup_step').execute(
-      'retry',
-      context,
-      undefined,
-      undefined,
-      context,
-    );
-    assert.match(textContent(retried), /已恢复 Case calculator/);
+    const skip = tools.find((item) => item.name === 'continue_without_capability');
+    const retry = tools.find((item) => item.name === 'retry_setup_step');
+    assert.ok(skip && retry);
+    await skip.execute('skip', { capability: 'screenCapture' }, undefined, undefined, context);
+    maat.setup.interrupt({ platform: 'macos', pendingAction: 'screenshot' });
+    const result = await retry.execute('retry', {}, undefined, undefined, context);
+    const text = result.content
+      .filter((item) => item.type === 'text')
+      .map((item) => item.text)
+      .join('\n');
+    assert.match(text, /准备状态已重新检查/);
+    assert.doesNotMatch(text, /Case|业务断言/);
     assert.equal(maat.setup.pendingInterruption(), undefined);
   } finally {
     await maat.close();
@@ -156,49 +110,30 @@ test('setup tools persist degradation in the Draft and resume the interrupted Ca
   }
 });
 
-test('a Case requiring screenshots cannot choose screenshot degradation', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'maat-setup-tools-'));
-  const maat = createMaat({
-    workspaceRoot: directory,
-    setupAssistant: {
-      preferencesFile: path.join(directory, 'setup.json'),
-      detector: async () => partialSnapshot(),
-    },
-  });
-  try {
-    await maat.platforms.select('macos');
-    maat.cases.begin({
-      id: 'required-evidence',
-      name: 'Required Evidence',
-      description: 'Screenshot required',
-      objectives: ['Screenshot exists'],
-      requireScreenshotEvidence: true,
-    });
-    await assert.rejects(
-      toolByName(createSetupTools(maat), 'continue_without_capability').execute(
-        'skip',
-        { capability: 'screenCapture' },
-        undefined,
-        undefined,
-        context,
-      ),
-      /requires screenshot Evidence/,
-    );
-  } finally {
-    await maat.close();
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('/maat-setup checks macOS from the default Web platform without switching it', async () => {
+test('Android setup is the first-use command default and doctor remains read-only', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'maat-setup-command-'));
   const maat = createMaat({
     workspaceRoot: directory,
     setupAssistant: {
       preferencesFile: path.join(directory, 'setup.json'),
       detector: async () => partialSnapshot(),
+      androidDetector: async () =>
+        aggregateSetup({
+          platform: 'android',
+          capabilities: [
+            {
+              id: 'appiumServer',
+              required: true,
+              status: 'action-required',
+              messageKey: 'capability.appium.start',
+              errorCode: 'APPIUM_SERVER_UNAVAILABLE',
+              action: { id: 'start-appium', labelKey: 'action.startAppium' },
+            },
+          ],
+        }),
     },
   });
+
   const commands = new Map<string, { handler: (args: string, ctx: ExtensionContext) => unknown }>();
   const pi = {
     registerCommand(
@@ -208,35 +143,116 @@ test('/maat-setup checks macOS from the default Web platform without switching i
       commands.set(name, command);
     },
   } as unknown as ExtensionAPI;
-  let confirms = 0;
   const notifications: string[] = [];
-  const commandContext = {
-    ...languageContext('请检查 macOS 测试环境'),
-    mode: 'print',
-    ui: {
-      confirm: async () => {
-        confirms += 1;
-        return true;
-      },
-      notify: (message: string) => notifications.push(message),
-    },
+  const messages: string[] = [];
+  pi.sendMessage = (message) => {
+    messages.push(
+      typeof message.content === 'string' ? message.content : JSON.stringify(message.content),
+    );
+  };
+  const ctx = {
+    ...context,
+    ui: { notify: (message: string) => notifications.push(message) },
   } as unknown as ExtensionContext;
   try {
-    assert.equal(maat.platforms.current().id, 'web');
     registerMaatSetupCommands(pi, maat);
-    await commands.get('maat-setup')?.handler('', commandContext);
-    assert.equal(confirms, 0);
-    assert.match(notifications.join('\n'), /下一步：开启截图权限/);
-    assert.doesNotMatch(notifications.join('\n'), /已恢复 Case/);
-    assert.equal(maat.setup.current().state, 'partially-ready');
-    assert.equal(maat.setup.current().platform, 'macos');
+    await commands.get('maat-doctor')?.handler('', ctx);
+    assert.match(notifications.at(-1)!, /Maat · Android/);
     assert.equal(maat.platforms.current().id, 'web');
-    await commands.get('maat-doctor')?.handler('', commandContext);
-    assert.match(notifications.at(-1) ?? '', /Maat · macOS 工程诊断/);
-    assert.doesNotMatch(notifications.at(-1) ?? '', /^\s*{/);
-    assert.equal(maat.platforms.current().id, 'web');
+    await commands.get('maat-setup')?.handler('android zh-CN', ctx);
+    assert.equal(maat.platforms.current().id, 'android');
+    assert.match(messages[0]!, /APPIUM_SERVER_UNAVAILABLE/);
+    assert.match(messages[0]!, /android-tools\.mjs/);
+    await maat.platforms.select('web');
+    await commands.get('maat-setup')?.handler('', ctx);
+    assert.equal(maat.platforms.current().id, 'android');
+    await commands.get('maat-doctor')?.handler('macos en', ctx);
+    assert.match(notifications.at(-1)!, /Maat · macOS/);
+    assert.doesNotMatch(notifications.join('\n'), /恢复 Case|业务断言/);
+    assert.equal(maat.platforms.current().id, 'android');
   } finally {
     await maat.close();
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('setup respects an explicitly selected unsupported platform instead of checking macOS', async () => {
+  const maat = createMaat();
+  const commands = new Map<string, { handler: (args: string, ctx: ExtensionContext) => unknown }>();
+  const pi = {
+    registerCommand(
+      name: string,
+      command: { handler: (args: string, ctx: ExtensionContext) => unknown },
+    ) {
+      commands.set(name, command);
+    },
+  } as unknown as ExtensionAPI;
+  const notifications: string[] = [];
+  const ctx = {
+    ...context,
+    ui: { notify: (message: string) => notifications.push(message) },
+  } as unknown as ExtensionContext;
+  maat.setup.check = async () => {
+    throw new Error('No macOS diagnostics should run.');
+  };
+  try {
+    await maat.platforms.select('ios');
+    registerMaatSetupCommands(pi, maat);
+    await commands.get('maat-setup')?.handler('', ctx);
+    await commands.get('maat-doctor')?.handler('', ctx);
+    assert.equal(maat.platforms.current().id, 'ios');
+    assert.match(notifications.join('\n'), /ios/);
+    assert.doesNotMatch(notifications.join('\n'), /Maat · macOS/);
+    await assert.rejects(
+      Promise.resolve(commands.get('maat-setup')?.handler('not-a-platform', ctx)),
+      /Use \/maat-setup/,
+    );
+  } finally {
+    await maat.close();
+  }
+});
+
+test('setup waits for the current tool batch before switching its platform', async () => {
+  const maat = createMaat({
+    setupAssistant: {
+      androidDetector: async () =>
+        aggregateSetup({ platform: 'android', capabilities: [], state: 'unknown' }),
+    },
+  });
+  const commands = new Map<
+    string,
+    { handler: (args: string, ctx: ExtensionContext) => Promise<unknown> }
+  >();
+  const messages: string[] = [];
+  const pi = {
+    registerCommand(
+      name: string,
+      command: { handler: (args: string, ctx: ExtensionContext) => Promise<unknown> },
+    ) {
+      commands.set(name, command);
+    },
+    sendMessage(message: { content: string }) {
+      messages.push(message.content);
+    },
+  } as unknown as ExtensionAPI;
+  let finish!: () => void;
+  const idle = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const ctx = { ...context, waitForIdle: () => idle } as unknown as ExtensionContext;
+  try {
+    registerMaatSetupCommands(pi, maat);
+    const handler = commands.get('maat-setup');
+    assert.ok(handler);
+    const pending = handler.handler('android', ctx);
+    await Promise.resolve();
+    assert.equal(maat.platforms.current().id, 'web');
+    assert.equal(messages.length, 0);
+    finish();
+    await pending;
+    assert.equal(maat.platforms.current().id, 'android');
+    assert.equal(messages.length, 1);
+  } finally {
+    await maat.close();
   }
 });

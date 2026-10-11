@@ -7,8 +7,13 @@ import {
 } from '../schema.ts';
 import { resolveDevice } from '../../../setup/devices.ts';
 import type { JavaScriptSession } from '../../../core/exploration/runtime.ts';
+import { errorWithCleanupFailure } from '../../../core/exploration/runtime.ts';
 
 export class NativeManager implements JavaScriptSession {
+  private readonly executionTimeoutMs: number;
+  constructor(executionTimeoutMs = 60_000) {
+    this.executionTimeoutMs = executionTimeoutMs;
+  }
   private session?: JavaScriptSession;
   private environment?: NativeEnvironment;
   private app?: NativeAppTarget;
@@ -31,7 +36,7 @@ export class NativeManager implements JavaScriptSession {
       : undefined;
   }
   get isRunning() {
-    return this.session !== undefined;
+    return this.session !== undefined && !this.session.isClosed;
   }
   async configure(environment: NativeEnvironment, app?: NativeAppTarget) {
     capabilities(environment);
@@ -53,18 +58,22 @@ export class NativeManager implements JavaScriptSession {
     if (!this.environment) throw new Error('Select and configure a native project first.');
     this.busy = true;
     try {
+      if (this.session?.isClosed) await this.close();
       if (!this.session) {
-        this.resolved ??= { ...(await resolveDevice(this.environment)), app: this.app };
-        this.session = await startNativeSession(this.resolved);
+        this.resolved ??= { ...(await resolveDevice(this.environment, signal)), app: this.app };
+        signal?.throwIfAborted();
+        this.session = await startNativeSession(this.resolved, this.executionTimeoutMs, { signal });
       }
-      if (signal?.aborted) {
-        await this.close();
-        signal.throwIfAborted();
-      }
+      signal?.throwIfAborted();
       return await this.session!.execute(code, signal);
     } catch (error) {
-      if (signal?.aborted || /timed out|worker exited|session closed/.test(String(error)))
-        await this.close();
+      if (signal?.aborted || this.session?.isClosed) {
+        try {
+          await this.close();
+        } catch (cleanup) {
+          throw errorWithCleanupFailure(error, cleanup);
+        }
+      }
       throw error;
     } finally {
       this.busy = false;

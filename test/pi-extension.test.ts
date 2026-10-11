@@ -4,7 +4,7 @@ import test from 'node:test';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import maatPiExtension from '../packages/pi/src/extension.ts';
 
-test('Pi Extension registers the complete Maat tool surface and lifecycle', () => {
+test('Pi Extension registers execution/setup tools without legacy workflow tools', () => {
   const tools: string[] = [];
   const commands: string[] = [];
   const events: string[] = [];
@@ -25,27 +25,24 @@ test('Pi Extension registers the complete Maat tool surface and lifecycle', () =
 
   for (const name of [
     'exe_js',
-    'begin_case',
-    'list_case_steps',
-    'remove_case_step',
-    'replace_case_step',
     'check_platform_setup',
+    'check_device_ready',
     'open_setup_step',
     'retry_setup_step',
     'continue_without_capability',
-    'save_case',
-    'list_evidence',
     'select_platform',
     'configure_session',
     'configure_browser',
-    'set_work_mode',
   ]) {
     assert.ok(tools.includes(name), `${name} was not registered`);
   }
   assert.ok(commands.includes('maat-status'));
   assert.ok(commands.includes('maat-setup'));
   assert.ok(commands.includes('maat-doctor'));
-  assert.ok(commands.includes('mode'));
+  for (const name of ['begin_case', 'save_case', 'list_evidence', 'set_work_mode'])
+    assert.equal(tools.includes(name), false);
+  assert.equal(commands.includes('mode'), false);
+  assert.equal(events.includes('user_bash'), false);
   assert.ok(events.includes('session_shutdown'));
   assert.ok(events.includes('before_agent_start'));
 });

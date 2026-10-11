@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -9,8 +9,9 @@ type Manifest = {
   dependencies?: Record<string, string>;
   name: string;
   peerDependencies?: Record<string, string>;
-  pi?: { extensions?: string[] };
+  pi?: { extensions?: string[]; skills?: string[] };
   version: string;
+  exports?: Record<string, string>;
 };
 
 const workspaces = ['@houlianpi/maat-core', '@houlianpi/maat-pi', '@houlianpi/maat'] as const;
@@ -39,6 +40,10 @@ assert.equal(
   manifests.get('@houlianpi/maat')?.dependencies?.['@earendil-works/pi-coding-agent'],
   '0.87.0',
 );
+assert.equal(manifests.get('@houlianpi/maat-core')?.exports?.['./test'], undefined);
+for (const name of ['mocha', 'tsx'])
+  assert.equal(manifests.get('@houlianpi/maat-core')?.dependencies?.[name], undefined);
+assert.equal(manifests.get('@houlianpi/maat')?.dependencies?.tsx, undefined);
 
 execFileSync('npm', ['run', 'build'], { stdio: 'inherit' });
 const tarballs: string[] = [];
@@ -56,6 +61,21 @@ try {
     assert.ok(files.has('package.json'));
     assert.ok([...files].some((file) => file.startsWith('dist/')));
     assert.ok(![...files].some((file) => file.startsWith('src/')));
+    assert.ok(
+      ![...files].some((file) =>
+        /^dist\/(?:core\/(?:cases|testing)\/|test\/|work-mode\.|tools\/case-tools\.|cli\/cases\.|agent\/(?:run-recorder|replay-generator)\.|platforms\/(?:web|appium)\/test-session\.)/.test(
+          file,
+        ),
+      ),
+      'Packed package contains removed test, mode or Replay code.',
+    );
+    if (workspace === '@houlianpi/maat-pi') {
+      assert.ok(files.has('skills/maat-setup/SKILL.md'), 'Packed Pi setup Skill is missing.');
+      assert.ok(
+        files.has('skills/maat-setup/scripts/android-tools.mjs'),
+        'Packed Android preparation script is missing.',
+      );
+    }
   }
 
   const installation = await mkdtemp(path.join(tmpdir(), 'maat-workspaces-'));
@@ -70,96 +90,55 @@ try {
     const modules = path.join(installation, 'node_modules');
     const coreRoot = path.join(modules, '@houlianpi', 'maat-core');
     const maatRoot = path.join(modules, '@houlianpi', 'maat');
+    const installedPiRoot = path.join(modules, '@houlianpi', 'maat-pi');
     const cli = path.join(maatRoot, 'bin', 'maat.mjs');
     assert.match(
       execFileSync(process.execPath, [cli, '--help'], { encoding: 'utf8' }),
-      /Maat - conversational UI verification/,
+      /Maat - UI execution for Coding Agents/,
     );
-    assert.throws(
-      () => execFileSync(process.execPath, [cli, 'test', '--case', 'missing']),
-      /Unknown Case/,
-    );
+    for (const command of ['test', 'cases', 'replay']) {
+      const removed = spawnSync(process.execPath, [cli, command], { encoding: 'utf8' });
+      assert.equal(removed.status, 1);
+      assert.match(removed.stderr, new RegExp('Unknown command: ' + command));
+    }
 
     const workerSmoke = `
       import { pathToFileURL } from 'node:url';
       const core = await import(pathToFileURL(process.argv[1] + '/dist/index.js'));
       const maat = core.createMaat({ workspaceRoot: process.cwd() });
       try {
+        if (typeof core.resolveAndroidTools !== 'function' || typeof core.prepareAndroidTools !== 'function')
+          throw new Error('Installed Core Android tool APIs are missing');
+        for (const name of ['saveCase', 'runMaatTests', 'CaseDraftManager'])
+          if (name in core) throw new Error('Removed Core export remains: ' + name);
+        for (const name of ['cases', 'drafts', 'tests', 'evidence'])
+          if (name in maat) throw new Error('Removed Core API remains: ' + name);
         await maat.platforms.configure({ browser: 'chromium', headless: true });
-        const result = await maat.exploration.executeJavaScript("await page.setContent('<h1>installed</h1>'); console.log(await page.textContent('h1'));");
+        const result = await maat.exploration.executeJavaScript("await page.setContent('<h1>installed</h1>'); console.log(await page.textContent('h1')); display(await page.screenshot());");
         if (result[0]?.type !== 'text' || result[0].text !== 'installed') throw new Error('Worker smoke failed');
+        if (result[1]?.type !== 'image' || result[1].mimeType !== 'image/png' || !result[1].data)
+          throw new Error('Installed Worker screenshot observation failed');
       } finally { await maat.close(); }
     `;
     execFileSync(process.execPath, ['--input-type=module', '-e', workerSmoke, coreRoot], {
       stdio: 'pipe',
     });
-
-    const saveSmoke = `
-      import { pathToFileURL } from 'node:url';
-      const core = await import(pathToFileURL(process.argv[1] + '/dist/index.js'));
-      const root = process.argv[2];
-      const manager = new core.CaseDraftManager();
-      const draft = manager.begin({ id: 'saved-empty', name: 'Saved empty', description: 'Saved from installed Core', objectives: ['Ready'], rootDirectory: root });
-      await manager.recordSuccessfulStep("await page.setContent('<h1>Ready</h1>'); await expect(page.locator('h1')).toHaveText('Ready');", [], { adapterId: 'web', bindings: ['page', 'expect'], requirement: { adapterId: 'web', setup: { browser: 'chromium', headless: true } } }, 'Verify ready');
-      const saved = await core.saveCase(draft, root);
-      console.log(saved.testPath);
-    `;
-    const generatedRoot = path.join(emptyProject, 'generated-tests', 'web');
-    execFileSync(
-      process.execPath,
-      ['--input-type=module', '-e', saveSmoke, coreRoot, generatedRoot],
-      { cwd: emptyProject, env: { ...process.env, NODE_PATH: modules }, stdio: 'pipe' },
-    );
-    execFileSync(
-      process.execPath,
-      [
-        cli,
-        'test',
-        '--root',
-        path.join(emptyProject, 'generated-tests'),
-        '--project',
-        'web',
-        '--case',
-        'saved-empty',
-        '--browser',
-        'chromium',
-      ],
-      { cwd: emptyProject, env: { ...process.env, NODE_PATH: modules }, stdio: 'pipe' },
-    );
-
-    const caseRoot = path.join(emptyProject, 'maat-tests', 'web', 'cases', 'smoke');
-    await mkdir(caseRoot, { recursive: true });
-    await writeFile(
-      path.join(caseRoot, 'empty.spec.ts'),
-      `import { afterEach, beforeEach, createMaatTest, describe, it, type MaatTest } from '@houlianpi/maat-core/test';
-describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async () => { maat = await createMaatTest('empty', [{ adapterId: 'web', setup: { browser: 'chromium', headless: true } }]); await maat.setup(); }); afterEach(async function () { await maat?.teardown({ passed: this.currentTest?.state === 'passed' }); }); it('empty', async () => { await maat.step('verify', 'web', async ({ page, expect }) => { await page.setContent('<h1>Ready</h1>'); await expect(page.locator('h1')).toHaveText('Ready'); }); }); });
-`,
-    );
-    const caseArgs = [
-      cli,
-      'test',
-      '--root',
-      path.join(emptyProject, 'maat-tests'),
-      '--project',
-      'web',
-      '--case',
-      'smoke/empty',
-      '--browser',
-      'chromium',
-    ];
-    try {
-      execFileSync(process.execPath, caseArgs, {
-        cwd: emptyProject,
-        env: { ...process.env, NODE_PATH: modules },
-        stdio: 'pipe',
-      });
-    } catch (error) {
-      const failure = error as { stdout?: Buffer; stderr?: Buffer };
-      throw new Error(
-        `Installed empty-project Case failed:\n${failure.stdout?.toString() ?? ''}${failure.stderr?.toString() ?? ''}`,
-        { cause: error },
-      );
-    }
+    const noSdkEnvironment = { ...process.env };
+    delete noSdkEnvironment.ANDROID_HOME;
+    delete noSdkEnvironment.ANDROID_SDK_ROOT;
+    const androidStatus = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          path.join(installedPiRoot, 'skills', 'maat-setup', 'scripts', 'android-tools.mjs'),
+          'status',
+        ],
+        { cwd: emptyProject, env: noSdkEnvironment, encoding: 'utf8' },
+      ),
+    ) as { toolchainReady?: unknown; adbAvailable?: unknown; aapt2Available?: unknown };
+    assert.equal(typeof androidStatus.toolchainReady, 'boolean');
+    assert.equal(typeof androidStatus.adbAvailable, 'boolean');
+    assert.equal(typeof androidStatus.aapt2Available, 'boolean');
 
     // Pi owns its SDK and supplies Extension peers. Test this independently from the
     // standalone package, which intentionally carries its own exact Pi SDK dependency.
@@ -182,9 +161,18 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
       await readFile(path.join(piRoot, 'package.json'), 'utf8'),
     ) as Manifest;
     assert.deepEqual(piManifest.pi?.extensions, ['./dist/extension.js']);
+    assert.deepEqual(piManifest.pi?.skills, ['./skills']);
     const extensionSmoke = `
       import { pathToFileURL } from 'node:url';
-      const extension = (await import(pathToFileURL(process.argv[1] + '/dist/extension.js'))).default;
+      import { realpath } from 'node:fs/promises';
+      const api = await import(pathToFileURL(process.argv[1] + '/dist/index.js'));
+      const extension = api.maatPiExtension;
+      const sdk = await import(pathToFileURL(process.argv[2] + '/dist/index.js'));
+      const skills = sdk.loadSkillsFromDir({ dir: process.argv[1] + '/skills', source: 'installed-maat' });
+      if (skills.diagnostics.length || skills.skills.length !== 1 || skills.skills[0].name !== 'maat-setup')
+        throw new Error('Installed Pi setup Skill was not discovered');
+      if (await realpath(skills.skills[0].filePath) !== await realpath(api.MAAT_SETUP_SKILL_PATH))
+        throw new Error('Installed Skill path points outside the package');
       const tools = []; const commands = []; const handlers = new Map();
       const pi = {
         registerTool(tool) { tools.push(tool.name); },
@@ -192,17 +180,31 @@ describe('Installed empty project', () => { let maat: MaatTest; beforeEach(async
         on(event, handler) { handlers.set(event, handler); return () => {}; },
       };
       extension(pi);
-      for (const name of ['check_platform_setup', 'open_setup_step', 'retry_setup_step', 'continue_without_capability'])
+      for (const name of ['check_platform_setup', 'check_device_ready', 'open_setup_step', 'retry_setup_step', 'continue_without_capability'])
         if (!tools.includes(name)) throw new Error('Installed extension missing tool: ' + name);
+      for (const name of ['begin_case', 'save_case', 'list_evidence', 'set_work_mode'])
+        if (tools.includes(name)) throw new Error('Installed extension contains removed tool: ' + name);
+      if (commands.includes('mode') || handlers.has('user_bash'))
+        throw new Error('Installed extension contains removed work-mode policy');
       for (const name of ['maat-setup', 'maat-status', 'maat-doctor'])
         if (!commands.includes(name)) throw new Error('Installed extension missing command: ' + name);
       await handlers.get('session_shutdown')?.();
     `;
-    execFileSync(process.execPath, ['--input-type=module', '-e', extensionSmoke, piRoot], {
-      cwd: emptyProject,
-      env: { ...process.env, NODE_PATH: piModules },
-      stdio: 'pipe',
-    });
+    execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        extensionSmoke,
+        piRoot,
+        path.join(piModules, '@earendil-works', 'pi-coding-agent'),
+      ],
+      {
+        cwd: emptyProject,
+        env: { ...process.env, NODE_PATH: piModules },
+        stdio: 'pipe',
+      },
+    );
 
     const setupPersistenceSmoke = `
       import { pathToFileURL } from 'node:url';

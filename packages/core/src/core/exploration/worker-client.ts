@@ -2,6 +2,7 @@ import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isRecord, maxCodeBytes, parseObservations } from './protocol.ts';
 import type { JavaScriptSession } from './runtime.ts';
+import { WorkerTerminatedError } from './runtime.ts';
 
 const maxWorkerStderrBytes = 16 * 1024;
 const gracefulCloseTimeoutMs = 500;
@@ -12,7 +13,9 @@ export async function createExplorationWorker(
   options: unknown,
   timeoutMs = 60_000,
   initializationTimeoutMs = 30_000,
+  initializationSignal?: AbortSignal,
 ): Promise<JavaScriptSession> {
+  initializationSignal?.throwIfAborted();
   const sourceRuntime = import.meta.url.endsWith('.ts');
   const child = fork(
     fileURLToPath(
@@ -63,9 +66,9 @@ export async function createExplorationWorker(
     }
   };
   const terminate = (error: Error) => {
-    terminalError ??= error;
+    terminalError ??= new WorkerTerminatedError(error.message, { cause: error });
     closed = true;
-    pending?.reject(error);
+    pending?.reject(terminalError);
     pending = undefined;
     killGroup();
   };
@@ -87,7 +90,10 @@ export async function createExplorationWorker(
     signal?: AbortSignal,
     deadlineMs = timeoutMs,
   ): Promise<unknown> {
-    if (closed) return Promise.reject(terminalError ?? new Error('Exploration Worker is closed.'));
+    if (closed)
+      return Promise.reject(
+        terminalError ?? new WorkerTerminatedError('Exploration Worker is closed.'),
+      );
     if (pending) return Promise.reject(new Error('Exploration Worker is busy.'));
     signal?.throwIfAborted();
     return new Promise((resolve, reject) => {
@@ -101,7 +107,13 @@ export async function createExplorationWorker(
           ),
         deadlineMs,
       );
-      const abort = () => terminate(new Error('Exploration execution aborted.'));
+      const abort = () =>
+        terminate(
+          new Error(
+            `Exploration ${operation === 'initialize' ? 'initialization' : 'execution'} aborted.`,
+            { cause: signal?.reason },
+          ),
+        );
       const cleanup = () => {
         clearTimeout(timer);
         signal?.removeEventListener('abort', abort);
@@ -127,7 +139,7 @@ export async function createExplorationWorker(
     await request(
       'initialize',
       { module: module.href, options },
-      undefined,
+      initializationSignal,
       initializationTimeoutMs,
     );
   } catch (error) {
@@ -138,6 +150,9 @@ export async function createExplorationWorker(
     throw error;
   }
   return {
+    get isClosed() {
+      return closed;
+    },
     async execute(code, signal) {
       if (!code.trim() || Buffer.byteLength(code) > maxCodeBytes)
         throw new Error('Code must be nonempty and at most 64 KiB.');

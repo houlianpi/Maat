@@ -6,8 +6,22 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import type { MaatApi } from '@houlianpi/maat-core';
 import { maatStatusLines } from './status.ts';
-import { setupDoctor, setupPanel } from './setup-ui.ts';
+import { setupAgentContext, setupDoctor, setupPanel } from './setup-ui.ts';
 import { resolveSetupLocale, setupMessage } from './setup-i18n.ts';
+
+function setupTarget(args: string, maat: MaatApi) {
+  const tokens = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const requested = tokens.find((token) =>
+    maat.platforms.list().some((adapter) => adapter.id === token),
+  );
+  const language = tokens.filter((token) => token !== requested).join(' ');
+  if (language && !/^(zh|zh-cn|中文|en|en-us|english)$/i.test(language))
+    throw new Error(
+      'Use /maat-setup [android|macos] [zh-CN|en] or /maat-doctor [android|macos] [zh-CN|en].',
+    );
+  const current = maat.platforms.current().id;
+  return { platform: requested ?? (current === 'web' ? 'android' : current), language };
+}
 
 export function registerMaatSetupCommands(pi: ExtensionAPI, maat: MaatApi): void {
   pi.registerCommand('maat-status', {
@@ -15,9 +29,9 @@ export function registerMaatSetupCommands(pi: ExtensionAPI, maat: MaatApi): void
     handler: async (args, ctx) => {
       const locale = resolveSetupLocale(args, ctx);
       const status = maat.platforms.status();
-      const lines = maatStatusLines(status, maat.drafts);
-      if (status.id === 'macos') {
-        const snapshot = await maat.setup.check({ platform: 'macos' });
+      const lines = maatStatusLines(status);
+      if (status.id === 'macos' || status.id === 'android') {
+        const snapshot = await maat.setup.check({ platform: status.id, signal: ctx.signal });
         lines.push('', ...setupPanel(snapshot, locale));
       }
       ctx.ui.notify(lines.join('\n'), 'info');
@@ -25,28 +39,60 @@ export function registerMaatSetupCommands(pi: ExtensionAPI, maat: MaatApi): void
   });
 
   pi.registerCommand('maat-setup', {
-    description: 'Guide macOS setup with one recommended next action',
+    description: 'Prepare Android through the host Agent, or guide macOS setup',
     handler: async (args, ctx) => {
-      const locale = resolveSetupLocale(args, ctx);
+      await ctx.waitForIdle();
+      ctx.signal?.throwIfAborted();
+      const { platform, language } = setupTarget(args, maat);
+      const locale = resolveSetupLocale(language, ctx);
+      if (platform !== 'android' && platform !== 'macos') {
+        ctx.ui.notify(
+          locale === 'zh-CN'
+            ? `当前 ${platform} 平台没有准备向导。Android 手机请使用 /maat-setup android；不会替你切换已有设备。`
+            : `No preparation workflow is available for ${platform}. Use /maat-setup android for a local Android phone; the current device was not changed.`,
+          'warning',
+        );
+        return;
+      }
+      if (platform === 'android') {
+        if (maat.platforms.current().id !== 'android') await maat.platforms.select('android');
+        const snapshot = await maat.setup.check({ platform: 'android', signal: ctx.signal });
+        pi.sendMessage(
+          {
+            customType: 'maat-android-setup',
+            content: [
+              locale === 'zh-CN'
+                ? '用户请求准备当前 Android 手机。请读取 maat-setup Skill，在授权范围内使用宿主工具处理必要准备；需要本人操作时明确等待，完成后调用 check_device_ready 并继续原任务。'
+                : 'The user requested preparation of the current Android phone. Read the maat-setup Skill, use authorized host tools for necessary preparation, wait for user-only actions, then call check_device_ready and continue the original task.',
+              ...setupPanel(snapshot, locale),
+              setupAgentContext(snapshot, locale),
+            ].join('\n'),
+            display: true,
+          },
+          { triggerTurn: true },
+        );
+        return;
+      }
       const copy =
         locale === 'zh-CN'
           ? {
-              resumed: (id: string) => `已恢复 Case ${id}，请从中断位置继续。`,
+              resumed: '准备状态已重新检查，请读取当前界面后继续原任务。',
               open: '打开 macOS 系统设置？Maat 不会自动修改权限。',
               screen: '请允许 Xcode、启动 Appium 的终端，以及列表中的 macOS 自动化组件。\n',
-              done: '完成后回到这里再次运行 /maat-setup。Maat 会保留当前 Case。',
+              done: '完成后回到这里再次运行 /maat-setup，重新检查准备状态。',
             }
           : {
-              resumed: (id: string) => `Resumed Case ${id}. Continue from the interruption.`,
+              resumed: 'Preparation was rechecked. Read the current UI before continuing.',
               open: 'Open macOS System Settings? Maat will not change permissions automatically.',
               screen:
                 'Allow Xcode, the terminal that starts Appium, and the listed macOS automation component.\n',
-              done: 'When finished, return here and run /maat-setup again. Maat will preserve the current Case.',
+              done: 'When finished, return here and run /maat-setup again to recheck preparation.',
             };
-      const snapshot = await maat.setup.check({ platform: 'macos', signal: ctx.signal });
+      if (maat.platforms.current().id !== 'macos') await maat.platforms.select('macos');
+      const snapshot = await maat.setup.check({ platform, signal: ctx.signal });
       const resumed = maat.setup.resume();
       ctx.ui.notify(
-        `${setupPanel(snapshot, locale).join('\n')}${resumed?.caseId ? `\n\n${copy.resumed(resumed.caseId)}` : ''}`,
+        `${setupPanel(snapshot, locale).join('\n')}${resumed ? `\n\n${copy.resumed}` : ''}`,
         snapshot.canContinue ? 'info' : 'warning',
       );
       const action = snapshot.recommendedAction;
@@ -57,16 +103,14 @@ export function registerMaatSetupCommands(pi: ExtensionAPI, maat: MaatApi): void
           `${setupMessage(locale, snapshot.summaryKey)}\n\n${copy.open}`,
         )
       ) {
-        const activeCase = maat.cases.current();
-        if (activeCase)
-          maat.setup.interrupt({
-            platform: 'macos',
-            caseId: activeCase.id,
-            pendingAction: action.id,
-            workMode: 'case',
-          });
+        maat.setup.interrupt({ platform: 'macos', pendingAction: action.id });
         const selected = await maat.setup.action(action.id);
-        execFile('open', [selected.settingsUrl!], () => undefined);
+        await new Promise<void>((resolve, reject) => {
+          execFile('open', [selected.settingsUrl!], (error) => {
+            if (error) reject(error);
+            else resolve();
+          });
+        });
         ctx.ui.notify(
           `${selected.id === 'open-screen-recording' ? copy.screen : ''}${copy.done}`,
           'info',
@@ -78,8 +122,13 @@ export function registerMaatSetupCommands(pi: ExtensionAPI, maat: MaatApi): void
   pi.registerCommand('maat-doctor', {
     description: 'Show redacted technical Maat setup diagnostics',
     handler: async (args, ctx) => {
-      const locale = resolveSetupLocale(args, ctx);
-      const snapshot = await maat.setup.check({ platform: 'macos', signal: ctx.signal });
+      const { platform, language } = setupTarget(args, maat);
+      const locale = resolveSetupLocale(language, ctx);
+      if (platform !== 'android' && platform !== 'macos') {
+        ctx.ui.notify(`No preparation diagnostics are available for ${platform}.`, 'warning');
+        return;
+      }
+      const snapshot = await maat.setup.check({ platform, signal: ctx.signal });
       ctx.ui.notify(setupDoctor(snapshot, locale), snapshot.canContinue ? 'info' : 'warning');
     },
   });

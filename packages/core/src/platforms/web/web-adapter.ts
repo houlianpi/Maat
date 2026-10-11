@@ -1,12 +1,10 @@
 import path from 'node:path';
-import type { BrowserConfig } from './exploration-manager.ts';
 import { WebExplorationManager } from './exploration-manager.ts';
 import type { PlatformAdapter } from '../../core/platforms/contracts.ts';
 import type { BrowserName } from './config.ts';
-import { createWebTestSession } from './test-session.ts';
 
 export class WebPlatformAdapter implements PlatformAdapter {
-  readonly root: string;
+  readonly configRoot: string;
   readonly id = 'web';
   readonly label = 'Web';
   readonly codeContext = {
@@ -16,23 +14,24 @@ export class WebPlatformAdapter implements PlatformAdapter {
       { name: 'context', description: 'Playwright BrowserContext' },
       { name: 'browser', description: 'Playwright Browser' },
       { name: 'expect', description: 'Playwright expect' },
-      { name: 'display', description: 'Return screenshot Evidence' },
+      { name: 'display', description: 'Return a screenshot UI observation' },
+      { name: 'evidence', description: 'Capture a screenshot UI observation with screenshot()' },
     ],
     guidelines: [
       'Use Playwright locators.',
       'Await every browser operation.',
-      'Assert only explicit test objectives.',
+      'Observe actual UI state; check only user-declared outcomes.',
     ],
   };
   readonly browser: WebExplorationManager;
 
-  constructor(root = path.resolve('maat-tests/web'), browser?: WebExplorationManager) {
-    this.root = root;
-    this.browser = browser ?? new WebExplorationManager(root);
+  constructor(configRoot = path.resolve('maat-tests/web'), browser?: WebExplorationManager) {
+    this.configRoot = configRoot;
+    this.browser = browser ?? new WebExplorationManager(configRoot);
   }
 
   async initialize(): Promise<void> {
-    this.browser.setConfigRoot(this.root);
+    this.browser.setConfigRoot(this.configRoot);
   }
   configure(config: Record<string, unknown>) {
     return this.browser.configure({
@@ -54,21 +53,11 @@ export class WebPlatformAdapter implements PlatformAdapter {
   execute(code: string, signal?: AbortSignal) {
     return this.browser.execute(code, signal);
   }
-  runtimeRequirement() {
-    return {
-      adapterId: this.id,
-      setup: { browser: this.config.browser, headless: this.config.headless },
-    };
-  }
-  createTestSession(requirement = this.runtimeRequirement()) {
-    return createWebTestSession(requirement.setup);
-  }
   status() {
     const config = this.config;
     return {
       id: this.id,
       label: this.label,
-      root: this.root,
       session: this.browser.isRunning ? ('ready' as const) : ('idle' as const),
       detail: `${config.browser} · ${config.headless ? 'headless' : 'headed'}`,
     };

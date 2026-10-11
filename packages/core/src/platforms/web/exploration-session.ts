@@ -1,7 +1,10 @@
 import type { JavaScriptSessionOptions } from '../../core/exploration/runtime.ts';
 import { createExplorationWorker } from '../../core/exploration/worker-client.ts';
 
-export function createWebExplorationSession(options: JavaScriptSessionOptions = {}) {
+export function createWebExplorationSession(
+  options: JavaScriptSessionOptions = {},
+  signal?: AbortSignal,
+) {
   const runtimeModule = import.meta.url.endsWith('.ts')
     ? './exploration-runtime.ts'
     : './exploration-runtime.js';
@@ -10,5 +13,6 @@ export function createWebExplorationSession(options: JavaScriptSessionOptions = 
     options,
     options.executionTimeoutMs ?? 60_000,
     options.initializationTimeoutMs ?? 30_000,
+    signal,
   );
 }
