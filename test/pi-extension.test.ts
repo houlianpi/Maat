@@ -36,9 +36,9 @@ test('Pi Extension registers execution/setup tools without legacy workflow tools
   ]) {
     assert.ok(tools.includes(name), `${name} was not registered`);
   }
-  assert.ok(commands.includes('maat-status'));
   assert.ok(commands.includes('maat-setup'));
-  assert.ok(commands.includes('maat-doctor'));
+  assert.equal(commands.includes('maat-status'), false);
+  assert.equal(commands.includes('maat-doctor'), false);
   for (const name of ['begin_case', 'save_case', 'list_evidence', 'set_work_mode'])
     assert.equal(tools.includes(name), false);
   assert.equal(commands.includes('mode'), false);

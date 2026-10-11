@@ -71,6 +71,7 @@ try {
     );
     if (workspace === '@houlianpi/maat-pi') {
       assert.ok(files.has('skills/maat-setup/SKILL.md'), 'Packed Pi setup Skill is missing.');
+      assert.ok(files.has('skills/mobile-use/SKILL.md'), 'Packed Pi Mobile Use Skill is missing.');
       assert.ok(
         files.has('skills/maat-setup/scripts/android-tools.mjs'),
         'Packed Android preparation script is missing.',
@@ -161,7 +162,7 @@ try {
       await readFile(path.join(piRoot, 'package.json'), 'utf8'),
     ) as Manifest;
     assert.deepEqual(piManifest.pi?.extensions, ['./dist/extension.js']);
-    assert.deepEqual(piManifest.pi?.skills, ['./skills']);
+    assert.equal(piManifest.pi?.skills, undefined);
     const extensionSmoke = `
       import { pathToFileURL } from 'node:url';
       import { realpath } from 'node:fs/promises';
@@ -169,9 +170,10 @@ try {
       const extension = api.maatPiExtension;
       const sdk = await import(pathToFileURL(process.argv[2] + '/dist/index.js'));
       const skills = sdk.loadSkillsFromDir({ dir: process.argv[1] + '/skills', source: 'installed-maat' });
-      if (skills.diagnostics.length || skills.skills.length !== 1 || skills.skills[0].name !== 'maat-setup')
-        throw new Error('Installed Pi setup Skill was not discovered');
-      if (await realpath(skills.skills[0].filePath) !== await realpath(api.MAAT_SETUP_SKILL_PATH))
+      if (skills.diagnostics.length || skills.skills.map((skill) => skill.name).join(',') !== 'maat-setup,mobile-use')
+        throw new Error('Installed Pi Skills were not discovered');
+      if (await realpath(skills.skills[0].filePath) !== await realpath(api.MAAT_SETUP_SKILL_PATH) ||
+          await realpath(skills.skills[1].filePath) !== await realpath(api.MAAT_MOBILE_USE_SKILL_PATH))
         throw new Error('Installed Skill path points outside the package');
       const tools = []; const commands = []; const handlers = new Map();
       const pi = {
@@ -186,8 +188,8 @@ try {
         if (tools.includes(name)) throw new Error('Installed extension contains removed tool: ' + name);
       if (commands.includes('mode') || handlers.has('user_bash'))
         throw new Error('Installed extension contains removed work-mode policy');
-      for (const name of ['maat-setup', 'maat-status', 'maat-doctor'])
-        if (!commands.includes(name)) throw new Error('Installed extension missing command: ' + name);
+      if (commands.join(',') !== 'maat-setup')
+        throw new Error('Installed extension should register only maat-setup');
       await handlers.get('session_shutdown')?.();
     `;
     execFileSync(

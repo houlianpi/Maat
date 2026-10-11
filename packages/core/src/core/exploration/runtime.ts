@@ -14,8 +14,24 @@ export type JavaScriptSession = {
   close(): Promise<void>;
 };
 
-/** Only parent-side lifecycle failures use this type; script errors remain ordinary Errors. */
-export class WorkerTerminatedError extends Error {}
+export class ExplorationExecutionError extends Error {
+  readonly code = 'MAAT_EXECUTION_ERROR';
+  readonly details: import('./protocol.ts').WorkerError;
+  constructor(
+    message: string,
+    details: import('./protocol.ts').WorkerError,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = 'ExplorationExecutionError';
+    this.details = details;
+  }
+}
+
+/** Parent-side lifecycle failure; the action result is uncertain and the Worker is closed. */
+export class WorkerTerminatedError extends Error {
+  readonly code = 'MAAT_EXECUTION_TERMINATED';
+}
 
 export function errorWithCleanupFailure(primary: unknown, cleanup: unknown): AggregateError {
   const message = (error: unknown) => (error instanceof Error ? error.message : String(error));

@@ -1,8 +1,8 @@
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { isRecord, maxCodeBytes, parseObservations } from './protocol.ts';
+import { isRecord, maxCodeBytes, parseObservations, parseWorkerError } from './protocol.ts';
 import type { JavaScriptSession } from './runtime.ts';
-import { WorkerTerminatedError } from './runtime.ts';
+import { ExplorationExecutionError, WorkerTerminatedError } from './runtime.ts';
 
 const maxWorkerStderrBytes = 16 * 1024;
 const gracefulCloseTimeoutMs = 500;
@@ -79,9 +79,16 @@ export async function createExplorationWorker(
       return;
     }
     const request = pending!;
-    pending = undefined;
-    if (typeof message.error === 'string') request.reject(new Error(message.error));
-    else request.resolve(message.result);
+    const details = parseWorkerError(message.error);
+    if (details) {
+      pending = undefined;
+      request.reject(new ExplorationExecutionError(details.message, details));
+    } else if ('error' in message) {
+      terminate(new Error('Invalid Exploration Worker error response.'));
+    } else {
+      pending = undefined;
+      request.resolve(message.result);
+    }
   });
   child.on('error', (error) => terminate(error));
   function request(
@@ -147,6 +154,8 @@ export async function createExplorationWorker(
     if (child.exitCode === null && child.signalCode === null) killGroup();
     await exited;
     child.stderr?.destroy();
+    if (error instanceof ExplorationExecutionError)
+      throw new Error(`Exploration initialization failed: ${error.message}`, { cause: error });
     throw error;
   }
   return {
@@ -155,7 +164,13 @@ export async function createExplorationWorker(
     },
     async execute(code, signal) {
       if (!code.trim() || Buffer.byteLength(code) > maxCodeBytes)
-        throw new Error('Code must be nonempty and at most 64 KiB.');
+        throw new ExplorationExecutionError('Code must be nonempty and at most 64 KiB.', {
+          name: 'ValidationError',
+          message: 'Code must be nonempty and at most 64 KiB.',
+          category: 'invalid-input',
+          phase: 'validate',
+          actionState: 'not-started',
+        });
       return parseObservations(await request('execute', { code }, signal));
     },
     close() {

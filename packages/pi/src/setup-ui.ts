@@ -165,19 +165,19 @@ export function setupPanel(snapshot: SetupSnapshot, locale: SetupLocale = 'en'):
     const summary =
       snapshot.state === 'checking'
         ? chinese
-          ? '正在检查准备条件'
-          : 'Checking preparation conditions'
+          ? '结论：正在检查，尚不能开始手机任务'
+          : 'Conclusion: checking; phone tasks cannot start yet'
         : snapshot.state === 'unknown'
           ? chinese
-            ? '尚未检查准备条件'
-            : 'Preparation has not been checked'
+            ? '结论：尚不能开始手机任务，尚未检查准备条件'
+            : 'Conclusion: phone tasks cannot start; preparation has not been checked'
           : snapshot.canContinue
             ? chinese
-              ? '准备条件已满足；手机操作通道尚需确认'
-              : 'Preparation conditions are satisfied; verify the phone control channel next'
+              ? '结论：尚不能开始手机任务。电脑侧准备已完成，手机操作通道尚需确认'
+              : 'Conclusion: phone tasks cannot start yet. Computer preparation is complete; verify the phone control channel'
             : chinese
-              ? '还需完成准备'
-              : 'Preparation needs attention';
+              ? '结论：尚不能开始手机任务，还需完成以下准备'
+              : 'Conclusion: phone tasks cannot start; preparation still needs attention';
     const next = snapshot.recommendedAction
       ? setupMessage(locale, snapshot.recommendedAction.labelKey)
       : snapshot.canContinue

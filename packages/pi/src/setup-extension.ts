@@ -5,9 +5,9 @@ import type {
   InlineExtension,
 } from '@earendil-works/pi-coding-agent';
 import type { MaatApi } from '@houlianpi/maat-core';
-import { maatStatusLines } from './status.ts';
-import { setupAgentContext, setupDoctor, setupPanel } from './setup-ui.ts';
+import { setupAgentContext, setupPanel } from './setup-ui.ts';
 import { resolveSetupLocale, setupMessage } from './setup-i18n.ts';
+import { MAAT_SETUP_SKILL_PATH } from './system-prompt.ts';
 
 function setupTarget(args: string, maat: MaatApi) {
   const tokens = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -16,28 +16,12 @@ function setupTarget(args: string, maat: MaatApi) {
   );
   const language = tokens.filter((token) => token !== requested).join(' ');
   if (language && !/^(zh|zh-cn|中文|en|en-us|english)$/i.test(language))
-    throw new Error(
-      'Use /maat-setup [android|macos] [zh-CN|en] or /maat-doctor [android|macos] [zh-CN|en].',
-    );
+    throw new Error('Use /maat-setup [android|macos] [zh-CN|en].');
   const current = maat.platforms.current().id;
   return { platform: requested ?? (current === 'web' ? 'android' : current), language };
 }
 
 export function registerMaatSetupCommands(pi: ExtensionAPI, maat: MaatApi): void {
-  pi.registerCommand('maat-status', {
-    description: 'Show Maat capabilities and the recommended next action',
-    handler: async (args, ctx) => {
-      const locale = resolveSetupLocale(args, ctx);
-      const status = maat.platforms.status();
-      const lines = maatStatusLines(status);
-      if (status.id === 'macos' || status.id === 'android') {
-        const snapshot = await maat.setup.check({ platform: status.id, signal: ctx.signal });
-        lines.push('', ...setupPanel(snapshot, locale));
-      }
-      ctx.ui.notify(lines.join('\n'), 'info');
-    },
-  });
-
   pi.registerCommand('maat-setup', {
     description: 'Prepare Android through the host Agent, or guide macOS setup',
     handler: async (args, ctx) => {
@@ -62,8 +46,8 @@ export function registerMaatSetupCommands(pi: ExtensionAPI, maat: MaatApi): void
             customType: 'maat-android-setup',
             content: [
               locale === 'zh-CN'
-                ? '用户请求准备当前 Android 手机。请读取 maat-setup Skill，在授权范围内使用宿主工具处理必要准备；需要本人操作时明确等待，完成后调用 check_device_ready 并继续原任务。'
-                : 'The user requested preparation of the current Android phone. Read the maat-setup Skill, use authorized host tools for necessary preparation, wait for user-only actions, then call check_device_ready and continue the original task.',
+                ? `用户请求准备当前 Android 手机。请用宿主文件工具读取 Maat 内部准备工作流 ${MAAT_SETUP_SKILL_PATH}，在授权范围内使用宿主工具处理必要准备；需要本人操作时明确等待，完成后调用 check_device_ready 并继续原任务。`
+                : `The user requested preparation of the current Android phone. Read Maat's internal setup workflow at ${MAAT_SETUP_SKILL_PATH} with the host file tool, use authorized host tools for necessary preparation, wait for user-only actions, then call check_device_ready and continue the original task.`,
               ...setupPanel(snapshot, locale),
               setupAgentContext(snapshot, locale),
             ].join('\n'),
@@ -116,20 +100,6 @@ export function registerMaatSetupCommands(pi: ExtensionAPI, maat: MaatApi): void
           'info',
         );
       }
-    },
-  });
-
-  pi.registerCommand('maat-doctor', {
-    description: 'Show redacted technical Maat setup diagnostics',
-    handler: async (args, ctx) => {
-      const { platform, language } = setupTarget(args, maat);
-      const locale = resolveSetupLocale(language, ctx);
-      if (platform !== 'android' && platform !== 'macos') {
-        ctx.ui.notify(`No preparation diagnostics are available for ${platform}.`, 'warning');
-        return;
-      }
-      const snapshot = await maat.setup.check({ platform, signal: ctx.signal });
-      ctx.ui.notify(setupDoctor(snapshot, locale), snapshot.canContinue ? 'info' : 'warning');
     },
   });
 }

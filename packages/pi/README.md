@@ -4,9 +4,19 @@ Pi coding-agent extension for Maat. Install with `pi install npm:@houlianpi/maat
 
 ## Android setup and Mobile Use
 
-The package ships the `maat-setup` Skill alongside its extension. Ask the host
-Agent to prepare an Android phone, or select Android and run `/maat-setup`.
-`/maat-doctor` and `check_platform_setup` diagnose preparation; `check_device_ready`
+The package ships internal `maat-setup` and `mobile-use` workflows alongside its
+extension without adding `skill:*` commands. Ask the host Agent to prepare an
+Android phone, or select Android and run `/maat-setup`, the only Maat command.
+Setup reports distinguish computer-side preparation from a verified phone
+channel. Multi-step phone work uses bounded scrolling and treats each `exe_js`
+call as isolated.
+Execution failures return a model-visible category, phase, Session state and
+action certainty. Compile failures can be corrected; runtime or timeout failures
+require a fresh read of current UI state and are never replayed automatically.
+Maat tool failures remain error tool results inside the Pi Agent loop; they do
+not terminate the host Pi Session, so the model can recover in the same turn or
+the user can continue with a later message.
+`check_platform_setup` and `get_setup_diagnostics` diagnose preparation; `check_device_ready`
 checks the actual phone channel and returns observations.
 
 The host Agent handles authorized installation, configuration and startup with

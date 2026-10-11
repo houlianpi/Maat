@@ -63,8 +63,8 @@ export function createSetupTools(maat: MaatApi): ToolDefinition<any, any, any>[]
               type: 'text',
               text:
                 locale === 'zh-CN'
-                  ? 'Android 操作通道已确认。请复用下面的当前界面观察继续任务；这不代表业务任务已完成。'
-                  : 'The Android control channel is ready. Reuse the current observation below; this does not prove the business task completed.',
+                  ? '结论：可以开始手机任务。Android 操作通道已确认，请复用下面的当前界面观察继续；这不代表业务任务已完成。'
+                  : 'Conclusion: phone tasks can start. The Android control channel is ready; reuse the current observation below. This does not prove the business task completed.',
             },
             ...observations,
           ],

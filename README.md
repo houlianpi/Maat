@@ -27,16 +27,14 @@ pi
 ```
 
 Ask Pi to prepare an Android phone and read its current UI. The package includes the
-`maat-setup` Skill. The host Agent uses its existing tools and permissions to handle
+`maat-setup` and `mobile-use` Skills. The host Agent uses its existing tools and permissions to handle
 necessary preparation; Maat does not create another installer Agent or service manager.
 This preparation workflow is local: Pi, Appium and the phone's ADB connection
 run on the same computer. Remote preparation is not part of the current scope.
 
-After selecting Android:
-
-- `/maat-setup` hands preparation to the host Agent.
-- `/maat-doctor` shows redacted environment diagnostics.
-- `/maat-status` shows the current platform and preparation state.
+`/maat-setup` is the only Maat command. It hands preparation to the host Agent.
+Status remains visible in the TUI, while diagnostics and packaged workflows are
+internal Agent capabilities rather than additional user commands.
 
 To use the standalone Pi-backed TUI:
 
@@ -62,6 +60,9 @@ maat agent --browser chromium --headless "Read the page and describe what is vis
    Session creation may deploy automation helpers or trigger system prompts.
 4. Use `exe_js` for UI execution. Its only input is `code`; observations are not
    recorded as formal steps. Reuse returned observations for the next action.
+   Failures identify their category, phase, Session state and whether an action
+   may already have executed; uncertain failures require a current-state read,
+   never automatic replay.
 5. If phone authorization or authentication requires the user, pause and wait for
    actual completion. Read the current UI before continuing the original task.
 

@@ -73,6 +73,7 @@ test('Android setup and diagnostics remain on Android and propagate cancellation
       .map((item) => item.text)
       .join('\n');
     assert.match(text, /Maat · Android/);
+    assert.match(text, /尚不能开始手机任务/);
     assert.match(text, /APPIUM_SERVER_UNAVAILABLE/);
     assert.match(text, /"status":"action-required"/);
     assert.doesNotMatch(text, /macOS|开始测试/);
@@ -131,6 +132,11 @@ test('Android readiness forwards observations without formal persistence and exp
   const result = await tool.execute('ready', { screenshot: false }, signal, undefined, ctx);
   assert.equal(requestedScreenshot, false);
   assert.ok(result.content.some((item) => item.type === 'text' && item.text === '<hierarchy />'));
+  assert.ok(
+    result.content.some(
+      (item) => item.type === 'text' && item.text.includes('可以开始手机任务'),
+    ),
+  );
   assert.equal('cases' in maat, false);
   assert.equal('evidence' in maat, false);
   const imageResult = await tool.execute('image', { screenshot: true }, signal, undefined, ctx);
@@ -164,14 +170,13 @@ test('locked phone readiness is a visible failure with a user-only next step', a
   );
 });
 
-test('Android setup command hands preparation to the host, while doctor stays diagnostic', async () => {
+test('Android setup is the only user command and hands preparation to the host', async () => {
   const { maat, checks, ctx } = fixture();
   const commands = new Map<
     string,
     { handler: (args: string, context: ExtensionContext) => unknown }
   >();
   const messages: Array<{ content: string; triggerTurn: boolean }> = [];
-  const notifications: string[] = [];
   const pi = {
     registerCommand(
       name: string,
@@ -183,18 +188,15 @@ test('Android setup command hands preparation to the host, while doctor stays di
       messages.push({ content: message.content, triggerTurn: options.triggerTurn });
     },
   } as unknown as ExtensionAPI;
-  ctx.ui.notify = (message) => notifications.push(message);
   registerMaatSetupCommands(pi, maat);
+  assert.deepEqual([...commands.keys()], ['maat-setup']);
   await commands.get('maat-setup')?.handler('', ctx);
   assert.equal(checks.at(-1)?.platform, 'android');
   assert.equal(messages.length, 1);
   assert.equal(messages[0]!.triggerTurn, true);
-  assert.match(messages[0]!.content, /maat-setup Skill/);
+  assert.match(messages[0]!.content, /内部准备工作流/);
+  assert.match(messages[0]!.content, /maat-setup\/SKILL\.md/);
   assert.match(messages[0]!.content, /继续原任务/);
-  await commands.get('maat-doctor')?.handler('', ctx);
-  assert.equal(checks.at(-1)?.platform, 'android');
-  assert.equal(messages.length, 1);
-  assert.match(notifications.at(-1)!, /诊断不会创建手机 Session/);
 });
 
 test('the host tool can explicitly clear legacy App routing for readiness recovery', async () => {

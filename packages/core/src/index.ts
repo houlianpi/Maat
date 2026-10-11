@@ -1,7 +1,16 @@
 export { createMaat, type CreateMaatOptions } from './api/create-maat.ts';
 export { MaatApi } from './api/maat-api.ts';
 export type { JavaScriptObservation } from './core/exploration/protocol.ts';
-export type { JavaScriptSession } from './core/exploration/runtime.ts';
+export {
+  ExplorationExecutionError,
+  WorkerTerminatedError,
+  type JavaScriptSession,
+} from './core/exploration/runtime.ts';
+export type {
+  ExecutionErrorCategory,
+  ExecutionErrorPhase,
+  WorkerError,
+} from './core/exploration/protocol.ts';
 export type { PlatformStatus } from './core/platforms/contracts.ts';
 export {
   browserNames,

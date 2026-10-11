@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { validateToolArguments } from '@earendil-works/pi-ai';
 import { createExecJsTool } from '../packages/pi/src/tools/exec-js-tool.ts';
-import type { JavaScriptSession } from '../packages/core/src/core/exploration/runtime.ts';
+import {
+  ExplorationExecutionError,
+  WorkerTerminatedError,
+  type JavaScriptSession,
+} from '../packages/core/src/core/exploration/runtime.ts';
 
 test('exe_js returns observations and exposes only the execution input', async () => {
   const session: JavaScriptSession = {
@@ -36,7 +40,7 @@ test('exe_js returns observations and exposes only the execution input', async (
   assert.deepEqual(result.details, { observationCount: 1 });
 });
 
-test('exe_js preserves execution failure without a recorder or fallback', async () => {
+test('exe_js classifies an unknown execution failure without a success fallback', async () => {
   const primary = new Error('execution failed');
   const tool = createExecJsTool({
     close: async () => {},
@@ -52,8 +56,78 @@ test('exe_js preserves execution failure without a recorder or fallback', async 
       undefined,
       {} as Parameters<typeof tool.execute>[4],
     ),
-    (error: unknown) => error === primary,
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal(error.cause, primary);
+      assert.match(error.message, /category: unknown/);
+      assert.match(error.message, /actionState: uncertain/);
+      assert.match(error.message, /Do not replay this code/);
+      return true;
+    },
   );
+});
+
+test('exe_js gives the model safe recovery for compile and runtime failures', async () => {
+  const failures = [
+    {
+      error: new ExplorationExecutionError('Unexpected token', {
+        name: 'SyntaxError',
+        message: 'Unexpected token',
+        category: 'syntax-error',
+        phase: 'compile',
+        actionState: 'not-started',
+      }),
+      expected: [/category: syntax-error/, /No UI action ran/, /session: reusable/],
+    },
+    {
+      error: new ExplorationExecutionError('setTimeout is not defined', {
+        name: 'ReferenceError',
+        message: 'setTimeout is not defined',
+        category: 'reference-error',
+        phase: 'execute',
+        actionState: 'uncertain',
+      }),
+      expected: [/category: reference-error/, /driver\.pause/, /Do not replay/],
+    },
+    {
+      error: new ExplorationExecutionError('globalThis.slowScroll is not a function', {
+        name: 'TypeError',
+        message: 'globalThis.slowScroll is not a function',
+        category: 'type-error',
+        phase: 'execute',
+        actionState: 'uncertain',
+      }),
+      expected: [/category: type-error/, /earlier exe_js call do not persist/, /read-only exe_js/],
+    },
+    {
+      error: new WorkerTerminatedError('Exploration execution exceeded 60000ms.'),
+      expected: [/category: execution-terminated/, /session: closed/, /actionState: uncertain/],
+    },
+  ];
+
+  for (const failure of failures) {
+    const tool = createExecJsTool({
+      close: async () => {},
+      execute: async () => {
+        throw failure.error;
+      },
+    });
+    await assert.rejects(
+      tool.execute(
+        'classified',
+        { code: 'broken()' },
+        undefined,
+        undefined,
+        {} as Parameters<typeof tool.execute>[4],
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal(error.cause, failure.error);
+        for (const expected of failure.expected) assert.match(error.message, expected);
+        return true;
+      },
+    );
+  }
 });
 
 test('supplemental diagnosis retains the primary error and cancellation signal', async () => {

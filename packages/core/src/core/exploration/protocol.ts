@@ -2,6 +2,25 @@ export type JavaScriptObservation =
   | { type: 'text'; text: string }
   | { type: 'image'; data: string; mimeType: string };
 
+export type ExecutionErrorCategory =
+  | 'invalid-input'
+  | 'syntax-error'
+  | 'reference-error'
+  | 'type-error'
+  | 'assertion-error'
+  | 'output-limit'
+  | 'runtime-error';
+
+export type ExecutionErrorPhase = 'validate' | 'compile' | 'execute';
+
+export type WorkerError = {
+  name: string;
+  message: string;
+  category: ExecutionErrorCategory;
+  phase: ExecutionErrorPhase;
+  actionState: 'not-started' | 'uncertain';
+};
+
 export type WorkerOperation =
   | {
       operation: 'initialize';
@@ -22,10 +41,48 @@ export type WorkerOperation =
 
 export type WorkerRequest = WorkerOperation & { id: number };
 
-export type WorkerResponse = { id: number; result: unknown } | { id: number; error: string };
+export type WorkerResponse = { id: number; result: unknown } | { id: number; error: WorkerError };
 
 export const maxCodeBytes = 64 * 1024;
 export const maxOutputBytes = 12 * 1024 * 1024;
+
+const executionErrorCategories: ExecutionErrorCategory[] = [
+  'invalid-input',
+  'syntax-error',
+  'reference-error',
+  'type-error',
+  'assertion-error',
+  'output-limit',
+  'runtime-error',
+];
+const executionErrorPhases: ExecutionErrorPhase[] = ['validate', 'compile', 'execute'];
+
+function isExecutionErrorCategory(value: unknown): value is ExecutionErrorCategory {
+  return executionErrorCategories.some((category) => category === value);
+}
+
+function isExecutionErrorPhase(value: unknown): value is ExecutionErrorPhase {
+  return executionErrorPhases.some((phase) => phase === value);
+}
+
+export function parseWorkerError(value: unknown): WorkerError | undefined {
+  if (
+    !isRecord(value) ||
+    typeof value.name !== 'string' ||
+    typeof value.message !== 'string' ||
+    !isExecutionErrorCategory(value.category) ||
+    !isExecutionErrorPhase(value.phase) ||
+    (value.actionState !== 'not-started' && value.actionState !== 'uncertain')
+  )
+    return;
+  return {
+    name: value.name,
+    message: value.message,
+    category: value.category,
+    phase: value.phase,
+    actionState: value.actionState,
+  };
+}
 
 export function isCanonicalBase64(value: string): boolean {
   if (!value || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return false;

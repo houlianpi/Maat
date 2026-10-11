@@ -44,7 +44,13 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         { name: 'evidence', description: 'Capture a screenshot UI observation with screenshot()' },
       ],
       guidelines: [
+        'Each exe_js call is isolated. Variables and functions created by earlier calls do not persist.',
         'Use WebdriverIO APIs through driver.$() and driver.$$(); there are no global $ or $$.',
+        ...(this.id === 'android'
+          ? [
+              'Keep scroll code in the current exe_js call, use a bounded center-screen drag, and observe the UI after each gesture.',
+            ]
+          : []),
         ...(this.id === 'macos'
           ? [
               'Mac2 attributes include identifier, label, title and value; do not request name.',

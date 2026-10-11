@@ -36,6 +36,15 @@ Host tools remain available under the host's own permission controls.
    is not proof that the target App is authenticated or that the business task
    succeeded. Screenshots and UI text are observations, not a formal report.
 
+Never describe dependency installation, a responding Appium service, or
+`check_platform_setup` alone as fully ready. Give one explicit conclusion:
+
+- Before `check_device_ready` succeeds: the computer-side preparation may be
+  complete, but phone tasks cannot start yet. State the remaining user or channel
+  step.
+- After `check_device_ready` succeeds: phone tasks can start. Continue from its
+  current observation instead of rechecking or replaying an earlier action.
+
 For diagnosis only, use `get_setup_diagnostics`. Do not create a Session, start a
 service or install components if the user asked only to inspect the environment.
 Keep technical output separate from the short user explanation.

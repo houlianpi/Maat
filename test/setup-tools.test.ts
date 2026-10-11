@@ -110,7 +110,7 @@ test('optional capabilities and permission recheck are independent of Case state
   }
 });
 
-test('Android setup is the first-use command default and doctor remains read-only', async () => {
+test('Android setup is the first-use command default and the only user command', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'maat-setup-command-'));
   const maat = createMaat({
     workspaceRoot: directory,
@@ -156,19 +156,13 @@ test('Android setup is the first-use command default and doctor remains read-onl
   } as unknown as ExtensionContext;
   try {
     registerMaatSetupCommands(pi, maat);
-    await commands.get('maat-doctor')?.handler('', ctx);
-    assert.match(notifications.at(-1)!, /Maat · Android/);
-    assert.equal(maat.platforms.current().id, 'web');
+    assert.deepEqual([...commands.keys()], ['maat-setup']);
     await commands.get('maat-setup')?.handler('android zh-CN', ctx);
     assert.equal(maat.platforms.current().id, 'android');
     assert.match(messages[0]!, /APPIUM_SERVER_UNAVAILABLE/);
     assert.match(messages[0]!, /android-tools\.mjs/);
     await maat.platforms.select('web');
     await commands.get('maat-setup')?.handler('', ctx);
-    assert.equal(maat.platforms.current().id, 'android');
-    await commands.get('maat-doctor')?.handler('macos en', ctx);
-    assert.match(notifications.at(-1)!, /Maat · macOS/);
-    assert.doesNotMatch(notifications.join('\n'), /恢复 Case|业务断言/);
     assert.equal(maat.platforms.current().id, 'android');
   } finally {
     await maat.close();
@@ -199,7 +193,6 @@ test('setup respects an explicitly selected unsupported platform instead of chec
     await maat.platforms.select('ios');
     registerMaatSetupCommands(pi, maat);
     await commands.get('maat-setup')?.handler('', ctx);
-    await commands.get('maat-doctor')?.handler('', ctx);
     assert.equal(maat.platforms.current().id, 'ios');
     assert.match(notifications.join('\n'), /ios/);
     assert.doesNotMatch(notifications.join('\n'), /Maat · macOS/);

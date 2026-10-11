@@ -4,9 +4,11 @@ import ts from 'typescript';
 import {
   imageMimeType,
   isCanonicalBase64,
+  isRecord,
   maxCodeBytes,
   maxOutputBytes,
   type JavaScriptObservation,
+  type WorkerError,
 } from './protocol.ts';
 import type { ExplorationRuntime, ExplorationRuntimeModule } from './runtime.ts';
 
@@ -22,6 +24,43 @@ async function close() {
   }
 }
 
+function executionError(error: unknown, phase: WorkerError['phase']): WorkerError {
+  const name =
+    error instanceof Error
+      ? error.name
+      : isRecord(error) && typeof error.name === 'string'
+        ? error.name
+        : 'Error';
+  const message = (
+    error instanceof Error
+      ? error.message
+      : isRecord(error) && typeof error.message === 'string'
+        ? error.message
+        : String(error)
+  ).slice(0, 8_000);
+  const category: WorkerError['category'] =
+    phase === 'validate'
+      ? 'invalid-input'
+      : phase === 'compile' || name === 'SyntaxError'
+        ? 'syntax-error'
+        : name === 'ReferenceError'
+          ? 'reference-error'
+          : name === 'TypeError'
+            ? 'type-error'
+            : /expect\(|assert|expected|received/i.test(message)
+              ? 'assertion-error'
+              : /output exceeds/i.test(message)
+                ? 'output-limit'
+                : 'runtime-error';
+  return {
+    name,
+    message,
+    category,
+    phase,
+    actionState: phase === 'validate' || phase === 'compile' ? 'not-started' : 'uncertain',
+  };
+}
+
 process.on(
   'message',
   async (message: {
@@ -32,10 +71,14 @@ process.on(
     code?: string;
   }) => {
     if (busy) {
-      process.send?.({ id: message.id, error: 'Exploration Worker is busy.' });
+      process.send?.({
+        id: message.id,
+        error: executionError(new Error('Exploration Worker is busy.'), 'validate'),
+      });
       return;
     }
     busy = true;
+    let phase: WorkerError['phase'] = 'validate';
     try {
       if (message.operation === 'initialize') {
         const factory = (await import(message.module!)) as ExplorationRuntimeModule;
@@ -103,12 +146,26 @@ process.on(
               }),
           },
         });
-        const source = ts.transpileModule(`(async () => {\n${message.code}\n})()`, {
+        phase = 'compile';
+        const transpiled = ts.transpileModule(`(async () => {\n${message.code}\n})()`, {
           compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
-        }).outputText;
-        const value = await new vm.Script(source, { filename: 'maat-exploration.ts' }).runInContext(
-          context,
+          reportDiagnostics: true,
+        });
+        const diagnostics = (transpiled.diagnostics ?? []).filter(
+          (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
         );
+        if (diagnostics.length)
+          throw new SyntaxError(
+            diagnostics
+              .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, ' '))
+              .join('; ')
+              .slice(0, 8_000),
+          );
+        const script = new vm.Script(transpiled.outputText, {
+          filename: 'maat-exploration.ts',
+        });
+        phase = 'execute';
+        const value = await script.runInContext(context);
         if (!output.length)
           append({
             type: 'text',
@@ -122,7 +179,7 @@ process.on(
     } catch (error) {
       process.send?.({
         id: message.id,
-        error: error instanceof Error ? error.message : String(error),
+        error: executionError(error, phase),
       });
     } finally {
       busy = false;

@@ -25,8 +25,9 @@ test('Maat isolates Pi resources while copying initial model preferences', () =>
   assert.equal(settings.enableInstallTelemetry, false);
   assert.equal(resources.noExtensions, true);
   assert.equal(resources.noSkills, true);
-  assert.equal(resources.additionalSkillPaths.length, 1);
+  assert.equal(resources.additionalSkillPaths.length, 2);
   assert.match(resources.additionalSkillPaths[0]!, /skills\/maat-setup\/SKILL\.md$/);
+  assert.match(resources.additionalSkillPaths[1]!, /skills\/mobile-use\/SKILL\.md$/);
   assert.equal(resources.noContextFiles, true);
   assert.equal(resources.noPromptTemplates, true);
 });

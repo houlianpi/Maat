@@ -13,6 +13,7 @@ import { WebPlatformAdapter } from '../packages/core/src/platforms/web/web-adapt
 import { MaatApi } from '../packages/core/src/api/maat-api.ts';
 import { PlatformRegistry } from '../packages/core/src/core/platforms/registry.ts';
 import {
+  ExplorationExecutionError,
   WorkerTerminatedError,
   type JavaScriptSession,
 } from '../packages/core/src/core/exploration/runtime.ts';
@@ -81,6 +82,43 @@ test('display rejects text and non-image bytes without returning a corrupt obser
     );
     assert.deepEqual(await session.execute(`console.log('session remains usable');`), [
       { type: 'text', text: 'session remains usable' },
+    ]);
+  } finally {
+    await session.close();
+  }
+});
+
+test('worker classifies code failures and preserves uncertain UI state for observation', async () => {
+  const session = await launch();
+  try {
+    await assert.rejects(session.execute('const broken: = 1;'), (error: unknown) => {
+      assert.ok(error instanceof ExplorationExecutionError);
+      assert.equal(error.details.category, 'syntax-error');
+      assert.equal(error.details.phase, 'compile');
+      assert.equal(error.details.actionState, 'not-started');
+      return true;
+    });
+    await assert.rejects(session.execute('setTimeout(() => {}, 1);'), (error: unknown) => {
+      assert.ok(error instanceof ExplorationExecutionError);
+      assert.equal(error.details.category, 'reference-error');
+      assert.equal(error.details.actionState, 'uncertain');
+      return true;
+    });
+    await session.execute(`await page.setContent('<h1>before</h1>');`);
+    await assert.rejects(
+      session.execute(`
+        await page.locator('h1').evaluate(element => element.textContent = 'possibly changed');
+        globalThis.slowScroll();
+      `),
+      (error: unknown) => {
+        assert.ok(error instanceof ExplorationExecutionError);
+        assert.equal(error.details.category, 'type-error');
+        assert.equal(error.details.actionState, 'uncertain');
+        return true;
+      },
+    );
+    assert.deepEqual(await session.execute(`console.log(await page.locator('h1').textContent());`), [
+      { type: 'text', text: 'possibly changed' },
     ]);
   } finally {
     await session.close();
