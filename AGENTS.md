@@ -158,6 +158,18 @@ artifacts/     Generated output, never editable source
   must decide. Role-specific findings supplement this package. Lead consolidates
   it, retaining failures and separately versioned post-fix checks, and distinguishes
   review, validation and business completion.
+- **Code growth and retirement.** Before adding code, identify existing helpers
+  and consumers; each implementation task explains what is reused, changed, added
+  and eventually retired. Prefer in-place changes or a small shared extraction
+  over parallel implementations. New migration-only code records its intended
+  consumer and integration/retirement stage in the authorized Issue/PR, not a
+  second tracking system. Remove task-created experiments and redundant helpers
+  within the approved scope; do not delete old behavior merely because it looks
+  unused. Retirement evidence covers source/dynamic consumers, public exports,
+  package delivery and platform regressions. The approved design's G5/G5M, G6
+  authorization and G7 boundaries still govern legacy mobile deletion. Delivery
+  reports added/removed files and net source growth separately from tests/docs;
+  investigate duplication rather than imposing an arbitrary line-count quota.
 - **Authority and safety.** Role tools are capabilities, not device-operation
   authorization, and never override this guide's safety or human-confirmation
   boundaries. PM/Designer/Reviewer stay read/search-only; Developer uses
