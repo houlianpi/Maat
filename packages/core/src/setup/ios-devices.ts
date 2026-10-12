@@ -97,7 +97,6 @@ export async function assertIosColdReadiness(
     args: string[],
     signal?: AbortSignal,
   ) => Promise<SetupCommandResult> = defaultCommand,
-  allowWdaInitialization = false,
 ): Promise<void> {
   signal?.throwIfAborted();
   const result = await command(
@@ -141,8 +140,5 @@ export async function assertIosColdReadiness(
     );
   if (lock.passcodeRequired || !lock.unlockedSinceBoot)
     throw new Error('IOS_DEVICE_LOCKED: wake and unlock the phone yourself, then recheck.');
-  if (allowWdaInitialization) return;
-  throw new Error(
-    'IOS_DEVICE_LOCK_STATE_UNKNOWN: CoreDevice reports passcodeRequired=false and unlockedSinceBoot=true, but these do not prove the current lock or screen state. Cold WDA initialization remains blocked; its first-connection policy requires explicit user confirmation.',
-  );
+  // These are only cold lock hints. The Worker must still obtain a live WDA lock result.
 }

@@ -177,6 +177,11 @@ async function context(
     throw new Error(
       'IOS_WDA_DEVICE_REQUIRED: connect and select exactly one paired physical iPhone; no other device was substituted.',
     );
+  if (
+    input.capabilities?.['appium:udid'] !== undefined &&
+    input.capabilities['appium:udid'] !== phones[0].id
+  )
+    throw new Error('IOS_WDA_IDENTITY_CONFLICT: the selected phone changed during WDA inspection.');
   const project = await deps.project(input.signal);
   const settings = await deps.command(
     'xcodebuild',
@@ -207,6 +212,18 @@ async function context(
     };
   const caps = input.capabilities ?? {};
   const options = isRecord(caps['appium:options']) ? caps['appium:options'] : {};
+  const org = options.xcodeOrgId ?? options['appium:xcodeOrgId'] ?? caps['appium:xcodeOrgId'];
+  const requestedBundle =
+    options.updatedWDABundleId ??
+    options['appium:updatedWDABundleId'] ??
+    caps['appium:updatedWDABundleId'];
+  if (
+    (org !== undefined && org !== team) ||
+    (requestedBundle !== undefined && requestedBundle !== bundle)
+  )
+    throw new Error(
+      'IOS_WDA_IDENTITY_CONFLICT: Session hints conflict with the existing signing Team or WDA identifier.',
+    );
   const configured =
     caps['appium:derivedDataPath'] ?? options.derivedDataPath ?? options['appium:derivedDataPath'];
   if (configured !== undefined && (typeof configured !== 'string' || !path.isAbsolute(configured)))
@@ -269,6 +286,11 @@ function configuration(ctx: Context): Record<string, unknown> {
     'appium:derivedDataPath': ctx.buildRoot,
     'appium:updatedWDABundleId': ctx.bundle,
     'appium:useNewWDA': false,
+    'appium:prebuildWDA': false,
+    'appium:useSimpleBuildTest': false,
+    'appium:useXctestrunFile': false,
+    'appium:allowProvisioningUpdates': false,
+    'appium:allowProvisioningDeviceRegistration': false,
     'appium:wdaStartupRetries': 1,
   };
 }
@@ -416,6 +438,80 @@ export async function inspectIosWda(
 ): Promise<IosWdaInspection> {
   const ctx = await context(input, deps);
   return 'state' in ctx ? ctx : (ctx.inspection ?? inspect(ctx, input, deps));
+}
+
+/** Read-only cold connection checks; only the driver performs an explicitly permitted deployment. */
+export async function resolveIosWdaReuse(
+  input: IosWdaInput,
+  allowInstallation = false,
+  deps: Dependencies = defaults,
+): Promise<Record<string, unknown>> {
+  const ctx = await context(input, deps);
+  const result = 'state' in ctx ? ctx : (ctx.inspection ?? (await inspect(ctx, input, deps)));
+  if ('state' in ctx || result.state !== 'ready' || !result.capabilities)
+    throw new Error(
+      'IOS_WDA_SIGNING_REQUIRED: prepare a current device-matching WDA build with your existing Team. Signing or renewal requires explicit authorization; no Session was created.',
+    );
+  let data: unknown;
+  try {
+    data = JSON.parse(
+      await deps.command(
+        'xcrun',
+        [
+          'devicectl',
+          'device',
+          'info',
+          'apps',
+          '--device',
+          ctx.phone.id,
+          '--quiet',
+          '--timeout',
+          '5',
+          '--json-output',
+          '-',
+        ],
+        { timeout: 10_000, signal: input.signal },
+      ),
+    );
+  } catch (error) {
+    input.signal?.throwIfAborted();
+    throw new Error(
+      'IOS_WDA_INSPECTION_FAILED: installed control-component state could not be read; no installation or Session was started.',
+      { cause: error },
+    );
+  }
+  if (!isRecord(data) || !isRecord(data.result) || !Array.isArray(data.result.apps))
+    throw new Error(
+      'IOS_WDA_INSPECTION_FAILED: CoreDevice returned an invalid installed-app list.',
+    );
+  const identifiers = data.result.apps.map((app: unknown) => {
+    if (
+      !isRecord(app) ||
+      typeof app.bundleIdentifier !== 'string' ||
+      !app.bundleIdentifier.trim() ||
+      typeof app.name !== 'string' ||
+      !app.name.trim()
+    )
+      throw new Error('IOS_WDA_INSPECTION_FAILED: CoreDevice returned invalid App metadata.');
+    return { id: app.bundleIdentifier, name: app.name };
+  });
+  const bundleId = `${ctx.bundle}.xctrunner`;
+  if (
+    identifiers.some(
+      (app) =>
+        app.id !== bundleId &&
+        (/WebDriverAgentRunner/i.test(app.name) || app.id.endsWith('.xctrunner')),
+    )
+  )
+    throw new Error(
+      'IOS_WDA_CONFIGURATION_CONFLICT: another test Runner is installed. Startup cleanup cannot be safely scoped; choose a safe configuration explicitly. No App was removed.',
+    );
+  if (!identifiers.some((app) => app.id === bundleId) && !allowInstallation)
+    throw new Error(
+      'IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED: the selected iPhone does not have this control component. Explain the first installation and obtain user authorization before allowing it; no Session was created.',
+    );
+  input.signal?.throwIfAborted();
+  return result.capabilities;
 }
 
 export async function prepareIosWda(

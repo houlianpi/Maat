@@ -8,6 +8,7 @@ import {
   inspectIosWda,
   prepareIosWda,
   runIosWdaCommand,
+  resolveIosWdaReuse,
 } from '../packages/core/src/setup/ios-wda.ts';
 
 const certificate = new X509Certificate(`-----BEGIN CERTIFICATE-----
@@ -54,6 +55,10 @@ async function fixture() {
     mutateProject: false,
     cachedExpires: '',
     profileIdentifier: 'LEGACY_PREFIX.com.example.wda.xctrunner',
+    installed: true,
+    installationReadFailed: false,
+    otherRunner: false,
+    emptyMetadata: false,
   };
   const deps: NonNullable<Parameters<typeof inspectIosWda>[1]> = {
     hostPlatform: 'darwin',
@@ -73,6 +78,29 @@ async function fixture() {
     command: async (file, args, options) => {
       options.signal?.throwIfAborted();
       calls.push([file, ...args]);
+      if (file === 'xcrun') {
+        if (flags.installationReadFailed)
+          throw new Error('PRIVATE_PHONE installed inspection failed');
+        assert.equal(args[args.indexOf('--device') + 1], 'PRIVATE_PHONE');
+        return JSON.stringify({
+          result: {
+            apps: [
+              ...(flags.installed
+                ? [
+                    {
+                      name: 'WebDriverAgentRunner-Runner',
+                      bundleIdentifier: `${flags.bundle}.xctrunner`,
+                    },
+                  ]
+                : []),
+              ...(flags.otherRunner
+                ? [{ name: 'Other Runner', bundleIdentifier: 'com.other.xctrunner' }]
+                : []),
+              ...(flags.emptyMetadata ? [{ name: '', bundleIdentifier: '' }] : []),
+            ],
+          },
+        });
+      }
       if (file === 'xcodebuild' && args.includes('-showBuildSettings'))
         return `Build settings for action build and target WebDriverAgentRunner:\n DEVELOPMENT_TEAM = ${flags.team}\n PRODUCT_BUNDLE_IDENTIFIER = ${flags.bundle}\n BUILD_DIR = ${path.join(build, 'Build', 'Products')}\n`;
       if (file === 'plutil')
@@ -151,6 +179,70 @@ test('WDA inspection reuses paid-year and free-week profiles without assuming va
     assert.equal(expired.profile?.expired, true);
     assert.equal(expired.certificate?.expired, false);
     assert.equal(expired.capabilities, undefined);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('normal WDA reuse verifies phone installation without signing; first installation requires permission', async () => {
+  const f = await fixture();
+  try {
+    const caps = await resolveIosWdaReuse(f.input, false, f.deps);
+    assert.equal(caps['appium:usePrebuiltWDA'], true);
+    for (const key of [
+      'prebuildWDA',
+      'useSimpleBuildTest',
+      'useXctestrunFile',
+      'allowProvisioningUpdates',
+      'allowProvisioningDeviceRegistration',
+    ])
+      assert.equal(caps[`appium:${key}`], false);
+    assert.equal(
+      f.calls.some(
+        (args) =>
+          args.includes('build-for-testing') || args.includes('install') || args.includes('launch'),
+      ),
+      false,
+    );
+    f.flags.installed = false;
+    await assert.rejects(
+      resolveIosWdaReuse(f.input, false, f.deps),
+      /INSTALLATION_AUTHORIZATION_REQUIRED/,
+    );
+    assert.equal((await resolveIosWdaReuse(f.input, true, f.deps))['appium:usePrebuiltWDA'], true);
+    f.flags.expires = '2026-12-31T00:00:00Z';
+    await assert.rejects(resolveIosWdaReuse(f.input, true, f.deps), /SIGNING_REQUIRED/);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test('WDA reuse refuses unknown installation, other runners and conflicting identity before startup', async () => {
+  const f = await fixture();
+  try {
+    f.flags.installationReadFailed = true;
+    await assert.rejects(resolveIosWdaReuse(f.input, false, f.deps), (error) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /IOS_WDA_INSPECTION_FAILED/);
+      assert.doesNotMatch(error.message, /PRIVATE_PHONE/);
+      return true;
+    });
+    f.flags.installationReadFailed = false;
+    f.flags.emptyMetadata = true;
+    await assert.rejects(resolveIosWdaReuse(f.input, true, f.deps), /INSPECTION_FAILED/);
+    f.flags.emptyMetadata = false;
+    f.flags.otherRunner = true;
+    await assert.rejects(resolveIosWdaReuse(f.input, true, f.deps), /CONFIGURATION_CONFLICT/);
+    f.flags.otherRunner = false;
+    for (const capabilities of [
+      { ...f.input.capabilities, 'appium:udid': 'OTHER_PHONE' },
+      { ...f.input.capabilities, 'appium:xcodeOrgId': 'OTHER_TEAM' },
+      { ...f.input.capabilities, 'appium:options': { updatedWDABundleId: 'com.other.wda' } },
+    ])
+      await assert.rejects(
+        resolveIosWdaReuse({ ...f.input, capabilities }, false, f.deps),
+        /IDENTITY_CONFLICT/,
+      );
   } finally {
     await rm(f.root, { recursive: true, force: true });
   }

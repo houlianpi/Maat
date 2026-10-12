@@ -31,11 +31,11 @@ export interface PlatformAdapter {
   configureSession?(setup: SessionSetup): Promise<void>;
   inspectSetup?(request: SetupInspection): Promise<unknown>;
   execute(code: string, signal?: AbortSignal): Promise<JavaScriptObservation[]>;
-  /** Phone readiness: initialization authorization is transient, never an unlocked proof. */
+  /** Phone readiness: first-installation permission is transient, never an unlocked proof. */
   executeReadiness?(
     code: string,
     signal?: AbortSignal,
-    options?: { allowWdaInitialization?: boolean },
+    options?: { allowWdaInitialization?: boolean; allowWdaInstallation?: boolean },
   ): Promise<JavaScriptObservation[]>;
   status(): PlatformStatus;
   close(): Promise<void>;

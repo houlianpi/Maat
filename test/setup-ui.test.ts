@@ -5,6 +5,56 @@ import { setupAgentContext, setupDoctor, setupPanel } from '../packages/pi/src/s
 import { resolveSetupLocale } from '../packages/pi/src/setup-i18n.ts';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 
+test('iOS state facts replace cold authorization with live readiness and separate installation grants in both languages', () => {
+  const snapshot = aggregateSetup({
+    platform: 'ios',
+    capabilities: [
+      {
+        id: 'iosDevice',
+        required: true,
+        status: 'ready',
+        messageKey: 'capability.iosDevice.ready',
+      },
+    ],
+    technicalDetails: { wda: { state: 'valid' } },
+  });
+  for (const locale of ['en', 'zh-CN'] as const) {
+    const content = setupAgentContext(snapshot, locale);
+    const facts = JSON.parse(content.split('Maat setup facts:\n')[1]!);
+    assert.deepEqual(facts.wda, { state: 'valid' });
+    assert.equal(facts.preparationOnly, true);
+    assert.match(facts.coldReadiness, /直接 check_device_ready|call check_device_ready.*directly/);
+    assert.match(facts.coldReadiness, /passcodeRequired:false\/unlockedSinceBoot:true/);
+    assert.match(
+      facts.coldReadiness,
+      /仅明确获准后内部传|only after explicit approval internally pass/,
+    );
+    assert.match(
+      facts.coldReadiness,
+      /首次安装、签名和重启仍独立授权|first installation, signing and restart still need separate grants/,
+    );
+    assert.match(
+      facts.preparationGuidance,
+      /valid local build is not proof of WDA installed on the phone/,
+    );
+    assert.match(facts.configurationGuidance, /IOS_WDA_CONFIGURATION_CONFLICT/);
+    assert.match(facts.configurationGuidance, /IOS_READINESS_UNSUPPORTED/);
+    assert.match(facts.configurationGuidance, /autoAcceptAlerts\/autoDismissAlerts/);
+    assert.match(
+      facts.configurationGuidance,
+      /不自动改配置、重装、改 Team|do not automatically change configuration, reinstall, change Team/,
+    );
+    assert.doesNotMatch(
+      content,
+      /allowWdaInitialization|blocks cold Session initialization by default/,
+    );
+    assert.deepEqual(facts.nextStep, {
+      tool: 'check_device_ready',
+      instruction: facts.nextStep.instruction,
+    });
+  }
+});
+
 test('setup context preserves Android SDK/ADB and mobile driver install commands', () => {
   for (const [platform, id, labelKey, expected] of [
     ['android', 'install-adb', 'action.installAdb', /android-tools\.mjs.*prepare/],

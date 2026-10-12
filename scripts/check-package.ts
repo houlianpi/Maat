@@ -193,16 +193,20 @@ try {
         throw new Error('Installed Skill path points outside the package');
       const tools = []; const commands = []; const handlers = new Map();
       const definitions = new Map();
-      let mobileEnabled = false;
+      const mobileEnabled = true;
+      let rawEnabled = false;
       const pi = {
         registerFlag(name, options) {
-          if (name !== 'maat-mobile-ui' || options.description !== 'Compact Maat tool cards and concise status' ||
-              options.type !== 'boolean' || options.default !== false)
+          if (!['maat-mobile-ui', 'maat-raw-ui'].includes(name) ||
+              options.type !== 'boolean' ||
+              options.default !== (name === 'maat-mobile-ui') ||
+              typeof options.description !== 'string' || !options.description)
             throw new Error('Installed compact UI flag contract is incorrect');
         },
         getFlag(name) {
-          if (name !== 'maat-mobile-ui') throw new Error('Unexpected flag lookup: ' + name);
-          return mobileEnabled;
+          if (name === 'maat-raw-ui') return rawEnabled;
+          if (name === 'maat-mobile-ui') return mobileEnabled;
+          throw new Error('Unexpected flag lookup: ' + name);
         },
         registerMessageRenderer() {},
         registerTool(tool) { tools.push(tool.name); definitions.set(tool.name, tool); },
@@ -233,7 +237,6 @@ try {
         throw new Error('Installed extension should register only maat-setup');
       if (definitions.get('exe_js').renderCall)
         throw new Error('Installed compact UI must remain opt-in');
-      mobileEnabled = true;
       const mobileContext = { mode: 'print', sessionManager: {
         getEntries() { return [{ type: 'message', message: { role: 'user', content: '请检查手机' } }]; }
       } };
@@ -260,6 +263,16 @@ try {
       card.setExpanded(true);
       if (!card.render(120).join('\\n').includes('codeContext'))
         throw new Error('Installed expanded renderer lost model facts');
+      await emit('session_shutdown');
+      handlers.clear();
+      definitions.clear();
+      tools.length = 0;
+      commands.length = 0;
+      rawEnabled = true;
+      extension(pi);
+      await emit('session_start', { reason: 'startup' }, mobileContext);
+      if (definitions.get('exe_js').renderCall)
+        throw new Error('Installed raw UI opt-out did not restore plain tool rendering');
       await emit('session_shutdown');
     `;
     execFileSync(

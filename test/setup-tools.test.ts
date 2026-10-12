@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { validateToolArguments } from '@earendil-works/pi-ai';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { createMaat } from '../packages/core/src/api/create-maat.ts';
 import { aggregateSetup } from '../packages/core/src/setup-assistant/model.ts';
@@ -311,7 +312,7 @@ test('iOS setup command and later retry/diagnostics remain iOS and read-only', a
   }
 });
 
-test('iOS readiness forwards transient WDA authorization and returns model-visible proof', async () => {
+test('iOS readiness schema removes initialization gate and only forwards explicit first-install grant', async () => {
   const maat = createMaat();
   await maat.platforms.select('ios');
   const calls: unknown[] = [];
@@ -338,49 +339,114 @@ test('iOS readiness forwards transient WDA authorization and returns model-visib
   const tool = createSetupTools(maat).find((item) => item.name === 'check_device_ready')!;
   const signal = new AbortController().signal;
   try {
-    const result = await tool.execute(
-      'ready',
-      { screenshot: false, allowWdaInitialization: true },
-      signal,
-      undefined,
-      context,
+    assert.deepEqual(Object.keys(tool.parameters.properties), [
+      'screenshot',
+      'allowWdaInstallation',
+    ]);
+    assert.equal(tool.parameters.required?.length ?? 0, 0);
+    assert.equal(tool.parameters.properties.allowWdaInstallation.type, 'boolean');
+    const schemaText = JSON.stringify(tool.parameters);
+    assert.match(schemaText, /explicitly authorizes first installation/);
+    assert.match(schemaText, /Never infer|Not permission for signing changes, restart or unlock/);
+    assert.doesNotMatch(schemaText + tool.description, /allowWdaInitialization/);
+    const call = { type: 'toolCall' as const, id: 'ready', name: tool.name, arguments: {} };
+    assert.deepEqual(validateToolArguments(tool, call), {});
+    assert.throws(() =>
+      validateToolArguments(tool, { ...call, arguments: { allowWdaInitialization: false } }),
     );
-    assert.deepEqual(calls[0], { screenshot: false, allowWdaInitialization: true, signal });
+    assert.throws(() =>
+      validateToolArguments(tool, {
+        ...call,
+        arguments: { allowWdaInstallation: { approve: true } },
+      }),
+    );
+    const result = await tool.execute('ready', { screenshot: false }, signal, undefined, context);
+    assert.deepEqual(calls[0], { screenshot: false, allowWdaInstallation: undefined, signal });
     assert.match(resultText(result), /iOS|phoneUnlocked|source|viewport/);
     assert.equal(result.details.platform, 'ios');
     await tool.execute('next', {}, undefined, undefined, context);
     assert.deepEqual(calls[1], {
       screenshot: undefined,
-      allowWdaInitialization: undefined,
+      allowWdaInstallation: undefined,
       signal: undefined,
     });
+    await tool.execute('grant', { allowWdaInstallation: true }, signal, undefined, context);
+    assert.deepEqual(calls[2], { screenshot: undefined, allowWdaInstallation: true, signal });
+    await tool.execute('deny', { allowWdaInstallation: false }, signal, undefined, context);
+    assert.deepEqual(calls[3], { screenshot: undefined, allowWdaInstallation: false, signal });
+    // Even a stale direct caller cannot reintroduce the model initialization opt-out gate.
+    await tool.execute('legacy', { allowWdaInitialization: false }, signal, undefined, context);
+    assert.deepEqual(calls[4], { screenshot: undefined, allowWdaInstallation: undefined, signal });
     assert.equal(maat.platforms.status().session, 'idle');
   } finally {
     await maat.close();
   }
 });
 
-test('iOS readiness errors preserve causes and distinguish lock uncertainty from WDA security rejection', async () => {
+test('iOS readiness errors preserve original diagnostics, fail once and guide English/Chinese without initialization gate', async () => {
   const maat = createMaat();
   await maat.platforms.select('ios');
   const tool = createSetupTools(maat).find((item) => item.name === 'check_device_ready')!;
   try {
     for (const [code, expected] of [
-      ['IOS_DEVICE_LOCKED', /本人点亮并解锁/],
-      ['IOS_DEVICE_LOCK_STATE_UNKNOWN', /无法证明|allowWdaInitialization/],
-      ['IOS_WDA_SECURITY_REJECTED', /若已信任或没有入口|有效期/],
+      ['IOS_DEVICE_LOCKED', /本人点亮并解锁|Wake and unlock it yourself/],
+      ['IOS_DEVICE_LOCK_STATE_UNKNOWN', /live WDA.*未能返回|live WDA did not return/],
+      ['IOS_WDA_SECURITY_REJECTED', /若已信任或没有入口|if already trusted or no entry/],
+      [
+        'IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED',
+        /本人明确授权首次安装|explicit user approval of first installation/,
+      ],
+      ['IOS_WDA_SIGNING_REQUIRED', /不能自动续签|do not renew automatically/],
+      [
+        'IOS_WDA_INSPECTION_FAILED',
+        /本机有效构建不等于手机已安装|valid local build proves neither phone installation/,
+      ],
+      ['IOS_CONNECTION_INITIALIZATION_DISABLED', /existingSession/],
+      [
+        'IOS_WDA_CONFIGURATION_CONFLICT',
+        /仅报告明确配置冲突|Report the explicit configuration conflict/,
+      ],
+      ['IOS_READINESS_UNSUPPORTED', /不符合安全 WDA 复用路径|incompatible with safe WDA reuse/],
     ] as const) {
-      const original = new Error(code);
-      maat.setup.ready = async () => {
-        throw original;
-      };
-      await assert.rejects(tool.execute('ready', {}, undefined, undefined, context), (error) => {
-        assert.ok(error instanceof Error);
-        assert.equal(error.cause, original);
-        assert.match(error.message, expected);
-        assert.doesNotMatch(error.message, /Android|SDK|一定未信任/);
-        return true;
-      });
+      for (const language of ['请继续手机任务', 'Continue my phone task']) {
+        const ctx = {
+          ...context,
+          sessionManager: {
+            getEntries: () => [{ type: 'message', message: { role: 'user', content: language } }],
+          },
+        } as unknown as ExtensionContext;
+        const original = new Error(`${code}: synthetic primary inspection/lock failure`);
+        let calls = 0;
+        maat.setup.ready = async () => {
+          calls += 1;
+          throw original;
+        };
+        await assert.rejects(
+          tool.execute('ready', { screenshot: true }, undefined, undefined, ctx),
+          (error) => {
+            assert.ok(error instanceof Error);
+            assert.equal(error.cause, original);
+            assert.ok(error.message.startsWith(`${original.message}\n`));
+            assert.match(error.message, expected);
+            assert.doesNotMatch(error.message, /allowWdaInitialization|Android|SDK|一定未信任/);
+            if (code === 'IOS_DEVICE_LOCK_STATE_UNKNOWN') {
+              assert.match(
+                error.message,
+                /不读取 source、截图或执行业务 UI|do not read source, take screenshots or perform business UI/,
+              );
+              assert.match(error.message, /不重放|do not replay/);
+            }
+            if (code === 'IOS_WDA_CONFIGURATION_CONFLICT' || code === 'IOS_READINESS_UNSUPPORTED') {
+              assert.match(
+                error.message,
+                /不自动.*重装.*改 Team|Do not automatically.*reinstall.*change Team/,
+              );
+            }
+            return true;
+          },
+        );
+        assert.equal(calls, 1); // Host guidance never retries initialization or performs UI.
+      }
     }
   } finally {
     await maat.close();

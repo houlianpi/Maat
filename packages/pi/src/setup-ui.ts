@@ -167,9 +167,15 @@ export function setupAgentContext(
           wda: facts.wda,
           setupSkill: MAAT_SETUP_SKILL_PATH,
           preparationGuidance:
-            'Use the iOS section of the setup Skill, not project source or Android SDK tools. Reuse Xcode, XCUITest, existing Appium and WDA verified against the selected physical iPhone; an open WDA port or simulator is not device proof. Do not ask for Apple credentials or silently change signing, Developer Mode, trust or device selection. WDA signing/deployment is not verified by doctor.',
+            'Use the iOS section of the setup Skill, not project source or Android SDK tools. Diagnose actual conditions and reuse Xcode, XCUITest, the exact selected Appium endpoint and device-bound WDA. A valid local build is not proof of WDA installed on the phone; an open WDA port or simulator is not device proof. Do not ask for Apple credentials or silently change signing, Developer Mode, trust or device selection. Doctor does not verify WDA signing or phone installation.',
+          configurationGuidance:
+            locale === 'zh-CN'
+              ? 'IOS_WDA_CONFIGURATION_CONFLICT 表示签名 hint 不匹配/手机有其它 testRunner，避免 Appium cleanup 删除。IOS_READINESS_UNSUPPORTED 表示 useNewWDA、autoAcceptAlerts/autoDismissAlerts、禁 prebuilt、强 preinstalled 或自定义 suffix 不符合安全复用路径。只报告明确配置问题并只读核查，不自动改配置、重装、改 Team、删除组件或改变用户服务/手机数据；首次安装授权不允许重签名，也不能绕过配置冲突。'
+              : 'IOS_WDA_CONFIGURATION_CONFLICT means signing hints mismatch/another phone testRunner, preventing Appium cleanup deletion. IOS_READINESS_UNSUPPORTED means useNewWDA, autoAcceptAlerts/autoDismissAlerts, disabled prebuilt, forced preinstalled or custom suffix is incompatible with safe reuse. Report explicit configuration problems and inspect read-only; do not automatically change configuration, reinstall, change Team, delete helpers or modify user services/phone data. First-install approval neither authorizes re-signing nor bypasses configuration conflicts.',
           coldReadiness:
-            'IOS_DEVICE_LOCK_STATE_UNKNOWN blocks cold Session initialization by default. CoreDevice passcodeRequired:false and unlockedSinceBoot:true do not prove current unlock/screen state. Only explicit user authorization for this attempt after explaining WDA effects permits check_device_ready({allowWdaInitialization:true}); it is transient, not unlock proof or signing authorization. Live WDA unlock and real UI observations are still required. IOS_WDA_SECURITY_REJECTED may involve signing, entitlements or profile trust; if developer App trust is absent or already granted, inspect signing/profile expiry, not a retry loop.',
+            locale === 'zh-CN'
+              ? '普通手机任务默认允许建立必要控制连接；已有有效构建和手机 helper 时直接 check_device_ready({screenshot:false}) 并继续原任务，不询问每个冷 Session 的初始化授权。CoreDevice passcodeRequired:false/unlockedSinceBoot:true 不是当前解锁证明；已知锁定必须拦截，连接后由 live WDA 确认布尔锁状态。IOS_DEVICE_LOCK_STATE_UNKNOWN 只代表真实锁查询失败/无布尔；可用性未确认前无 source、截图或业务 UI，不自动解锁、不重放。IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED 单独请求所选手机首次安装授权，未授权停在 POST 前；仅明确获准后内部传 allowWdaInstallation:true，不自动勾选、不让用户配置参数。IOS_WDA_SIGNING_REQUIRED 不得自动续签；首次安装、签名和重启仍独立授权，一次合并必要的具体影响说明。IOS_WDA_INSPECTION_FAILED 保留实际安装/签名检查失败，不把本机有效构建当手机已安装。IOS_CONNECTION_INITIALIZATION_DISABLED 仅为旧调用方 existingSession opt-out，不是新的授权门槛。IOS_WDA_SECURITY_REJECTED 可能涉及签名、权限或信任；已信任或无入口时只读核查签名/有效期，不循环重装。'
+              : 'Ordinary phone tasks allow necessary control connection initialization by default. With a current valid build and existing phone helper, call check_device_ready({screenshot:false}) directly and continue the original task; do not ask for initialization authorization for every cold Session. CoreDevice passcodeRequired:false/unlockedSinceBoot:true is not current-unlock proof; known locks must block, then live WDA must confirm boolean lock state after connection. IOS_DEVICE_LOCK_STATE_UNKNOWN means an actual lock-query failure/missing boolean only; until usability is confirmed, no source, screenshot or business UI, no automatic unlock and no replay. IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED separately requests first installation on the selected phone and stops before POST without approval; only after explicit approval internally pass allowWdaInstallation:true, never auto-select it or ask users to configure parameters. IOS_WDA_SIGNING_REQUIRED must not auto-renew; first installation, signing and restart still need separate grants, combining necessary concrete effects in one request. IOS_WDA_INSPECTION_FAILED preserves actual installation/signature inspection failure; a valid local build is not phone installation proof. IOS_CONNECTION_INITIALIZATION_DISABLED is a legacy existingSession caller opt-out, not a new authorization gate. IOS_WDA_SECURITY_REJECTED may involve signing, entitlements or trust; if trusted or absent, inspect signing/profile expiry read-only, not a reinstall loop.',
         }
       : {}),
     nextStep: action
@@ -193,7 +199,12 @@ export function setupAgentContext(
               snapshot.platform === 'android' || snapshot.platform === 'ios'
                 ? 'check_device_ready'
                 : 'exe_js',
-            instruction: 'Read the current UI before continuing.',
+            instruction:
+              snapshot.platform === 'ios'
+                ? locale === 'zh-CN'
+                  ? '默认建立必要连接，确认 live WDA 当前解锁后才读取 UI；复用返回观察继续原任务。'
+                  : 'Establish the necessary connection by default and confirm live WDA unlocked state before UI; reuse returned observations to continue the original task.'
+                : 'Read the current UI before continuing.',
           }
         : {
             instruction:

@@ -36,9 +36,12 @@ run on the same computer. Remote preparation is not part of the current scope.
 Status remains visible in the TUI, while diagnostics and packaged workflows are
 internal Agent capabilities rather than additional user commands.
 
-For the opt-in Pi display preview, start `pi --maat-mobile-ui`. All Maat tools use
-compact cards and a concise single-line status. Pi retains inline images and expanded
-raw results. See [the Pi package guide](packages/pi/README.md#mobile-tui-preview)
+Pi displays all Maat tools as compact cards with a concise single-line status by
+default. Start `pi --maat-raw-ui` to restore the original display; it takes precedence
+over the existing `--maat-mobile-ui` flag, which remains compatible but is no longer
+needed. Use the valueless raw flag, not an equals-false value. Pi retains inline images,
+expanded raw results and complete model content/structured facts.
+See [the Pi package guide](packages/pi/README.md#mobile-tui-preview)
 for control sources, status semantics and manual visual acceptance boundaries.
 
 To use the standalone Pi-backed TUI:
@@ -62,7 +65,9 @@ maat agent --browser chromium --headless "Read the page and describe what is vis
    services and in-progress startup work; only address actual missing conditions.
 3. For Android or a local physical iPhone, `check_device_ready` creates or reuses a Session and returns the
    current UI source and viewport. Request `screenshot=true` for visual inspection.
-   Session creation may deploy automation helpers or trigger system prompts.
+   Ordinary iOS tasks allow the necessary control connection by default; live WDA
+   must confirm unlocked state before business UI observations. First WDA installation,
+   re-signing and restart still require separate explicit authorization.
 4. Use `exe_js` for UI execution. Its only input is `code`; observations are not
    recorded as formal steps. Reuse returned observations for the next action.
    Failures identify their category, phase, Session state and whether an action
@@ -112,14 +117,33 @@ first-use attempt or establish a fresh-machine installation pass.
 Use `/maat-setup ios` on the local Mac with the intended physical iPhone selected.
 Read-only doctor checks Xcode, Appium CLI, XCUITest, connection/pairing, Developer
 Mode and Appium. Passing preparation is not WDA signing validation or readiness.
-iOS readiness has a 180-second budget (Android: 15 seconds). Unknown current
-cold lock state stops with `IOS_DEVICE_LOCK_STATE_UNKNOWN` by default:
-CoreDevice `passcodeRequired:false`/`unlockedSinceBoot:true` is not current
-screen/unlock proof. Only explicit authorization after explaining WDA's possible
-screen wake/system prompts permits `allowWdaInitialization:true` for that one
-`check_device_ready` call; live WDA unlock and actual UI observations are still required.
-Signing changes/redeployment require separate authorization. Never request Apple
-credentials or use Android SDK, UiAutomator2 gestures/input or Android Back on iOS.
+iOS readiness has a 180-second budget (Android: 15 seconds). Ordinary phone tasks
+automatically establish necessary control connections, without a per-cold-Session
+confirmation. Diagnose actual conditions and reuse current valid builds/existing
+phone helpers; a valid local build is not phone installation proof. Core checks actual
+installation/signature before connecting. CoreDevice
+`passcodeRequired:false`/`unlockedSinceBoot:true` is not current-unlock proof or an
+initialization approval gate. Known locks require user unlock; live WDA confirms lock
+state after connection. Until usable, no source, screenshot or business UI, no automatic
+unlock and no replay. `IOS_DEVICE_LOCK_STATE_UNKNOWN` means a real lock-query failure
+or missing boolean: connection unconfirmed, not pending cold authorization.
+`IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED` separately requests approval for first
+WDA control-component installation on the selected phone; without approval, no install.
+The model handles `allowWdaInstallation` internally only after explicit approval,
+not as user configuration homework. `IOS_WDA_SIGNING_REQUIRED` must not auto-renew;
+`IOS_WDA_INSPECTION_FAILED` retains actual inspection failures;
+`IOS_CONNECTION_INITIALIZATION_DISABLED` is only a legacy caller opt-out.
+First installation, re-signing and restart still need separate grants; combine
+necessary concrete effects in one request. Trust, Developer Mode and passwords stay
+user-only. Never request Apple credentials or use Android SDK, UiAutomator2
+gestures/input or Android Back on iOS.
+
+`IOS_WDA_CONFIGURATION_CONFLICT` reports mismatched signing hints or another phone
+testRunner, avoiding Appium cleanup deletion. `IOS_READINESS_UNSUPPORTED` reports
+unsafe reuse configuration (`useNewWDA`, auto-accept/dismiss alerts, disabled prebuilt,
+forced preinstalled or custom suffix). Report the specific configuration issue,
+without automatic configuration changes, reinstall, Team changes or modifications
+to user services/phone data. First-install approval does not authorize re-signing.
 
 The local Mac/physical-iPhone doctor has passed. Pi integration is separately
 regression-tested. After authorized profile renewal/deployment, the verified WDA
@@ -135,8 +159,8 @@ if trusted or absent, inspect signing/profile expiry instead of retry loops.
 `prepare_mobile(build-ios-wda)` inspects/reuses valid builds without rebuilding;
 expired/missing builds require signing authorization and preserve the existing
 Team/bundle. Actual profile/certificate dates apply equally to paid/free signing,
-not an assumed seven days. Build hints stay internal; deployment/initialization
-needs authorized scope. Do not stop external services. Manual Appium pre-start
+not an assumed seven days. Build hints stay internal; first installation/signing/restart
+need separate authorization, not ordinary connection initialization. Do not stop external services. Manual Appium pre-start
 does not prove five-minute first use.
 
 ## Tools and runtime

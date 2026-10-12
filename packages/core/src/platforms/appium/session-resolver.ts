@@ -15,6 +15,7 @@ import {
   type IosDevice,
 } from '../../setup/ios-devices.ts';
 import { defaultFetchStatus } from '../../setup-assistant/probes.ts';
+import { resolveIosWdaReuse } from '../../setup/ios-wda.ts';
 
 export type SessionIssueCode =
   | 'server-unavailable'
@@ -31,7 +32,7 @@ export class SessionSetupError extends Error {
   }
 }
 
-function isLocal(url: string): boolean {
+export function isLocalAppiumEndpoint(url: string): boolean {
   const host = new URL(url).hostname;
   return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
 }
@@ -61,6 +62,10 @@ function iosReadinessRouting(environment: NativeEnvironment) {
   const url = environment.serverUrl ?? 'http://127.0.0.1:4723/';
   const endpoint = connection(url);
   const nested = environment.capabilities['appium:options'];
+  if (nested !== undefined && !isRecord(nested))
+    throw new Error(
+      'IOS_READINESS_UNSUPPORTED: appium:options must be an object; no Session was created.',
+    );
   const caps = {
     ...environment.capabilities,
     ...(isRecord(nested)
@@ -72,16 +77,52 @@ function iosReadinessRouting(environment: NativeEnvironment) {
         )
       : {}),
   };
+  const connectionBooleans: Record<string, boolean> = {
+    'appium:useNewWDA': false,
+    'appium:usePrebuiltWDA': true,
+    'appium:usePreinstalledWDA': false,
+    'appium:autoAcceptAlerts': false,
+    'appium:autoDismissAlerts': false,
+    'appium:prebuildWDA': false,
+    'appium:useSimpleBuildTest': false,
+    'appium:useXctestrunFile': false,
+    'appium:allowProvisioningUpdates': false,
+    'appium:allowProvisioningDeviceRegistration': false,
+    'appium:launchWithIDB': false,
+    'appium:autoWebview': false,
+  };
+  const alternateInputs = [
+    'agentPath',
+    'bootstrapPath',
+    'xcodeConfigFile',
+    'prebuiltWDAPath',
+    'keychainPath',
+    'keychainPassword',
+    'wdaBindingIP',
+    'initialDeeplinkUrl',
+    'safariInitialUrl',
+    'app',
+    'appPackage',
+    'appActivity',
+    'bundleId',
+  ];
   if (
     environment.platform !== 'ios' ||
     !['127.0.0.1', 'localhost', '::1', '[::1]'].includes(endpoint.hostname!) ||
     (environment.device?.kind !== undefined && environment.device.kind !== 'device') ||
     caps['appium:webDriverAgentUrl'] !== undefined ||
     (caps['appium:wdaBaseUrl'] !== undefined && caps['appium:wdaBaseUrl'] !== 'http://localhost') ||
-    (caps['appium:automationName'] !== undefined && caps['appium:automationName'] !== 'XCUITest')
+    (caps['appium:automationName'] !== undefined && caps['appium:automationName'] !== 'XCUITest') ||
+    caps['appium:updatedWDABundleIdSuffix'] !== undefined ||
+    Object.entries(connectionBooleans).some(
+      ([key, expected]) => caps[key] !== undefined && caps[key] !== expected,
+    ) ||
+    alternateInputs.some((key) => caps[`appium:${key}`] !== undefined) ||
+    (caps.browserName !== undefined && caps.browserName !== '') ||
+    (caps['appium:browserName'] !== undefined && caps['appium:browserName'] !== '')
   )
     throw new Error(
-      'IOS_READINESS_UNSUPPORTED: readiness requires a local physical iPhone and device-bound XCUITest/WDA routing; remote services and externally routed WDA are not supported.',
+      'IOS_READINESS_UNSUPPORTED: connection requires a local physical iPhone and a base Session with device-bound, verified prebuilt WDA. App launch/navigation, automatic builds/signing, alerts and alternate WDA routing or build inputs are not permitted; no configuration was changed.',
     );
   return { url, caps };
 }
@@ -92,19 +133,24 @@ export async function resolveIosReadinessSession(
   dependencies: {
     serverReady(url: string, signal?: AbortSignal): Promise<boolean>;
     devices(signal?: AbortSignal): Promise<IosDevice[]>;
-    assertUnlocked(
-      udid: string,
+    checkColdLock(udid: string, signal?: AbortSignal): Promise<void>;
+    prepareWda(
+      environment: NativeEnvironment,
+      allowInstallation: boolean,
       signal?: AbortSignal,
-      allowWdaInitialization?: boolean,
-    ): Promise<void>;
+    ): Promise<Record<string, unknown>>;
   } = {
     serverReady: defaultFetchStatus,
     devices: discoverIosDevices,
-    assertUnlocked: (udid, signal, allowWdaInitialization) =>
-      assertIosColdReadiness(udid, signal, undefined, allowWdaInitialization),
+    checkColdLock: assertIosColdReadiness,
+    prepareWda: (environment, allowInstallation, signal) =>
+      resolveIosWdaReuse(
+        { device: environment.device, capabilities: environment.capabilities, signal },
+        allowInstallation,
+      ),
   },
   currentTarget?: ResolvedNativeSession,
-  allowWdaInitialization = false,
+  allowWdaInstallation = false,
 ): Promise<ResolvedNativeSession> {
   signal?.throwIfAborted();
   const { url, caps } = iosReadinessRouting(environment);
@@ -152,15 +198,31 @@ export async function resolveIosReadinessSession(
       throw new Error(
         'IOS_READINESS_UNSUPPORTED: the running Session cannot be bound to the selected physical iPhone and endpoint; no Session was rebuilt.',
       );
-  } else await dependencies.assertUnlocked(device.id, signal, allowWdaInitialization);
+  }
+  let wdaCapabilities: Record<string, unknown> = {};
+  if (!currentTarget) {
+    await dependencies.checkColdLock(device.id, signal);
+    wdaCapabilities = await dependencies.prepareWda(
+      {
+        ...environment,
+        device: { kind: 'device', name: device.name },
+        capabilities: { ...caps, 'appium:udid': device.id },
+      },
+      allowWdaInstallation,
+      signal,
+    );
+  }
   signal?.throwIfAborted();
+  const resolvedCapabilities: Record<string, unknown> = {
+    ...caps,
+    ...wdaCapabilities,
+    'appium:udid': device.id,
+    'appium:deviceName': device.name,
+  };
+  delete resolvedCapabilities['appium:options'];
   return {
     environment: { ...environment, serverUrl: url, device: { kind: 'device', name: device.name } },
-    capabilities: {
-      ...environment.capabilities,
-      'appium:udid': device.id,
-      'appium:deviceName': device.name,
-    },
+    capabilities: resolvedCapabilities,
   };
 }
 
@@ -238,11 +300,16 @@ export async function resolveAppiumSession(
 ): Promise<ResolvedNativeSession> {
   signal?.throwIfAborted();
   const configuredUrl = environment.serverUrl;
-  const candidates = [
-    ...new Set(
-      [configuredUrl, 'http://127.0.0.1:4723/'].filter((value): value is string => Boolean(value)),
-    ),
-  ];
+  const candidates =
+    environment.platform === 'ios' && configuredUrl && !isLocalAppiumEndpoint(configuredUrl)
+      ? [configuredUrl]
+      : [
+          ...new Set(
+            [configuredUrl, 'http://127.0.0.1:4723/'].filter((value): value is string =>
+              Boolean(value),
+            ),
+          ),
+        ];
   let serverUrl: string | undefined;
   const notices: string[] = [];
   for (const candidate of candidates) {
@@ -270,7 +337,7 @@ export async function resolveAppiumSession(
       capabilities: { ...environment.capabilities },
       notices,
     };
-  if (!isLocal(serverUrl)) {
+  if (!isLocalAppiumEndpoint(serverUrl)) {
     throw new SessionSetupError(
       'no-device',
       'Remote Appium requires a deviceName or another provider-specific routing capability.',

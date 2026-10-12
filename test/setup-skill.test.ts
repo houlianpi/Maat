@@ -107,15 +107,53 @@ test('UI-only execution policy preserves authorized Android file transfer', asyn
   assert.match(MAAT_SYSTEM_PROMPT, /execute all UI interaction through exe_js/);
 });
 
-test('iOS internal workflows require transient authorization and never reuse Android-only examples', async () => {
+test('iOS policy initializes ordinary connections and isolates first-install/signing/restart grants', async () => {
   const setup = await readFile(MAAT_SETUP_SKILL_PATH, 'utf8');
   const mobile = await readFile(MAAT_MOBILE_USE_SKILL_PATH, 'utf8');
   assert.match(setup, /## iOS/);
-  assert.match(setup, /allowWdaInitialization/);
+  assert.match(setup, /allowWdaInstallation:true/);
+  assert.match(setup, /Ordinary phone tasks allow the necessary control connection by default/);
+  assert.match(setup, /A valid local build is not proof that WDA is installed/);
+  assert.match(
+    setup,
+    /live WDA must confirm an\s+unlocked boolean before source, screenshot or business UI/,
+  );
+  assert.match(
+    setup,
+    /Never infer approval from an ordinary phone task or automatically select true/,
+  );
+  assert.match(setup, /separate grants in one request, not one per command/);
+  for (const code of [
+    'IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED',
+    'IOS_WDA_SIGNING_REQUIRED',
+    'IOS_WDA_INSPECTION_FAILED',
+    'IOS_CONNECTION_INITIALIZATION_DISABLED',
+    'IOS_WDA_CONFIGURATION_CONFLICT',
+    'IOS_READINESS_UNSUPPORTED',
+    'IOS_DEVICE_LOCK_STATE_UNKNOWN',
+  ]) {
+    assert.ok(setup.includes(code), code);
+    assert.ok(MAAT_SYSTEM_PROMPT.includes(code), code);
+  }
+  assert.match(setup, /do not automatically change configuration, reinstall, change Team/);
+  assert.match(
+    MAAT_SYSTEM_PROMPT,
+    /do not automatically change configuration, reinstall, change Team/,
+  );
   assert.match(setup, /IOS_WDA_SECURITY_REJECTED/);
   assert.match(mobile, /## iOS/);
   assert.match(mobile, /Android-only/);
-  assert.match(MAAT_SYSTEM_PROMPT, /allowWdaInitialization=true/);
+  assert.doesNotMatch(setup + MAAT_SYSTEM_PROMPT, /allowWdaInitialization/);
+  assert.match(MAAT_SYSTEM_PROMPT, /allowWdaInstallation=true/);
+  assert.match(MAAT_SYSTEM_PROMPT, /only the screenshot option/);
+  assert.match(
+    MAAT_SYSTEM_PROMPT,
+    /First installation, re-signing and restart still require separate grants/,
+  );
+  assert.match(
+    MAAT_SYSTEM_PROMPT,
+    /no business UI, source or screenshot until usable, no automatic unlock and no replay/,
+  );
   assert.match(MAAT_SYSTEM_PROMPT, /not current-unlock proof/);
 });
 
@@ -131,4 +169,30 @@ test('unified preparation uses concrete task ownership instead of nonexistent ba
   );
   assert.match(MAAT_SYSTEM_PROMPT, /Do not use bash nohup/);
   assert.match(MAAT_SYSTEM_PROMPT, /paid and free certificates/);
+});
+
+test('English and Chinese setup docs describe automatic connection and separate first-install authorization', async () => {
+  for (const file of [
+    '../README.md',
+    '../README.zh-CN.md',
+    '../packages/pi/README.md',
+    '../docs/setup-assistant.md',
+    '../docs/setup-assistant.zh-CN.md',
+  ]) {
+    const doc = await readFile(new URL(file, import.meta.url), 'utf8');
+    assert.doesNotMatch(doc, /allowWdaInitialization/);
+    assert.match(doc, /allowWdaInstallation/);
+    for (const code of [
+      'IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED',
+      'IOS_WDA_SIGNING_REQUIRED',
+      'IOS_WDA_INSPECTION_FAILED',
+      'IOS_CONNECTION_INITIALIZATION_DISABLED',
+      'IOS_WDA_CONFIGURATION_CONFLICT',
+      'IOS_READINESS_UNSUPPORTED',
+      'IOS_DEVICE_LOCK_STATE_UNKNOWN',
+    ])
+      assert.ok(doc.includes(code), `${file}: ${code}`);
+    assert.match(doc, /live WDA/);
+    assert.match(doc, /不自动解锁|no\s+automatic\s+unlock/i);
+  }
 });

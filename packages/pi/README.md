@@ -4,8 +4,12 @@ Pi coding-agent extension for Maat. Install with `pi install npm:@houlianpi/maat
 
 ## Mobile TUI preview
 
-Start Pi with `pi --maat-mobile-ui` to opt into compact cards for **all Maat tools**
-and a concise single-line platform status. Labels follow the current session's
+Starting `pi` uses compact cards for **all Maat tools** and a concise single-line
+platform status by default. Start `pi --maat-raw-ui` to restore the original tool
+display and status; this opt-out takes precedence over `--maat-mobile-ui`.
+The existing valueless `--maat-mobile-ui` flag remains compatible but is no longer
+needed. Both flags are boolean presence switches in Pi 0.87: an equals-false value
+does not disable them. Labels follow the current session's
 user language (Chinese or English), cached from lifecycle events rather than
 resolved from the machine locale during card rendering.
 
@@ -29,6 +33,9 @@ neutral summary line. JavaScript text results show their original content,
 including image-coordinate notes and technical payloads, with a default preview
 of at most 240 Unicode characters and three lines; an ellipsis marks truncation.
 Expansion reveals the complete text, and model observations are never truncated.
+Collapsed call headers occupy one line and result summaries at most three lines;
+each line is clipped to the available terminal width with an ellipsis when needed.
+This limit applies only to presentation, not expanded results or structured facts.
 Image-only
 results report the number returned; text results do not repeat image counts.
 XML/JSON/globals remain expandable. Error causes, action certainty and recovery
@@ -58,9 +65,16 @@ for user intervention remain in the conversation, except explicit host error cod
 such as `ANDROID_DEVICE_LOCKED`. No task/action inference or automatic recovery is added.
 
 iPhone status also distinguishes connection, device selection, computer trust,
-Developer Mode, `IOS_DEVICE_LOCKED`, unknown cold state
+Developer Mode, `IOS_DEVICE_LOCKED`, unknown live lock state
 (`IOS_DEVICE_LOCK_STATE_UNKNOWN`) and WDA trust/signing rejection
 (`IOS_WDA_SECURITY_REJECTED`). Preparation never clears an unresolved channel risk.
+Unknown iOS state is not shown as locked: the collapsed error says the connection
+state is unconfirmed and retains action certainty, without asking for cold-connection
+authorization. First control-component installation needs authorization
+(`IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED`) as a separate status; signing required,
+inspection failed and legacy initialization disabled also have distinct statuses.
+Category, primary error and full original failure remain expandable and model-visible.
+Display flags do not change connection or installation authorization policy.
 
 ## iOS setup and Mobile Use
 
@@ -97,9 +111,10 @@ For WDA, actual profile and independent certificate dates determine reuse for
 paid/free signing alike. No assumed seven days or Team change. Valid reuse needs
 no signing authorization; missing/expired builds require explicit scope. The task
 builds only and applies internal capabilities after adapter/device identity checks.
-Later XCTest deployment/initialization needs authorized scope. No new planner:
-the original conversation continues, combining only necessary first-control/
-signing/possible-wake explanation, without exposing internal flags to users.
+Ordinary connection initialization reuses existing phone helpers by default.
+First installation, re-signing and restart need separate explicit grants; combine
+only necessary concrete effects/possible prompts once, not per command or cold Session.
+No new planner or internal flags as user chores: the original conversation continues.
 
 `/maat-setup ios` selects iOS; subsequent `retry_setup_step` and
 `get_setup_diagnostics` remain iOS. Doctor is read-only and checks preparation,
@@ -107,13 +122,34 @@ not signing or control success. Reuse local user-managed Appium and WDA verified
 against the selected physical iPhone, never a simulator just because 8100 responds.
 Use the iOS Skill section, not project source, SDK tools or Android gesture/input/Back APIs.
 
-`check_device_ready` accepts `screenshot?` and `allowWdaInitialization?`.
-The latter is iOS-only and transient, default unset: only explicit user authorization
-after explaining WDA initialization's possible screen wake/system prompts permits
-true for that attempt. CoreDevice first-unlock facts are not current-unlock proof;
-unknown cold state blocks by default. Live unlocked WDA and real UI are still
-required within the 180-second budget. Signing/redeployment needs separate
-authorization; Apple credentials must not be requested.
+`check_device_ready` accepts `screenshot?` and `allowWdaInstallation?`.
+Ordinary iOS connection initialization is allowed by default; after actual diagnosis,
+reuse a current valid build and existing phone helper with only the screenshot option.
+No per-cold-Session initialization grant is advertised. Core checks actual phone
+installation/signature at the exact selected device/server without root fallback;
+a valid local build does not prove installation. No Appium auto-sign/auto-first-install.
+`allowWdaInstallation` is iOS-only and transient, default unset: only explicit approval
+of first WDA installation on the selected phone permits true. Do not infer/auto-select
+approval or ask users to configure flags; it is not signing, restart or unlock permission.
+CoreDevice first-unlock facts are not current-unlock proof or an initialization gate.
+Known locks block; live WDA confirms unlocked boolean before source, screenshot or
+business UI. `IOS_DEVICE_LOCK_STATE_UNKNOWN` means actual lock-query failure/missing
+boolean, not cold authorization. No automatic unlock or replay. Live unlocked WDA
+and real UI are still required within the 180-second budget.
+`IOS_WDA_SIGNING_REQUIRED` prohibits automatic renewal; `IOS_WDA_INSPECTION_FAILED`
+preserves actual installed/signature inspection errors; `IOS_CONNECTION_INITIALIZATION_DISABLED`
+is legacy existingSession caller opt-out only. First installation, re-signing and restart
+remain separately authorized; combine necessary concrete effects once.
+Trust, Developer Mode and passwords remain user-only; never request Apple credentials.
+
+`IOS_WDA_CONFIGURATION_CONFLICT` distinguishes mismatched signing hints or another
+phone testRunner, preventing Appium cleanup deletion. `IOS_READINESS_UNSUPPORTED`
+distinguishes configuration incompatible with safe reuse: `useNewWDA`,
+`autoAcceptAlerts`/`autoDismissAlerts`, disabled prebuilt, forced preinstalled or custom
+suffix. Both have separate compact statuses. Report only the specific configuration
+issue and inspect read-only; do not automatically change configuration, reinstall,
+change Team, delete helpers or modify user services/phone data. First-install approval
+cannot bypass these checks or allow re-signing; expired signing still needs separate approval.
 
 Security rejection can mean signing, entitlements or profile trust. Check developer
 App trust once; if absent or already trusted inspect signing/profile expiry, not

@@ -30,9 +30,11 @@ pi
 
 - `/maat-setup` 将准备流程交给宿主 Agent。
 - `get_setup_diagnostics` 工具提供脱敏的环境诊断；输入区显示平台状态。
-- Pi 扩展可用 `--maat-mobile-ui` 启用紧凑卡片与简洁单行状态（预览）。
+- Pi 扩展默认显示紧凑卡片与简洁单行状态。
 
-使用 `pi --maat-mobile-ui` 启动预览。所有 Maat 工具保留完整展开结果，Pi 仍独立绘制内联图片。
+使用 `pi --maat-raw-ui` 恢复原始工具显示与状态，该开关优先于已有的 `--maat-mobile-ui`；
+后者仍兼容，但已无需指定。使用不带值的 raw 开关，不要用等号 false 值关闭 boolean flag。
+所有 Maat 工具保留完整展开结果、模型内容与 structured 事实，Pi 仍独立绘制内联图片。
 状态优先显示需要本人处理的问题与执行风险；返回结果不是实时连接或业务完成证明。
 控制来源、状态含义及尚需人工视觉验收的范围见
 [Pi 包指南](packages/pi/README.md#mobile-tui-preview)。
@@ -56,7 +58,8 @@ maat agent --browser chromium --headless "读取页面，说明当前可见内�
 1. 选择平台和目标设备；多台手机时不能猜测。
 2. 用 `check_platform_setup` 检查准备条件。复用安装、健康服务和正在启动的工作，只补实际缺项。
 3. Android 或本地物理 iPhone 使用 `check_device_ready` 建立或复用 Session，返回当前控件树和视口；
-   需要视觉观察时传 `screenshot=true`。建立 Session 可能部署辅助组件或触发系统提示。
+   需要视觉观察时传 `screenshot=true`。iOS 普通任务默认建立必要连接，须 live WDA 确认
+   当前解锁才返回业务 UI 观察；首次 WDA 安装、重签名和重启仍需独立授权。
 4. 用 `exe_js` 执行 UI 代码，唯一输入是 `code`。返回的是观察，不录为正式步骤。
 5. 授权、解锁或认证需要本人完成时暂停；实际完成后重新观察并继续原任务。
 
@@ -90,12 +93,25 @@ Pi 已实现持有 foreground child 的 Appium 任务，并有受控 process/HTT
 在本地 Mac 上使用 `/maat-setup ios`，明确选择目标物理 iPhone。只读 doctor 检查
 Xcode、Appium CLI、XCUITest、连接/配对、Developer Mode 与 Appium；准备通过不证明
 WDA 签名有效或手机 ready。iOS readiness 预算 180 秒（Android 15 秒）。
-默认无法证明当前冷锁状态时以 `IOS_DEVICE_LOCK_STATE_UNKNOWN` 停止；
-CoreDevice 的 `passcodeRequired:false`/`unlockedSinceBoot:true` 不是当前屏幕/解锁证明。
-解释 WDA 初始化可能点亮屏幕或触发系统提示、获得本人明确授权后，才可在本次
-`check_device_ready` 传 `allowWdaInitialization:true`；仍须 live WDA 解锁和真实 UI 观察。
-更改签名/重新部署需另获授权，不索取 Apple 凭据；不能误用 Android SDK、
+普通手机任务自动建立必要控制连接，不逐冷 Session 确认初始化。实际诊断后复用有效构建
+与手机已有 helper；本机有效构建不等于手机已安装，连接前须检查实际安装/签名。
+CoreDevice 的 `passcodeRequired:false`/`unlockedSinceBoot:true` 不是当前解锁证明，
+也不是初始化授权门槛。已知锁定需本人解锁；连接后 live WDA 实时确认锁状态，可用性未确认
+前无 source、截图或业务 UI，不自动解锁、不重放。`IOS_DEVICE_LOCK_STATE_UNKNOWN` 只表示
+真实锁查询失败/无布尔，显示连接未确认而非冷连接待授权。
+`IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED` 单独请求所选手机首次安装控制组件授权，
+未授权不安装；模型明确获准后内部处理 `allowWdaInstallation`，不让用户配置参数。
+`IOS_WDA_SIGNING_REQUIRED` 不自动续签；`IOS_WDA_INSPECTION_FAILED` 保留实际检查失败；
+`IOS_CONNECTION_INITIALIZATION_DISABLED` 仅是兼容调用方禁用初始化。
+首次安装、重签名、重启仍独立授权，必要时一次合并具体影响，不索取 Apple 凭据。
+信任、Developer Mode、密码仍由本人处理；不能误用 Android SDK、
 UiAutomator2 手势/输入或 Android Back。
+
+`IOS_WDA_CONFIGURATION_CONFLICT` 报告签名 hint 不匹配或手机其它 testRunner，
+避免 Appium cleanup 删除。`IOS_READINESS_UNSUPPORTED` 报告不符合安全复用的配置
+（`useNewWDA`、自动接受/关闭提示、禁 prebuilt、强 preinstalled 或自定义 suffix）。
+仅报告明确配置问题，不自动改配置、重装、改 Team 或改变用户服务/手机数据；
+首次安装授权不是重签名权限。
 
 本地 Mac+目标真机 doctor 已准备通过；Pi 接入回归与真机初始化、完整自主首用分别验收。
 经明确授权续签/部署后，已验证的 WDA 构建通过 XCTest `test-without-building` 启动成功，
@@ -108,7 +124,7 @@ ready 返回真实控件树、视口和截图；系统计算器 `3×3×8` 的显
 信任，已信任或没有入口则核查签名/有效期，不循环重试。
 `prepare_mobile(build-ios-wda)` 先 inspect，valid build 不重构建；missing/expired
 须本人明确签名授权，保留现有 Team/bundle。付费/免费均使用真实 profile/certificate 日期，
-不默认七天；内部 hints 不进入 content，后续部署/初始化仍需授权。保留外部服务；
+不默认七天；内部 hints 不进入 content，首次安装/重签名/重启仍需独立授权，普通连接初始化不设确认门槛。保留外部服务；
 人工预启动 Appium 不能替代五分钟首用验收。
 
 ## 工具与运行时

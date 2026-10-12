@@ -65,9 +65,10 @@ are treated equally, without assuming seven days. Valid builds reuse without sig
 authorization; missing/expired builds require explicit authorization and preserve
 the existing Team/bundle. No Team selection, App deletion, purchase or deployment
 occurs in the build tool. Returned private capabilities are applied internally only
-when the original adapter/device/hints still match. Subsequent XCTest deployment/
-initialization needs explicit user scope; combine necessary first-control/signing/
-possible-wake explanation, not internal flags or repeated confirmations.
+when the original adapter/device/hints still match. Ordinary connection initialization
+reuses existing phone helpers by default. First WDA installation, re-signing and restart
+still need separate explicit grants; combine necessary concrete effects/possible prompts
+in one request, not internal flags or a confirmation for each command.
 
 ## iOS preparation, initialization and acceptance
 
@@ -76,21 +77,47 @@ pairing, Developer Mode and Appium read-only. It does not verify WDA signing.
 Pi command/retry/diagnostics remain iOS; no macOS Settings fallback, Android SDK
 preparation or project-source environment repair applies.
 
-Cold readiness defaults to `IOS_DEVICE_LOCK_STATE_UNKNOWN` without proven current
-awake/unlocked state. CoreDevice `passcodeRequired:false`/`unlockedSinceBoot:true`
-is not current screen/unlock proof. Explain WDA initialization's possible wake/prompts
-and wait for explicit user authorization before passing
-`check_device_ready({allowWdaInitialization:true})` once. The transient flag does
-not grant signing changes or prove unlock; unsafe/locked states still stop and
-live WDA unlock plus real source/viewport/images are required. Budget: iOS 180s,
-Android 15s. This is a readiness contract, not a blanket cold guard on ordinary
-iOS/simulator execution.
+Ordinary phone tasks automatically establish the necessary control connection.
+After actual diagnosis, a current valid build and existing phone helper permit
+`check_device_ready` with only the screenshot option, without a per-cold-Session
+authorization gate. Core uses the exact selected device/server without root fallback
+and checks actual WDA phone installation/signature before connecting; a valid local
+build is not proof of phone installation. Ordinary readiness reuses existing helpers,
+without Appium auto-signing or automatic first installation.
+CoreDevice `passcodeRequired:false`/`unlockedSinceBoot:true` is not current unlock
+proof, but is not an initialization approval gate. Known locks block; live WDA must
+confirm unlocked boolean state after connection before source, screenshot or business
+UI. `IOS_DEVICE_LOCK_STATE_UNKNOWN` means an actual live-lock read failure/missing
+boolean: connection unconfirmed, not pending cold authorization. No business UI
+until ready, no automatic unlock and no action replay. Budget: iOS 180s, Android 15s.
+
+`IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED` stops before POST without explicit
+approval of first WDA control-component installation on the selected phone.
+Explain necessary installation and possible prompts once, then handle the internal
+`allowWdaInstallation:true` grant only after approval; never infer or auto-select it,
+or give parameters to users as technical homework. It grants neither signing changes,
+restart nor unlock. `IOS_WDA_SIGNING_REQUIRED` needs separately authorized signing,
+never automatic renewal. `IOS_WDA_INSPECTION_FAILED` preserves actual installed/signature
+inspection failure, not permission to reinstall. `IOS_CONNECTION_INITIALIZATION_DISABLED`
+means a legacy caller opted into existingSession-only operation, not a model approval gate.
+First installation, re-signing and restart remain separately authorized; combine
+concrete effects in one request if several are needed. Trust, Developer Mode,
+passwords and authentication remain user-only.
+
+`IOS_WDA_CONFIGURATION_CONFLICT` reports mismatched signing hints or another
+testRunner on the phone, avoiding Appium cleanup deletion. `IOS_READINESS_UNSUPPORTED`
+reports configuration incompatible with safe reuse: `useNewWDA`,
+`autoAcceptAlerts`/`autoDismissAlerts`, disabled prebuilt, forced preinstalled or
+custom suffix. Report the explicit problem and inspect read-only; do not automatically
+change configuration, reinstall, change Team, delete helpers or modify user services/
+phone data. First-install approval does not bypass these checks or allow re-signing;
+expired signing still requires separate approval.
 
 Reuse user-managed Appium and device-bound WDA, preserving other services.
 `IOS_DEVICE_LOCKED` needs user wake/unlock. `IOS_WDA_SECURITY_REJECTED` may mean
 signing, entitlements or profile trust: check developer App trust once; if absent
 or already trusted, inspect signing/profile expiry read-only. Renewal/deployment
-needs separate authorization; never request Apple credentials or blindly reinstall.
+and first installation need separate authorization; never request Apple credentials or blindly reinstall.
 Keep the Session while waiting for user-only steps if more phone work remains;
 release only when the conversation no longer needs phone interaction.
 

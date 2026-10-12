@@ -43,16 +43,19 @@ export function createSetupTools(
       name: 'check_device_ready',
       label: 'Check Device Ready',
       description:
-        'Verify the selected local Android or physical iPhone control channel and return its current UI observation. A new Session requires an awake/unlocked local phone and may deploy automation helpers; iOS may build/sign/deploy WDA. This is not a dependency-only doctor or business validation; remote readiness is unsupported.',
-      parameters: Type.Object({
-        screenshot: Type.Optional(Type.Boolean()),
-        allowWdaInitialization: Type.Optional(
-          Type.Boolean({
-            description:
-              'iOS only, this attempt only. Set true only after explicit user authorization for WDA initialization and its possible screen wake/system prompts. Not unlock proof or permission to change signing.',
-          }),
-        ),
-      }),
+        'Establish or reuse the selected local Android or physical iPhone control connection and verify readiness before returning its current UI observation. Ordinary iOS connection initialization is allowed by default using a valid WDA build and an existing phone helper; live WDA must confirm unlocked state before source, screenshot or business UI. First WDA installation, signing changes and restarts require separate explicit authorization; never automatically unlock. This is not a dependency-only doctor or business validation; remote readiness is unsupported.',
+      parameters: Type.Object(
+        {
+          screenshot: Type.Optional(Type.Boolean()),
+          allowWdaInstallation: Type.Optional(
+            Type.Boolean({
+              description:
+                'iOS only, this attempt only. Set true only after the user explicitly authorizes first installation of the WDA control component on the selected phone. Never infer this grant from an ordinary phone task or set it automatically. Not permission for signing changes, restart or unlock. Handle this internal grant yourself, not as a technical parameter assignment for the user.',
+            }),
+          ),
+        },
+        { additionalProperties: false },
+      ),
       executionMode: 'sequential',
       execute: async (_id, params, signal, _update, ctx) => {
         const locale = resolveSetupLocale(undefined, ctx);
@@ -60,15 +63,13 @@ export function createSetupTools(
         try {
           result = await maat.setup.ready({
             screenshot: params.screenshot,
-            allowWdaInitialization: params.allowWdaInitialization,
+            allowWdaInstallation: params.allowWdaInstallation,
             signal,
           });
         } catch (error) {
-          const guidance = phoneReadinessGuidance(
-            error instanceof Error ? error.message : String(error),
-            locale,
-          );
-          if (guidance) throw new Error(guidance, { cause: error });
+          const message = error instanceof Error ? error.message : String(error);
+          const guidance = phoneReadinessGuidance(message, locale);
+          if (guidance) throw new Error(`${message}\n${guidance}`, { cause: error });
           throw error;
         }
         const { observations, ...readiness } = result;

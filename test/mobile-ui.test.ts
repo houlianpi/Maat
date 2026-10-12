@@ -50,22 +50,27 @@ const ready = aggregateSetup({
     },
   ],
 });
-function harness(enabled = true) {
+function harness(overrides: Partial<Record<'maat-mobile-ui' | 'maat-raw-ui', boolean>> = {}) {
   const maat = createMaat();
   const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => unknown>();
   let language = 'Continue with the phone';
   let widget: Component | undefined;
   let messageRenderer: Parameters<ExtensionAPI['registerMessageRenderer']>[1] | undefined;
   const renderers = new Map<string, NonNullable<typeof messageRenderer>>();
+  const flags = new Map<string, boolean>();
   const pi = {
     getFlag(name: string) {
-      assert.equal(name, 'maat-mobile-ui');
-      return enabled;
+      assert.ok(flags.has(name));
+      return flags.get(name);
     },
-    registerFlag(name: string, options: { description: string; default: boolean }) {
-      assert.equal(name, 'maat-mobile-ui');
-      assert.equal(options.description, 'Compact Maat tool cards and concise status');
-      assert.equal(options.default, false);
+    registerFlag(
+      name: 'maat-mobile-ui' | 'maat-raw-ui',
+      options: { description: string; type: string; default: boolean },
+    ) {
+      assert.ok(['maat-mobile-ui', 'maat-raw-ui'].includes(name));
+      assert.equal(options.type, 'boolean');
+      assert.equal(options.default, name === 'maat-mobile-ui');
+      flags.set(name, overrides[name] ?? options.default);
     },
     registerMessageRenderer(name: string, renderer: typeof messageRenderer) {
       messageRenderer = renderer;
@@ -138,9 +143,10 @@ function render(
     .join('\n');
 }
 
-test('compact UI remains opt-in and never decorates execution or model content', async () => {
-  const h = harness(false);
+test('explicit raw UI overrides default compact display without decorating execution or model content', async () => {
+  const h = harness({ 'maat-raw-ui': true });
   const original = createMaatPiTools(h.maat)[0]!;
+  assert.equal(h.decorate.enabled(), false);
   assert.equal(h.decorate(original), original);
   h.emit('session_start');
   h.start('exe_js');
@@ -162,6 +168,25 @@ test('compact UI remains opt-in and never decorates execution or model content',
     undefined,
   );
   await h.dispose();
+});
+
+test('no flag defaults to compact UI; programmatic false keeps the existing decorator contract', async () => {
+  for (const enabled of [true, false]) {
+    const h = harness(enabled ? {} : { 'maat-mobile-ui': false });
+    try {
+      const original = createMaatPiTools(h.maat)[0]!;
+      const decorated = h.decorate(original);
+      assert.equal(typeof h.decorate, 'function');
+      assert.equal(typeof h.decorate.update, 'function');
+      assert.equal(typeof h.decorate.prepared, 'function');
+      assert.equal(h.decorate.enabled(), enabled);
+      assert.equal(decorated.execute, original.execute);
+      assert.equal(decorated === original, !enabled);
+      assert.equal(typeof decorated.renderResult, enabled ? 'function' : 'undefined');
+    } finally {
+      await h.dispose();
+    }
+  }
 });
 
 test('iOS compact status distinguishes device actions, cold uncertainty and WDA security without readiness claims', async () => {
@@ -202,7 +227,13 @@ test('iOS compact status distinguishes device actions, cold uncertainty and WDA 
     assert.equal(h.widget, 'iOS · 待连接');
     for (const [code, expected] of [
       ['IOS_DEVICE_LOCKED', '请解锁手机'],
-      ['IOS_DEVICE_LOCK_STATE_UNKNOWN', '冷连接待明确授权'],
+      ['IOS_DEVICE_LOCK_STATE_UNKNOWN', '连接未确认 · 锁状态未知'],
+      ['IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED', '首次控制组件安装待授权'],
+      ['IOS_WDA_SIGNING_REQUIRED', 'WDA 签名需独立授权'],
+      ['IOS_WDA_INSPECTION_FAILED', 'WDA 安装或签名检查失败'],
+      ['IOS_CONNECTION_INITIALIZATION_DISABLED', '调用方禁用了连接初始化'],
+      ['IOS_WDA_CONFIGURATION_CONFLICT', 'WDA 配置冲突'],
+      ['IOS_READINESS_UNSUPPORTED', 'iOS readiness 配置不支持'],
       ['IOS_WDA_SECURITY_REJECTED', '请检查 WDA 信任或签名'],
     ] as const) {
       h.end('check_device_ready', textResult(`${code}: blocked`), true);
@@ -217,10 +248,11 @@ test('iOS compact status distinguishes device actions, cold uncertainty and WDA 
       'MAAT_EXECUTION_FAILED\nsummary: Error: IOS_DEVICE_LOCK_STATE_UNKNOWN: blocked\nactionState: uncertain',
     );
     const error = render(h.makeTool('exe_js'), envelope, { ...renderContext(), isError: true });
-    assert.match(error, /明确授权本次 WDA/);
+    assert.match(error, /只读检查锁查询\/连接故障/);
+    assert.doesNotMatch(error, /明确授权本次 WDA|冷连接待/);
     assert.match(error, /勿重放/);
     h.end('exe_js', envelope, true);
-    assert.equal(h.widget, 'iOS · 冷连接待明确授权');
+    assert.equal(h.widget, 'iOS · 连接未确认 · 锁状态未知');
     h.end('release_device_session', textResult('', { released: true, platform: 'ios' }));
     assert.equal(h.widget, 'iOS · 待连接');
     for (const name of ['maat-android-setup', 'maat-ios-setup']) {
@@ -363,6 +395,224 @@ test('raw execution previews keep image metadata and bound long text without alt
     assert.ok(render(tool, result, renderContext(), true, false, 1200).includes(text));
   }
   await h.dispose();
+});
+
+test('collapsed cards stay within three result rows and one call row at narrow widths', async () => {
+  const h = harness();
+  h.emit('session_start');
+  try {
+    const cases: Array<[string, Result, boolean]> = [
+      [
+        'list_platforms',
+        textResult(
+          JSON.stringify([{ label: 'Web', codeContext: 'synthetic runtime context'.repeat(100) }]),
+        ),
+        false,
+      ],
+      [
+        'list_devices',
+        textResult('', [{ id: 'synthetic-id', label: '测试手机'.repeat(50) }]),
+        false,
+      ],
+      ['exe_js', textResult('界'.repeat(500) + '\nsecond\nthird\nfourth'), false],
+      ['exe_js', textResult('TypeError: synthetic cause '.repeat(50).trimEnd()), true],
+    ];
+    for (const [name, result, isError] of cases) {
+      const tool = h.makeTool(name);
+      const before = structuredClone(result);
+      for (const width of [0, 1, 8, 18, 40, 80]) {
+        const context = { ...renderContext(), isError };
+        const lines = tool.renderResult!(
+          result,
+          { expanded: false, isPartial: false },
+          theme,
+          context,
+        ).render(width);
+        assert.ok(lines.length <= 3);
+        assert.ok(lines.every((line) => visibleWidth(line) <= width));
+        const call = tool.renderCall!({ code: 'synthetic()' }, theme, context).render(width);
+        assert.equal(call.length, 1);
+        assert.ok(call.every((line) => visibleWidth(line) <= width));
+      }
+      assert.deepEqual(result, before);
+      const expanded = render(tool, result, { ...renderContext(), isError }, true, false, 10000);
+      for (const item of result.content) {
+        if (item.type === 'text') assert.ok(expanded.includes(item.text));
+      }
+      if (result.details) assert.ok(expanded.includes('synthetic-id'));
+    }
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('unknown iOS state has a short error summary, never claims locked, and preserves full failure facts', async () => {
+  const h = harness();
+  await h.maat.platforms.select('ios');
+  try {
+    const originalCause = `IOS_DEVICE_LOCK_STATE_UNKNOWN: ${'synthetic cold connection detail '.repeat(30)}`;
+    for (const language of ['Continue', '请继续']) {
+      h.language(language);
+      h.emit('session_start');
+      for (const actionState of ['not-started', 'uncertain']) {
+        const result = {
+          ...textResult(
+            `MAAT_EXECUTION_FAILED\nsummary: ${originalCause}\ncode: IOS_DEVICE_LOCK_STATE_UNKNOWN\nactionState: ${actionState}`,
+            {
+              failure: {
+                code: 'IOS_DEVICE_LOCK_STATE_UNKNOWN',
+                summary: originalCause,
+                actionState,
+              },
+            },
+          ),
+          structuredContent: { retainedFact: 'synthetic structured fact' },
+        };
+        const before = structuredClone(result);
+        const tool = h.makeTool('exe_js');
+        const context = { ...renderContext(), isError: true };
+        const collapsed = render(tool, result, context);
+        assert.match(collapsed, /IOS_DEVICE_LOCK_STATE_UNKNOWN/);
+        assert.match(collapsed, /unconfirmed|连接未确认/);
+        assert.match(collapsed, /inspect lock-query|只读检查锁查询/);
+        assert.doesNotMatch(collapsed, /authorize this WDA|授权本次 WDA|冷连接待/);
+        assert.doesNotMatch(collapsed, /wake and unlock|请解锁|success|synthetic cold/);
+        assert.match(
+          collapsed,
+          actionState === 'not-started'
+            ? /No UI action ran|未执行 UI 动作/
+            : /uncertain|执行不确定/,
+        );
+        assert.ok(collapsed.split('\n').length <= 3);
+        assert.ok(Array.from(collapsed.split('\n')[0]!).length < 100);
+        const expanded = render(tool, result, context, true, false, 2000);
+        assert.ok(expanded.includes(originalCause));
+        assert.ok(expanded.includes(JSON.stringify(result.details, null, 2)));
+        assert.ok(expanded.includes(JSON.stringify(result.structuredContent, null, 2)));
+        assert.deepEqual(result, before);
+        h.end('exe_js', result, true);
+        assert.match(h.widget, /Connection unconfirmed|连接未确认/);
+        assert.doesNotMatch(h.widget, /Unlock|解锁|Ready|就绪/);
+      }
+    }
+  } finally {
+    await h.dispose();
+  }
+});
+
+test('new iOS readiness errors retain category/code and raw model content with distinct bilingual statuses', async () => {
+  const h = harness();
+  await h.maat.platforms.select('ios');
+  const iosReady = aggregateSetup({
+    platform: 'ios',
+    capabilities: [
+      {
+        id: 'iosDevice',
+        required: true,
+        status: 'ready',
+        messageKey: 'capability.iosDevice.ready',
+      },
+    ],
+  });
+  const states = [
+    [
+      'IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED',
+      '首次控制组件安装待授权',
+      'First control-component installation needs authorization',
+      /明确授权|explicit approval/,
+    ],
+    [
+      'IOS_WDA_SIGNING_REQUIRED',
+      'WDA 签名需独立授权',
+      'WDA signing needs separate authorization',
+      /不自动续签|no automatic renewal/,
+    ],
+    [
+      'IOS_WDA_INSPECTION_FAILED',
+      'WDA 安装或签名检查失败',
+      'WDA installation or signature inspection failed',
+      /只读诊断|diagnose.*read-only/,
+    ],
+    [
+      'IOS_CONNECTION_INITIALIZATION_DISABLED',
+      '调用方禁用了连接初始化',
+      'Caller disabled connection initialization',
+      /existingSession/,
+    ],
+    [
+      'IOS_WDA_CONFIGURATION_CONFLICT',
+      'WDA 配置冲突',
+      'WDA configuration conflict',
+      /不自动改配置、重装或改 Team|no automatic configuration change, reinstall or Team change/,
+    ],
+    [
+      'IOS_READINESS_UNSUPPORTED',
+      'iOS readiness 配置不支持',
+      'iOS readiness configuration unsupported',
+      /不自动改配置、重装或改 Team|no automatic configuration change, reinstall or Team change/,
+    ],
+  ] as const;
+  try {
+    for (const language of ['请继续', 'Continue']) {
+      h.language(language);
+      h.emit('session_start');
+      for (const [code, zh, en, next] of states) {
+        for (const actionState of ['not-started', 'uncertain']) {
+          const primary = `${code}: ${'synthetic original verification detail '.repeat(20)}`;
+          const result = {
+            ...textResult(
+              `MAAT_EXECUTION_FAILED\ncategory: SETUP\nname: ReadinessError\nphase: initialize\ncode: ${code}\nsummary: ${primary}\nactionState: ${actionState}`,
+              {
+                failure: {
+                  category: 'SETUP',
+                  name: 'ReadinessError',
+                  phase: 'initialize',
+                  code,
+                  summary: primary,
+                  actionState,
+                },
+              },
+            ),
+            structuredContent: { retainedFact: 'synthetic model fact' },
+          };
+          const before = structuredClone(result);
+          const tool = h.makeTool('check_device_ready');
+          const ctx = { ...renderContext(), isError: true };
+          const collapsed = render(tool, result, ctx, false, false, 1200);
+          assert.ok(collapsed.includes(code));
+          assert.match(collapsed, /SETUP · ReadinessError · initialize/);
+          assert.ok(collapsed.includes(language === '请继续' ? zh : en));
+          assert.match(collapsed, next);
+          assert.match(
+            collapsed,
+            actionState === 'not-started'
+              ? /未执行 UI 动作|No UI action ran/
+              : /执行不确定|Execution uncertain/,
+          );
+          assert.doesNotMatch(
+            collapsed,
+            /allowWdaInitialization|authorize this WDA initialization|冷连接待|wake and unlock|请解锁/,
+          );
+          assert.ok(collapsed.split('\n').length <= 3);
+          const expanded = render(tool, result, ctx, true, false, 4000);
+          assert.ok(expanded.includes(primary));
+          assert.ok(expanded.includes(JSON.stringify(result.details, null, 2)));
+          assert.ok(expanded.includes(JSON.stringify(result.structuredContent, null, 2)));
+          assert.deepEqual(result, before);
+          h.end('check_device_ready', result, true);
+          assert.equal(h.widget, `iOS · ${language === '请继续' ? zh : en}`);
+          // Preparation and unrelated observations cannot clear a readiness error.
+          h.end('get_setup_diagnostics', textResult('', iosReady));
+          h.end('exe_js', { content: [image] });
+          assert.equal(h.widget, `iOS · ${language === '请继续' ? zh : en}`);
+          h.end('check_device_ready', textResult('', { ready: true, platform: 'ios' }));
+          assert.equal(h.widget, `iOS · ${language === '请继续' ? '就绪' : 'Ready'}`);
+        }
+      }
+    }
+  } finally {
+    await h.dispose();
+  }
 });
 
 test('locale follows current session user language on session, agent and tool events', async () => {

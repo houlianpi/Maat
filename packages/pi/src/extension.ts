@@ -19,7 +19,7 @@ export default function maatPiExtension(pi: ExtensionAPI): void {
 
   const renderStatus = (ctx: ExtensionContext) => {
     if (ctx.mode !== 'tui') return;
-    if (pi.getFlag('maat-mobile-ui') === true) {
+    if (mobileTool.enabled()) {
       mobileTool.update(ctx);
       return;
     }
@@ -30,7 +30,7 @@ export default function maatPiExtension(pi: ExtensionAPI): void {
   };
 
   pi.on('session_start', async (_event, ctx) => {
-    if (pi.getFlag('maat-mobile-ui') === true) {
+    if (mobileTool.enabled()) {
       for (const tool of tools) pi.registerTool(mobileTool(tool));
     }
     renderStatus(ctx);

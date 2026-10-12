@@ -52,22 +52,25 @@ iPhone. WDA signing/deployment is not verified by doctor.
 The iOS readiness path uses the existing Worker, requires an exact local device
 and endpoint, and has a three-minute budget. A healthy Session must return
 `driver.isLocked() === false` before and after source/viewport/image observation.
-Physical-iPhone readiness never falls back to another device/server or replays
-an App-target initialization failure. Existing ordinary native execution and
-explicit simulator execution remain available outside this readiness path;
-neither bypass can be counted as a successful first-use preparation check.
+Local physical-iPhone readiness and cold execution use exact device/server
+routing and verify reusable WDA before Session creation. Simulator and remote
+execution remain separate; they are not physical-phone readiness evidence.
 
-**Cold iPhone initialization requires explicit authorization.** The tested Xcode CoreDevice
-lock result contains `passcodeRequired` and `unlockedSinceBoot`, not a current
-screen/unlocked proof. A false passcode requirement is not treated as that proof.
-Without `allowWdaInitialization: true`, `IOS_DEVICE_LOCK_STATE_UNKNOWN` stops
-before POST `/session`. Set this transient flag only after the user explicitly
-authorizes first WDA startup and possible screen/system-prompt effects. Even with
-authorization, failed queries, a required passcode or no unlock since boot block
-initialization. It never sends an unlock command or stores consent in hints.
-Authorization is not a machine-proven unlocked fact: only subsequent live WDA
-lock checks and actual observations can establish readiness. Do not describe
-preparation checks as successful iPhone operation or autonomous first use.
+**Normal phone tasks may establish the existing control connection.** CoreDevice
+`passcodeRequired` and `unlockedSinceBoot` are cold lock hints, not proof of current
+unlock. Known passcode/boot locks and failed queries still stop. Otherwise the
+connection initializes without a separate per-Session approval; only live WDA
+lock checks and actual observations can establish readiness. No automatic unlock
+or business UI action runs during readiness.
+
+The cold path checks a current signed build and the component installed on the
+selected phone. First installation requires transient `allowWdaInstallation:true`;
+it does not authorize signing or restart. Missing/expired signing stops for an
+authorized build/renewal. Conflicting identity, automatic alert handling or a
+startup configuration that may remove another test Runner is rejected.
+The legacy Core `allowWdaInitialization:false` option remains an explicit
+existing-Session-only restriction, but Pi no longer exposes it as a routine chore.
+Neither permission is persisted in hints.
 
 `inspectIosWda({ device?, capabilities?, signal? })` reads the installed XCUITest
 project's existing Team and build, verifies the build's signature, and reports

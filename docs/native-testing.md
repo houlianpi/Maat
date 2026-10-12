@@ -44,17 +44,34 @@ budget and before/after `driver.isLocked()` observations. It requires a base
 physical-iPhone Session without an App target. The cold path binds the exact
 local endpoint and device and must not use another phone or an unrelated WDA.
 
-Cold initialization is blocked by default: the observed CoreDevice lock response
-contains `passcodeRequired` and `unlockedSinceBoot`, neither of which proves the
-current screen and lock state. It returns `IOS_DEVICE_LOCK_STATE_UNKNOWN`
-before Session creation instead of inventing an unlocked proof. After the user
-explicitly authorizes startup of WDA and possible screen/system-prompt effects,
-`allowWdaInitialization=true` permits this one initialization when the read-only
-query succeeds, no passcode is required and the phone was unlocked since boot.
-It does not authorize signing changes, reinstallation or a device restart.
-The flag is not persisted and is not a proof of current unlock. Live WDA lock
-checks and actual UI observations remain required. No autonomous first-use
-success follows from an authorization or preparation result alone.
+Normal phone tasks authorize the necessary existing control connection, not
+automatic unlocking. CoreDevice `passcodeRequired` and `unlockedSinceBoot` are
+only preflight hints: known passcode/boot locks or query failures stop, but
+successful hints do not require another initialization confirmation and do not
+prove current unlock. After connection, live WDA lock checks must succeed before
+source, viewport and optional screenshot observation. Business JS is generated
+and executed only after the actual channel observation; each physical-phone
+dispatch retains its live lock guard.
+
+Before a cold Session, Maat verifies the current signed build and the actual
+installed helper on the selected iPhone. Missing installation requires explicit
+first-installation permission via `allowWdaInstallation=true`; signing, Team
+changes and restart remain separate. Permission is not stored in hints. Unsafe
+startup options and other installed test Runners that cannot be preserved by
+Appium startup are rejected rather than silently rebuilt, removed or accepted.
+The same preflight applies to ordinary local physical-iPhone execution, including
+an absent or name-only selector. Use a base Session: launch the desired App through
+`exe_js` only after readiness. Safari, initial deep links, automatic build/provisioning
+switches, alternate WDA addresses and unverified build inputs are rejected before
+Session creation, including nested `appium:options`; existing hints are not silently
+changed. Local-build signature verification does not prove the signature of the
+binary currently installed on the phone.
+An explicit remote iOS endpoint never falls back to a local Appium server; a
+healthy remote execution path and explicit simulator execution remain separate.
+Necessary WDA/XCTest process startup or reconstruction is part of establishing
+the control connection, not permission to reboot the phone, restart user-managed
+Appium, or terminate unrelated user processes.
+No preparation or installation grant is an unlocked proof or a business pass.
 
 Only the user may approve device trust, Developer Mode, signing/account access,
 unlock or a required restart. Never request Apple credentials, rewrite signing

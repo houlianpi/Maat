@@ -6,14 +6,38 @@ export type SetupLocale = 'en' | 'zh-CN';
 /** Known readiness errors only; never infer current lock state from preparation facts. */
 export function phoneReadinessGuidance(message: string, locale: SetupLocale): string | undefined {
   const zh = locale === 'zh-CN';
+  if (/\bIOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED\b/.test(message))
+    return zh
+      ? 'IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED：所选 iPhone 首次安装 WDA 控制组件待授权，尚未开始安装或业务 UI。向用户一次说明必要安装及可能的系统提示；仅在本人明确授权首次安装后内部传 allowWdaInstallation=true 再检查，不把参数交给用户配置。此授权不包含签名更改、重启或解锁，不自动推断授权。'
+      : 'IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED: first installation of the WDA control component on the selected iPhone needs authorization; installation and business UI have not started. Explain the necessary installation and possible system prompts once. Only after explicit user approval of first installation may you internally pass allowWdaInstallation=true and recheck; do not ask the user to configure parameters. This does not authorize signing changes, restart or unlock; never infer approval.';
+  if (/\bIOS_WDA_SIGNING_REQUIRED\b/.test(message))
+    return zh
+      ? 'IOS_WDA_SIGNING_REQUIRED：WDA 签名缺失、过期或不匹配，不能自动续签。只读核查实际描述文件、证书和目标设备匹配；一次合并说明必要签名及首次安装（若需要）的具体影响并取得独立明确授权，保留现有 Team/bundle，不索取 Apple 凭据。'
+      : 'IOS_WDA_SIGNING_REQUIRED: WDA signing is missing, expired or mismatched; do not renew automatically. Inspect actual profile/certificate validity and target-device match read-only. Combine the concrete effects of necessary signing and first installation (if needed) in one request for separate explicit grants. Preserve the existing Team/bundle; never request Apple credentials.';
+  if (/\bIOS_WDA_INSPECTION_FAILED\b/.test(message))
+    return zh
+      ? 'IOS_WDA_INSPECTION_FAILED：无法核查所选 iPhone 上 WDA 的实际安装情况。保留原始检查错误，只读诊断；本机有效构建不等于手机已安装，也不证明手机上二进制的签名，不自动安装、重签名或重试业务动作。'
+      : 'IOS_WDA_INSPECTION_FAILED: the actual WDA installation state on the selected iPhone could not be inspected. Preserve the original inspection error and diagnose read-only. A valid local build proves neither phone installation nor the installed binary signature; do not automatically install, re-sign or retry business actions.';
+  if (/\bIOS_CONNECTION_INITIALIZATION_DISABLED\b/.test(message))
+    return zh
+      ? 'IOS_CONNECTION_INITIALIZATION_DISABLED：兼容调用方主动禁用了连接初始化，只允许 existingSession。普通手机任务默认可建立必要连接，无需额外冷连接授权；检查调用方配置，不把此状态当作手机锁定、安装授权或自动重试理由。'
+      : 'IOS_CONNECTION_INITIALIZATION_DISABLED: a legacy caller explicitly disabled connection initialization and allows existingSession only. Ordinary phone tasks allow the necessary connection by default, without an extra cold-connection authorization gate. Check the caller configuration; this is not a locked phone, an installation grant or permission for automatic retries.';
+  if (/\bIOS_WDA_CONFIGURATION_CONFLICT\b/.test(message))
+    return zh
+      ? 'IOS_WDA_CONFIGURATION_CONFLICT：WDA 签名 hint 不匹配，或手机上有其它 testRunner，继续可能触发 Appium cleanup 删除。仅报告明确配置冲突并只读核查；不自动重装、改 Team、删除组件或改变用户服务/手机数据，不以首次安装授权绕过冲突。'
+      : 'IOS_WDA_CONFIGURATION_CONFLICT: WDA signing hints mismatch or another testRunner exists on the phone, risking Appium cleanup deletion. Report the explicit configuration conflict and inspect read-only. Do not automatically reinstall, change Team, delete helpers or modify user services/phone data; first-install approval does not bypass this conflict.';
+  if (/\bIOS_READINESS_UNSUPPORTED\b/.test(message))
+    return zh
+      ? 'IOS_READINESS_UNSUPPORTED：当前配置不符合安全 WDA 复用路径（如 useNewWDA、autoAcceptAlerts/autoDismissAlerts、禁用 prebuilt、强制 preinstalled 或自定义 suffix）。仅报告具体不支持的配置，未确认可用前无业务 UI；不自动改配置、重装或改 Team，不绕过安全检查。'
+      : 'IOS_READINESS_UNSUPPORTED: the current configuration is incompatible with safe WDA reuse (such as useNewWDA, autoAcceptAlerts/autoDismissAlerts, disabled prebuilt, forced preinstalled or a custom suffix). Report the specific unsupported configuration; no business UI until usable. Do not automatically change configuration, reinstall or change Team, and do not bypass safety checks.';
   if (/\bIOS_WDA_SECURITY_REJECTED\b/.test(message))
     return zh
       ? 'IOS_WDA_SECURITY_REJECTED：iOS 拒绝 WDA，可能涉及签名、权限或开发者描述文件信任。请本人检查“设置 > 通用 > VPN与设备管理”的开发者 App 信任状态；若已信任或没有入口，核查 WDA 签名及描述文件有效期。不要循环重试或重装；更改签名、重新部署须另获明确授权，不索取 Apple 凭据。'
       : 'IOS_WDA_SECURITY_REJECTED: iOS rejected WDA; signing, entitlements or developer-profile trust may be involved. Check developer App trust in Settings > General > VPN & Device Management yourself; if already trusted or no entry exists, inspect WDA signing and profile expiry. Do not loop retries or reinstall. Signing changes and redeployment require separate explicit authorization; never request Apple credentials.';
   if (/\bIOS_DEVICE_LOCK_STATE_UNKNOWN\b/.test(message))
     return zh
-      ? 'IOS_DEVICE_LOCK_STATE_UNKNOWN：无法证明当前 iPhone 已点亮并解锁，默认阻止冷 Session 初始化。请本人确认手机状态；说明 WDA 初始化可能点亮屏幕或触发系统提示后，仅在明确授权本次初始化时使用 allowWdaInitialization=true。授权不是当前解锁证明，不重放之前的动作。'
-      : 'IOS_DEVICE_LOCK_STATE_UNKNOWN: the current awake/unlocked iPhone state is unproven; cold Session initialization is blocked by default. Confirm the phone state yourself. Only after explaining possible screen wake/system prompts and obtaining explicit authorization for this attempt may allowWdaInitialization=true be used. Authorization is not current-unlock proof; do not replay previous actions.';
+      ? 'IOS_DEVICE_LOCK_STATE_UNKNOWN：live WDA 未能返回可靠的当前锁状态，连接可用性未确认。这不是冷连接待授权。未确认可用前不读取 source、截图或执行业务 UI，不自动解锁；只读检查锁状态查询/连接故障，修复后重新检查，不重放之前的动作。'
+      : 'IOS_DEVICE_LOCK_STATE_UNKNOWN: live WDA did not return a reliable current lock state; connection usability is unconfirmed. This is not a cold-connection authorization request. Until readiness is confirmed, do not read source, take screenshots or perform business UI, and never automatically unlock. Inspect the lock-query/connection failure read-only, then recheck after correction; do not replay previous actions.';
   const code = /\b(?:ANDROID|IOS)_DEVICE_LOCKED\b/.exec(message)?.[0];
   if (code)
     return zh

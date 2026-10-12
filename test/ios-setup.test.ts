@@ -166,6 +166,11 @@ test('iOS doctor is read-only, path-free and distinguishes preparation from WDA 
     'appiumServer',
   ]);
   assert.match(String(snapshot.technicalDetails?.wda), /not-verified/);
+  assert.match(
+    String(snapshot.technicalDetails?.initializationAuthorization),
+    /normal phone tasks/,
+  );
+  assert.doesNotMatch(String(snapshot.technicalDetails?.wda), /may build, sign/);
   assert.deepEqual(snapshot.fingerprint, {});
   assert.equal(
     fake.calls.some((call) => /\b(?:install|launch|sign|start-server|session)\b/.test(call)),
@@ -320,7 +325,7 @@ test('iOS checking aborts and restores the prior snapshot rather than reporting 
   assert.equal(fake.calls.includes('devices'), false);
 });
 
-test('actual CoreDevice lock output cannot manufacture a cold unlocked/screen-on proof', async () => {
+test('CoreDevice lock hints allow normal connection but are not a live unlocked proof', async () => {
   const calls: string[][] = [];
   const command = async (_file: string, args: string[]) => {
     calls.push(args);
@@ -334,18 +339,13 @@ test('actual CoreDevice lock output cannot manufacture a cold unlocked/screen-on
       }),
     );
   };
-  await assert.rejects(
-    assertIosColdReadiness(privateId, undefined, command),
-    /IOS_DEVICE_LOCK_STATE_UNKNOWN.*do not prove the current lock or screen state/,
-  );
+  assert.equal(await assertIosColdReadiness(privateId, undefined, command), undefined);
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.[calls[0].indexOf('--device') + 1], privateId);
   assert.equal(
     calls.some((args) => args.some((arg) => /launch|unlock|install/.test(arg))),
     false,
   );
-  await assertIosColdReadiness(privateId, undefined, command, true);
-  assert.equal(calls.length, 2);
   await assert.rejects(
     assertIosColdReadiness(privateId, undefined, async () =>
       success(
@@ -361,31 +361,13 @@ test('actual CoreDevice lock output cannot manufacture a cold unlocked/screen-on
     /IOS_DEVICE_LOCK_STATE_UNKNOWN/,
   );
   await assert.rejects(
-    assertIosColdReadiness(privateId, undefined, async () => failed, true),
-    /IOS_DEVICE_LOCK_STATE_UNKNOWN/,
-  );
-  await assert.rejects(
-    assertIosColdReadiness(
-      privateId,
-      undefined,
-      async () =>
-        success(
-          JSON.stringify({
-            result: { passcodeRequired: true, unlockedSinceBoot: true },
-          }),
-        ),
-      true,
-    ),
-    /IOS_DEVICE_LOCKED/,
-  );
-  await assert.rejects(
     assertIosColdReadiness(privateId, undefined, async () => success('invalid')),
     /IOS_DEVICE_LOCK_STATE_UNKNOWN/,
   );
   const controller = new AbortController();
   controller.abort(new Error('aborted'));
   await assert.rejects(assertIosColdReadiness(privateId, controller.signal, command), /aborted/);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 1);
 });
 
 test('iOS readiness resolver keeps identity and endpoint exact and checks before initialization', async () => {
@@ -402,8 +384,13 @@ test('iOS readiness resolver keeps identity and endpoint exact and checks before
       return true;
     },
     devices: async () => [phone],
-    assertUnlocked: async (id: string) => {
+    checkColdLock: async (id: string) => {
       calls.push(id);
+    },
+    prepareWda: async (target: NativeEnvironment, allowed: boolean) => {
+      assert.equal(target.capabilities['appium:udid'], privateId);
+      assert.equal(allowed, false);
+      return { 'appium:usePrebuiltWDA': true };
     },
   };
   const resolved = await resolveIosReadinessSession(environment, undefined, deps);
@@ -423,10 +410,46 @@ test('iOS readiness resolver keeps identity and endpoint exact and checks before
   );
   assert.deepEqual(calls, [environment.serverUrl]);
   for (const capabilities of [
+    { 'appium:options': null },
+    { 'appium:options': [] },
+    { 'appium:options': true },
     { 'appium:options': { udid: 'OTHER' } },
     { 'appium:options': { deviceName: 'OTHER' } },
     { 'appium:webDriverAgentUrl': 'http://localhost:8100' },
     { 'appium:options': { automationName: 'UiAutomator2' } },
+    { 'appium:options': { useNewWDA: true } },
+    { 'appium:options': { autoAcceptAlerts: true } },
+    ...[
+      'prebuildWDA',
+      'useSimpleBuildTest',
+      'useXctestrunFile',
+      'allowProvisioningUpdates',
+      'allowProvisioningDeviceRegistration',
+      'launchWithIDB',
+      'autoWebview',
+    ].flatMap((key) => [
+      { [`appium:${key}`]: true },
+      { 'appium:options': { [key]: true } },
+      { [`appium:${key}`]: 'true' },
+    ]),
+    ...[
+      'agentPath',
+      'bootstrapPath',
+      'xcodeConfigFile',
+      'prebuiltWDAPath',
+      'keychainPath',
+      'keychainPassword',
+      'wdaBindingIP',
+      'initialDeeplinkUrl',
+      'safariInitialUrl',
+      'app',
+      'bundleId',
+    ].flatMap((key) => [
+      { [`appium:${key}`]: 'unverified-input' },
+      { 'appium:options': { [key]: 'unverified-input' } },
+    ]),
+    { browserName: 'Safari' },
+    { 'appium:options': { browserName: 'Safari' } },
   ]) {
     calls.length = 0;
     await assert.rejects(

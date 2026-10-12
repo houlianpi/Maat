@@ -1,7 +1,19 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import {
+  createEventBus,
+  createExtensionRuntime,
+  DefaultResourceLoader,
+  SettingsManager,
+  type ExtensionAPI,
+  type ExtensionContext,
+  type ModelRuntime,
+} from '@earendil-works/pi-coding-agent';
+// Exercise the installed CLI parser and flag application, not an imitation of them.
+import { parseArgs } from '../node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js';
+import { createAgentSessionServices } from '../node_modules/@earendil-works/pi-coding-agent/dist/core/agent-session-services.js';
+import { loadExtensionFromFactory } from '../node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js';
 import maatPiExtension from '../packages/pi/src/extension.ts';
 import { MAAT_SYSTEM_PROMPT } from '../packages/pi/src/system-prompt.ts';
 
@@ -56,47 +68,100 @@ test('Pi Extension registers execution/setup tools without legacy workflow tools
   assert.ok(events.includes('before_agent_start'));
 });
 
-test('mobile renderers activate after Pi applies command-line flags', async () => {
-  let enabled = false;
-  const tools: Array<{ name: string; renderCall?: unknown }> = [];
-  const handlers = new Map<string, Function[]>();
-  const pi = {
-    registerFlag(name: string, options: { description: string; default: boolean }) {
-      assert.equal(name, 'maat-mobile-ui');
-      assert.equal(options.description, 'Compact Maat tool cards and concise status');
-      assert.equal(options.default, false);
-    },
-    getFlag(name: string) {
-      assert.equal(name, 'maat-mobile-ui');
-      return enabled;
-    },
-    registerMessageRenderer() {},
-    registerTool(tool: { name: string; renderCall?: unknown }) {
-      tools.push(tool);
-    },
-    registerCommand() {},
-    on(name: string, handler: Function) {
-      const list = handlers.get(name) ?? [];
-      list.push(handler);
-      handlers.set(name, list);
-    },
-  } as unknown as ExtensionAPI;
-  maatPiExtension(pi);
-  assert.equal(tools.find((tool) => tool.name === 'exe_js')?.renderCall, undefined);
-  enabled = true;
-  for (const handler of handlers.get('session_start')!) await handler({}, { mode: 'print' });
-  assert.equal(
-    typeof tools.filter((tool) => tool.name === 'exe_js').at(-1)?.renderCall,
-    'function',
-  );
-  for (const handler of handlers.get('session_shutdown')!) await handler();
+test('real Pi SDK applies CLI flags before session_start decoration, with raw taking precedence', async (t) => {
+  for (const [name, args, compact] of [
+    ['unspecified flags default to compact', [], true],
+    ['valueless raw opt-out restores original tools', ['--maat-raw-ui'], false],
+    ['existing valueless mobile flag remains compatible', ['--maat-mobile-ui'], true],
+    ['raw wins over explicit mobile flag', ['--maat-mobile-ui', '--maat-raw-ui'], false],
+    ['boolean equals-false is presence, not an opt-out', ['--maat-mobile-ui=false'], true],
+  ] as const) {
+    await t.test(name, async (t) => {
+      const runtime = createExtensionRuntime();
+      const extension = await loadExtensionFromFactory(
+        maatPiExtension,
+        process.cwd(),
+        createEventBus(),
+        runtime,
+      );
+      const originals = new Map(
+        [...extension.tools].map(([name, tool]) => [name, tool.definition]),
+      );
+      assert.equal(extension.flags.get('maat-mobile-ui')?.type, 'boolean');
+      assert.equal(extension.flags.get('maat-mobile-ui')?.default, true);
+      assert.equal(extension.flags.get('maat-raw-ui')?.type, 'boolean');
+      assert.equal(extension.flags.get('maat-raw-ui')?.default, false);
+      assert.equal(runtime.flagValues.get('maat-raw-ui'), false);
+      for (const tool of originals.values()) {
+        assert.equal(tool.renderCall, undefined);
+        assert.equal(tool.renderResult, undefined);
+      }
+      // Isolate resource discovery and model refresh: no config, credentials, network,
+      // model request, device request or tool execution is needed for flag application.
+      t.mock.method(DefaultResourceLoader.prototype, 'reload', async () => {});
+      t.mock.method(DefaultResourceLoader.prototype, 'getExtensions', () => ({
+        extensions: [extension],
+        errors: [],
+        runtime,
+      }));
+      let refreshes = 0;
+      const modelRuntime = {
+        async refresh(options: { allowNetwork: boolean }) {
+          assert.equal(options.allowNetwork, false);
+          refreshes++;
+        },
+      } as unknown as ModelRuntime;
+      const parsed = parseArgs([...args]);
+      if (args.some((arg) => arg === '--maat-mobile-ui=false'))
+        assert.equal(parsed.unknownFlags.get('maat-mobile-ui'), 'false');
+      let compactStatus = false;
+      const ctx = {
+        mode: 'tui',
+        sessionManager: { getEntries: () => [] },
+        ui: {
+          setWidget(_name: string, widget: unknown) {
+            compactStatus = typeof widget === 'function';
+          },
+        },
+      } as unknown as ExtensionContext;
+      try {
+        const services = await createAgentSessionServices({
+          cwd: process.cwd(),
+          settingsManager: SettingsManager.inMemory(),
+          modelRuntime,
+          extensionFlagValues: parsed.unknownFlags,
+        });
+        assert.deepEqual(services.diagnostics, []);
+        assert.equal(refreshes, 1);
+        assert.equal(runtime.flagValues.get('maat-mobile-ui'), true);
+        assert.equal(runtime.flagValues.get('maat-raw-ui'), !compact);
+        for (const handler of extension.handlers.get('session_start')!)
+          await handler({ type: 'session_start', reason: 'startup' }, ctx);
+        assert.equal(compactStatus, compact);
+        for (const [name, tool] of extension.tools) {
+          const original = originals.get(name)!;
+          assert.equal(tool.definition.execute, original.execute);
+          if (compact) {
+            assert.equal(typeof tool.definition.renderCall, 'function');
+            assert.equal(typeof tool.definition.renderResult, 'function');
+            assert.equal(tool.definition.renderShell, 'self');
+          } else {
+            assert.equal(tool.definition, original);
+          }
+        }
+      } finally {
+        for (const handler of extension.handlers.get('session_shutdown')!)
+          await handler({ type: 'session_shutdown' }, ctx);
+      }
+    });
+  }
 });
 
 test('before_agent_start appends the Maat prompt and refreshes mobile status exactly once', async () => {
   const handlers = new Map<string, Function[]>();
   const pi = {
     registerFlag() {},
-    getFlag: () => true,
+    getFlag: (name: string) => name === 'maat-mobile-ui',
     registerMessageRenderer() {},
     registerTool() {},
     registerCommand() {},

@@ -108,6 +108,7 @@ export type FailureFacts = {
   actionState: 'not-started' | 'uncertain';
   phase?: string;
   name?: string;
+  category?: string;
   code?: string;
 };
 
@@ -127,7 +128,7 @@ export function failureFacts(result: unknown): FailureFacts {
   };
   const code =
     field('code') ??
-    /\b(?:ANDROID_DEVICE_LOCKED|IOS_DEVICE_LOCKED|IOS_DEVICE_LOCK_STATE_UNKNOWN|IOS_WDA_SECURITY_REJECTED)\b/.exec(
+    /\b(?:ANDROID_DEVICE_LOCKED|IOS_DEVICE_LOCKED|IOS_DEVICE_LOCK_STATE_UNKNOWN|IOS_WDA_SECURITY_REJECTED|IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED|IOS_WDA_SIGNING_REQUIRED|IOS_WDA_INSPECTION_FAILED|IOS_CONNECTION_INITIALIZATION_DISABLED|IOS_WDA_CONFIGURATION_CONFLICT|IOS_READINESS_UNSUPPORTED)\b/.exec(
       envelope ? (field('summary') ?? '') : (text.split('\n')[0] ?? ''),
     )?.[0];
   return {
@@ -136,19 +137,53 @@ export function failureFacts(result: unknown): FailureFacts {
       (text.split('\n').filter(Boolean).slice(0, 2).join(' · ') || 'Unknown error'),
     actionState: field('actionState') === 'not-started' ? 'not-started' : 'uncertain',
     phase: field('phase'),
-    name: field('name') ?? field('category'),
+    name: field('name'),
+    category: field('category'),
     code,
   };
+}
+
+function shortKnownErrorSummary(code: string | undefined, locale: SetupLocale): string | undefined {
+  const summaries: Record<string, [string, string]> = {
+    IOS_DEVICE_LOCK_STATE_UNKNOWN: [
+      'iPhone 连接未确认 · 锁状态未知',
+      'iPhone connection unconfirmed · lock state unknown',
+    ],
+    IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED: [
+      '首次控制组件安装待授权',
+      'First control-component installation needs authorization',
+    ],
+    IOS_WDA_SIGNING_REQUIRED: ['WDA 签名需独立授权', 'WDA signing needs separate authorization'],
+    IOS_WDA_INSPECTION_FAILED: [
+      'WDA 安装或签名检查失败',
+      'WDA installation or signature inspection failed',
+    ],
+    IOS_CONNECTION_INITIALIZATION_DISABLED: [
+      '调用方禁用了连接初始化',
+      'Caller disabled connection initialization',
+    ],
+    IOS_WDA_CONFIGURATION_CONFLICT: ['WDA 配置冲突', 'WDA configuration conflict'],
+    IOS_READINESS_UNSUPPORTED: [
+      'iOS readiness 配置不支持',
+      'iOS readiness configuration unsupported',
+    ],
+  };
+  return code ? summaries[code]?.[locale === 'zh-CN' ? 0 : 1] : undefined;
 }
 
 export function failureSummary(result: unknown, locale: SetupLocale): string[] {
   const facts = failureFacts(result);
   const zh = locale === 'zh-CN';
+  const known = shortKnownErrorSummary(facts.code, locale);
+  const reason =
+    known ?? (facts.reason.length > 350 ? `${facts.reason.slice(0, 350)}…` : facts.reason);
   return [
     [
-      facts.name,
+      facts.category,
+      facts.name !== facts.category ? facts.name : undefined,
       facts.phase,
-      facts.reason.length > 350 ? `${facts.reason.slice(0, 350)}…` : facts.reason,
+      known ? facts.code : undefined,
+      reason,
     ]
       .filter(Boolean)
       .join(' · '),
@@ -156,10 +191,10 @@ export function failureSummary(result: unknown, locale: SetupLocale): string[] {
       ? zh
         ? '未执行 UI 动作'
         : 'No UI action ran'
-      : facts.code === 'IOS_DEVICE_LOCK_STATE_UNKNOWN'
+      : known
         ? zh
-          ? '执行不确定 · 勿重放；冷连接仍被阻止'
-          : 'Execution uncertain · do not replay; cold connection remains blocked'
+          ? '执行不确定 · 勿重放；通道未确认前无业务 UI'
+          : 'Execution uncertain · do not replay; no business UI until channel confirmed'
         : zh
           ? '执行不确定 · 先只读观察，勿重放'
           : 'Execution uncertain · observe read-only; do not replay',
@@ -169,15 +204,36 @@ export function failureSummary(result: unknown, locale: SetupLocale): string[] {
         : 'Next: wake and unlock the phone yourself, then recheck'
       : facts.code === 'IOS_DEVICE_LOCK_STATE_UNKNOWN'
         ? zh
-          ? '下一步：本人确认手机状态，明确授权本次 WDA 初始化；不自动绕过冷保护'
-          : 'Next: confirm phone state and explicitly authorize this WDA initialization; no automatic cold-guard bypass'
-        : facts.code === 'IOS_WDA_SECURITY_REJECTED'
+          ? '下一步：只读检查锁查询/连接故障，再复查可用性；不自动解锁'
+          : 'Next: inspect lock-query/connection failure read-only, then recheck; no automatic unlock'
+        : facts.code === 'IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED'
           ? zh
-            ? '下一步：检查开发者 App 信任；已信任或无入口则核查签名/有效期，勿循环重试'
-            : 'Next: check developer App trust; if trusted or absent, inspect signing/profile expiry; no retry loop'
-          : zh
-            ? '下一步：检查连接并只读观察，不自动重试动作'
-            : 'Next: check the connection and observe read-only; no automatic action retry',
+            ? '下一步：一次说明首次安装影响，等待所选手机安装的明确授权'
+            : 'Next: explain first-install effects once; await explicit approval for the selected phone'
+          : facts.code === 'IOS_WDA_SIGNING_REQUIRED'
+            ? zh
+              ? '下一步：只读核查签名/有效期，必要重签名另获授权；不自动续签'
+              : 'Next: inspect signing/expiry read-only; obtain re-signing approval, no automatic renewal'
+            : facts.code === 'IOS_WDA_INSPECTION_FAILED'
+              ? zh
+                ? '下一步：只读诊断实际安装/签名检查失败，不自动安装或重签名'
+                : 'Next: diagnose actual installation/signature inspection read-only; no automatic install or re-sign'
+              : facts.code === 'IOS_CONNECTION_INITIALIZATION_DISABLED'
+                ? zh
+                  ? '下一步：检查调用方 existingSession 配置，不索取冷连接授权'
+                  : 'Next: check caller existingSession configuration; no cold-connection approval gate'
+                : facts.code === 'IOS_WDA_CONFIGURATION_CONFLICT' ||
+                    facts.code === 'IOS_READINESS_UNSUPPORTED'
+                  ? zh
+                    ? '下一步：仅报告具体配置问题并只读核查，不自动改配置、重装或改 Team'
+                    : 'Next: report the specific configuration issue and inspect read-only; no automatic configuration change, reinstall or Team change'
+                  : facts.code === 'IOS_WDA_SECURITY_REJECTED'
+                    ? zh
+                      ? '下一步：检查开发者 App 信任；已信任或无入口则核查签名/有效期，勿循环重试'
+                      : 'Next: check developer App trust; if trusted or absent, inspect signing/profile expiry; no retry loop'
+                    : zh
+                      ? '下一步：检查连接并只读观察，不自动重试动作'
+                      : 'Next: check the connection and observe read-only; no automatic action retry',
   ];
 }
 

@@ -60,11 +60,11 @@ export async function detectIosSetup(
   const facts: Record<string, unknown> = {
     preparationOnly: true,
     serverScope: local ? 'local' : 'remote',
-    wda: 'not-verified; first connection may build, sign and deploy WebDriverAgent',
+    wda: 'not-verified; connection must inspect a valid signed local build and the selected iPhone installation before reuse',
     currentLockState:
       'unknown; passcode and boot-unlock facts do not prove current screen or lock state',
     initializationAuthorization:
-      'first WDA initialization requires explicit user authorization of possible screen and system-prompt effects',
+      'normal phone tasks allow necessary connection initialization; live WDA lock checks precede UI; first installation, signing changes and device/service restart require separate authorization',
   };
   if (!local || dependencies.hostPlatform !== 'darwin') {
     capabilities.push({

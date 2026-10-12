@@ -19,6 +19,7 @@ import {
   resolveAppiumSession,
   resolveAndroidReadinessSession,
   resolveIosReadinessSession,
+  isLocalAppiumEndpoint,
 } from './session-resolver.ts';
 import { discoverDevices } from '../../setup/devices.ts';
 import { discoverApplications } from '../../setup/applications.ts';
@@ -175,18 +176,33 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   private async prepare(
     signal?: AbortSignal,
     readiness = false,
-    allowWdaInitialization = false,
+    allowWdaInstallation = false,
   ): Promise<void> {
     signal?.throwIfAborted();
     if (!this.environment) await this.initialize();
     try {
       const safeAndroid = this.id === 'android';
-      const safeIos = this.id === 'ios' && readiness;
-      const resolved = safeIos
-        ? await this.resolveIosReadiness(signal, undefined, allowWdaInitialization)
+      const safeIos =
+        this.id === 'ios' &&
+        (readiness ||
+          (this.environment!.device?.kind !== 'simulator' &&
+            isLocalAppiumEndpoint(this.environment!.serverUrl ?? 'http://127.0.0.1:4723/')));
+      if (safeIos && this.app && Object.keys(this.app).length)
+        throw new Error(
+          'IOS_READINESS_BASE_SESSION_REQUIRED: establish a base connection before launching an App through exe_js. The configured App target was not cleared automatically.',
+        );
+      let resolved = safeIos
+        ? await this.resolveIosReadiness(signal, undefined, allowWdaInstallation)
         : safeAndroid
           ? await this.resolveReadiness(signal)
           : await resolveAppiumSession(this.environment!, undefined, signal);
+      if (
+        this.id === 'ios' &&
+        !safeIos &&
+        resolved.environment.device?.kind === 'device' &&
+        isLocalAppiumEndpoint(resolved.environment.serverUrl!)
+      )
+        resolved = await this.resolveIosReadiness(signal, undefined, allowWdaInstallation);
       signal?.throwIfAborted();
       const definition = this.definition;
       await this.runtime.configureResolved({
@@ -215,21 +231,21 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   protected resolveIosReadiness(
     signal?: AbortSignal,
     currentTarget?: ResolvedNativeSession,
-    allowWdaInitialization = false,
+    allowWdaInstallation = false,
   ) {
     return resolveIosReadinessSession(
       this.environment!,
       signal,
       undefined,
       currentTarget,
-      allowWdaInitialization,
+      allowWdaInstallation,
     );
   }
 
   async executeReadiness(
     code: string,
     signal?: AbortSignal,
-    readinessOptions: { allowWdaInitialization?: boolean } = {},
+    readinessOptions: { allowWdaInitialization?: boolean; allowWdaInstallation?: boolean } = {},
   ) {
     if (this.id !== 'android' && this.id !== 'ios')
       throw new Error('Only Android and iOS support setup readiness.');
@@ -250,9 +266,13 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         `${this.label} setup readiness requires a base Session without an App target.`,
       );
     if (this.id === 'android') await this.prepareAndroidExecution(signal);
-    else if (!this.runtime.isRunning)
-      await this.prepare(signal, true, readinessOptions.allowWdaInitialization);
-    else {
+    else if (!this.runtime.isRunning) {
+      if (readinessOptions.allowWdaInitialization === false)
+        throw new Error(
+          'IOS_CONNECTION_INITIALIZATION_DISABLED: this caller requested an existing Session only; no new Session was created.',
+        );
+      await this.prepare(signal, true, readinessOptions.allowWdaInstallation);
+    } else {
       const generation = this.runtime.currentSessionGeneration;
       const target = this.runtime.currentTarget;
       if (!target || generation === undefined)

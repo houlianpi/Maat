@@ -153,6 +153,8 @@ test('Android readiness forwards observations without formal persistence and exp
   let requestedScreenshot: boolean | undefined;
   maat.setup.ready = async (input = {}) => {
     assert.equal(input.signal, signal);
+    assert.equal(input.allowWdaInstallation, undefined);
+    assert.equal('allowWdaInitialization' in input, false);
     requestedScreenshot = input.screenshot;
     return {
       platform: 'android',
@@ -174,6 +176,7 @@ test('Android readiness forwards observations without formal persistence and exp
   };
   const tool = createSetupTools(maat).find((item) => item.name === 'check_device_ready');
   assert.ok(tool);
+  assert.equal('allowWdaInitialization' in tool.parameters.properties, false);
   const result = await tool.execute('ready', { screenshot: false }, signal, undefined, ctx);
   assert.equal(requestedScreenshot, false);
   assert.ok(result.content.some((item) => item.type === 'text' && item.text === '<hierarchy />'));

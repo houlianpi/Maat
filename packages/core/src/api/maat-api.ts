@@ -145,7 +145,12 @@ export class MaatApi {
       return snapshot;
     },
     ready: async (
-      input: { screenshot?: boolean; signal?: AbortSignal; allowWdaInitialization?: boolean } = {},
+      input: {
+        screenshot?: boolean;
+        signal?: AbortSignal;
+        allowWdaInitialization?: boolean;
+        allowWdaInstallation?: boolean;
+      } = {},
     ): Promise<SetupReadiness> => {
       const adapter = this.registry.current;
       if (adapter.id !== 'android' && adapter.id !== 'ios')
@@ -163,6 +168,13 @@ export class MaatApi {
         throw new Error(
           'WDA initialization authorization applies only to iOS; Android unlock protection is unchanged.',
         );
+      if (
+        input.allowWdaInstallation !== undefined &&
+        typeof input.allowWdaInstallation !== 'boolean'
+      )
+        throw new Error('WDA first-installation authorization must be a boolean.');
+      if (input.allowWdaInstallation && adapter.id !== 'ios')
+        throw new Error('WDA installation authorization applies only to iOS.');
       const signal = AbortSignal.any([
         ...(input.signal ? [input.signal] : []),
         AbortSignal.timeout(adapter.id === 'ios' ? 180_000 : 15_000),
@@ -221,6 +233,7 @@ export class MaatApi {
         observations = parseObservations(
           await adapter.executeReadiness(code, signal, {
             allowWdaInitialization: input.allowWdaInitialization,
+            allowWdaInstallation: input.allowWdaInstallation,
           }),
         );
         signal.throwIfAborted();

@@ -20,8 +20,10 @@ Host tools remain available under the host's own permission controls.
 Start from the natural phone task or `/maat-setup [android|ios]`, not another
 generic permission or "start preparation" gate. If the existing channel is healthy,
 continue directly. Ordinary missing-component preparation inside the approved
-scope is automatic; combine only the necessary first-control, signing/deployment
-and possible-screen-wake explanation into one confirmation when needed. Internal
+scope is automatic. Ordinary iOS connection initialization needs no per-cold-Session
+confirmation. First control-component installation, re-signing and restart still
+require separate explicit grants; combine only necessary concrete effects and
+possible system prompts into one request when needed, not one request per command. Internal
 authorization flags are implementation details, not questions for the user.
 
 `prepare_mobile` has only `status`, `start-appium`, and `build-ios-wda` actions:
@@ -56,7 +58,7 @@ A timed-out wait leaves work running, never starts it again. Appium has a 60-sec
 overall startup deadline; WDA work has a 180-second deadline. Process failures
 remain failed even if an unrelated service later responds.
 `ready` means **serviceResponding only**, not deviceReady or business success.
-Continue with the authorized `check_device_ready` and its actual observation.
+Continue with `check_device_ready` and its actual observation.
 
 Pi 0.87's built-in bash has no tracked-background API. Never work around this with
 `nohup`, `&`, or an instruction to open another terminal. Extension/standalone TUI
@@ -88,26 +90,65 @@ Use a base Session without App target capabilities; activate a known bundle ID
 separately after readiness. Preserve App data/login and external services.
 
 `check_device_ready` has a bounded 180-second iOS budget (Android: 15 seconds).
-Cold readiness defaults to stopping with `IOS_DEVICE_LOCK_STATE_UNKNOWN` when
-current awake/unlocked state cannot be proven. CoreDevice
-`passcodeRequired:false` plus `unlockedSinceBoot:true` is not proof of current
-unlock or screen state. Explain that first WDA initialization may wake the
-screen or trigger system prompts and wait for explicit user authorization.
-Only then use `check_device_ready({allowWdaInitialization:true})` for that
-attempt. This transient flag is not saved, not unlock proof and not permission
-to change signing or reinstall. Known lock/unsafe probe states still stop;
-readiness requires live WDA unlocked state and real source/viewport observations,
-plus an image when requested. Ordinary iOS/simulator execution is not a claim
-that all paths use this readiness cold guard.
+Ordinary phone tasks allow the necessary control connection by default, including
+cold Sessions. Diagnose actual conditions; with a current valid build and an
+existing phone helper, call `check_device_ready` with only the screenshot option
+and continue the original task. No extra initialization authorization gate applies.
+Use the exact selected device/server without root endpoint fallback.
+Necessary startup or reconstruction of existing WDA/XCTest control processes
+belongs to normal connection initialization. Separate restart permission means
+rebooting the phone or stopping/restarting user-managed Appium, not every WDA
+process launch. It never permits terminating unrelated user processes.
+A valid local build is not proof that WDA is installed on the selected phone:
+Core checks actual phone installation and the local build's signature before connection;
+this is not verification of the installed phone binary's signature. Ordinary
+readiness only reuses the current valid build and existing helper; do not let
+Appium auto-sign or automatically perform first installation.
 
-Trust, Developer Mode, signing changes and deployment require the user's actual
-permission; never request Apple credentials. Prefer existing signed WDA when
-usable. `IOS_DEVICE_LOCKED` requires the user to wake/unlock, not automatic
+CoreDevice
+`passcodeRequired:false` plus `unlockedSinceBoot:true` is not proof of current
+unlock or screen state, but these facts are not a cold-connection approval gate.
+Known passcode lock still blocks. After connecting, live WDA must confirm an
+unlocked boolean before source, screenshot or business UI. `IOS_DEVICE_LOCK_STATE_UNKNOWN`
+means an actual live lock-query failure or missing boolean, not pending initialization
+authorization. Inspect that failure read-only; until usability is confirmed, no
+source, screenshot or business UI, no automatic unlock and no action replay.
+
+`IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED` stops before POST when first phone
+installation lacks authorization. Explain the necessary WDA control-component
+installation on the selected phone and possible system prompts once. Only after
+explicit user approval may you internally call
+`check_device_ready({allowWdaInstallation:true})` for that attempt.
+Never infer approval from an ordinary phone task or automatically select true;
+do not give the user parameters as technical homework. This grant is not permission
+for signing changes, restart or unlock. First installation, re-signing and restart
+remain independently authorized; if several are necessary, combine their concrete
+effects and obtain the separate grants in one request, not one per command.
+`IOS_WDA_SIGNING_REQUIRED` means missing/expired/mismatched signing and must not
+auto-renew. `IOS_WDA_INSPECTION_FAILED` preserves failed actual installation-state
+verification; it is not proof of missing WDA or permission to reinstall.
+`IOS_CONNECTION_INITIALIZATION_DISABLED` is a legacy caller's existingSession-only
+opt-out, not a new model authorization gate.
+`IOS_WDA_CONFIGURATION_CONFLICT` reports mismatched signing hints or another
+testRunner on the phone, preventing Appium cleanup from deleting helpers.
+`IOS_READINESS_UNSUPPORTED` reports configuration outside safe reuse:
+`useNewWDA`, `autoAcceptAlerts`/`autoDismissAlerts`, disabled prebuilt, forced
+preinstalled or a custom suffix, build/provisioning overrides, alternate WDA addresses
+or build inputs, Safari and initial deep links. Ordinary local physical-iPhone
+execution uses the same safe cold path even without a device-kind hint; it cannot
+launch an App in the Session POST before live lock checks. Report the specific configuration issue and inspect
+read-only; do not automatically change configuration, reinstall, change Team, delete
+helpers or modify user services/phone data. First-install approval does not bypass
+these checks or authorize re-signing; expired signing still requires separate approval.
+
+Trust, Developer Mode, passwords and authentication remain user-only; never request
+Apple credentials. Prefer existing signed WDA when usable.
+`IOS_DEVICE_LOCKED` requires the user to wake/unlock, not automatic
 unlock, restart or action replay. `IOS_WDA_SECURITY_REJECTED` may mean invalid
 signing, entitlements or developer-profile trust. Ask the user to check developer
 App trust in Settings > General > VPN & Device Management once. If trusted or
 there is no entry, inspect signing and profile expiry read-only; do not force
-repeated trust searches or retry/reinstall loops. Renewal/redeployment needs
+repeated trust searches or retry/reinstall loops. Signing changes/first installation need
 separate explicit authorization.
 
 When checking an existing WDA build, read its embedded provisioning profile's
@@ -157,12 +198,13 @@ retain the Session while waiting for user action if more phone work remains.
    for every user task.
 3. If preparation is sufficient, call `check_device_ready` to establish the current
    Session and obtain a current UI observation. Request `screenshot=true` when
-   visual inspection is needed. Before a new local Session, Maat checks that the
+   visual inspection is needed. Before a new Android Session, Maat checks that the
    selected phone is awake and unlocked; a locked, screen-off or unknown state
    must stop before automation initialization. Once the user unlocks it, reuse
    existing phone helpers and prepare only missing components. Session creation
    can deploy helpers or trigger platform prompts; explain these effects before
-   first connection.
+   first Android connection. For iOS, follow the live-lock/first-install policy above;
+   ordinary control connection initialization is automatic, not a confirmation gate.
    Configure the device/server first without an App target; after the phone
    channel is usable, discover and launch the requested App with `exe_js`.
 4. Reuse the returned observation and continue the original task. A ready channel

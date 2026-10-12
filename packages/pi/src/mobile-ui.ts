@@ -17,6 +17,24 @@ import {
   toolTitles,
 } from './mobile-summary.ts';
 
+/** Bound collapsed presentation only; expanded text and model facts stay intact. */
+function collapsedText(lines: string[]) {
+  return {
+    render: (width: number) =>
+      lines
+        .slice(0, 3)
+        .map((line, index) =>
+          truncateToWidth(
+            line.replace(/\r\n?|\n/g, ' · ').replace(/\t/g, '   ') +
+              (index === 2 && lines.length > 3 ? '…' : ''),
+            width,
+            '…',
+          ),
+        ),
+    invalidate() {},
+  };
+}
+
 /** Presentation only: no observation, recovery, device action or host policy changes. */
 export function createMobileUi(pi: ExtensionAPI, maat: MaatApi) {
   let latestContext: ExtensionContext | undefined;
@@ -24,9 +42,20 @@ export function createMobileUi(pi: ExtensionAPI, maat: MaatApi) {
   let platformId = maat.platforms.current().id;
   let snapshot: SetupSnapshot | undefined;
   let confirmed = false;
-  let risk: 'locked' | 'lock-unknown' | 'wda-security' | 'connection' | undefined;
+  let risk:
+    | 'locked'
+    | 'lock-unknown'
+    | 'wda-installation'
+    | 'wda-signing'
+    | 'wda-inspection'
+    | 'wda-configuration'
+    | 'readiness-unsupported'
+    | 'initialization-disabled'
+    | 'wda-security'
+    | 'connection'
+    | undefined;
   const activeCalls = new Map<string, string>();
-  const enabled = () => pi.getFlag('maat-mobile-ui') === true;
+  const enabled = () => pi.getFlag('maat-mobile-ui') === true && pi.getFlag('maat-raw-ui') !== true;
   const relevant = (name: string) => name === 'exe_js' || name === 'check_device_ready';
   const capture = (ctx: ExtensionContext) => {
     latestContext = ctx;
@@ -35,6 +64,11 @@ export function createMobileUi(pi: ExtensionAPI, maat: MaatApi) {
 
   pi.registerFlag('maat-mobile-ui', {
     description: 'Compact Maat tool cards and concise status',
+    type: 'boolean',
+    default: true,
+  });
+  pi.registerFlag('maat-raw-ui', {
+    description: 'Use original Maat tool display instead of compact cards',
     type: 'boolean',
     default: false,
   });
@@ -52,7 +86,20 @@ export function createMobileUi(pi: ExtensionAPI, maat: MaatApi) {
     // Explicit user-only actions and unresolved execution risk outrank activity.
     if (risk === 'locked') return zh ? '请解锁手机' : 'Unlock the phone';
     if (risk === 'lock-unknown')
-      return zh ? '冷连接待明确授权' : 'Cold connection needs explicit authorization';
+      return zh ? '连接未确认 · 锁状态未知' : 'Connection unconfirmed · lock state unknown';
+    if (risk === 'wda-installation')
+      return zh
+        ? '首次控制组件安装待授权'
+        : 'First control-component installation needs authorization';
+    if (risk === 'wda-signing')
+      return zh ? 'WDA 签名需独立授权' : 'WDA signing needs separate authorization';
+    if (risk === 'wda-inspection')
+      return zh ? 'WDA 安装或签名检查失败' : 'WDA installation or signature inspection failed';
+    if (risk === 'wda-configuration') return zh ? 'WDA 配置冲突' : 'WDA configuration conflict';
+    if (risk === 'readiness-unsupported')
+      return zh ? 'iOS readiness 配置不支持' : 'iOS readiness configuration unsupported';
+    if (risk === 'initialization-disabled')
+      return zh ? '调用方禁用了连接初始化' : 'Caller disabled connection initialization';
     if (risk === 'wda-security') return zh ? '请检查 WDA 信任或签名' : 'Check WDA trust or signing';
     if (risk) return zh ? '请检查连接' : 'Check the connection';
     if (deviceAction?.messageKey === 'capability.iosDevice.trust')
@@ -135,14 +182,11 @@ export function createMobileUi(pi: ExtensionAPI, maat: MaatApi) {
   for (const messageType of ['maat-android-setup', 'maat-ios-setup']) {
     pi.registerMessageRenderer<{ summary: string[] }>(messageType, (message, options) => {
       if (!enabled()) return undefined;
-      return new Text(
-        options.expanded
-          ? resultText({ content: [{ type: 'text', text: message.content }] })
-          : (message.details?.summary.join('\n') ??
-            (locale === 'zh-CN' ? '手机准备' : 'Phone preparation')),
-        0,
-        0,
-      );
+      return options.expanded
+        ? new Text(resultText({ content: [{ type: 'text', text: message.content }] }), 0, 0)
+        : collapsedText(
+            message.details?.summary ?? [locale === 'zh-CN' ? '手机准备' : 'Phone preparation'],
+          );
     });
   }
   pi.on('session_start', (_event, ctx) => reset(ctx));
@@ -191,9 +235,21 @@ export function createMobileUi(pi: ExtensionAPI, maat: MaatApi) {
             ? 'locked'
             : failure.code === 'IOS_DEVICE_LOCK_STATE_UNKNOWN'
               ? 'lock-unknown'
-              : failure.code === 'IOS_WDA_SECURITY_REJECTED'
-                ? 'wda-security'
-                : 'connection';
+              : failure.code === 'IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED'
+                ? 'wda-installation'
+                : failure.code === 'IOS_WDA_SIGNING_REQUIRED'
+                  ? 'wda-signing'
+                  : failure.code === 'IOS_WDA_INSPECTION_FAILED'
+                    ? 'wda-inspection'
+                    : failure.code === 'IOS_WDA_CONFIGURATION_CONFLICT'
+                      ? 'wda-configuration'
+                      : failure.code === 'IOS_READINESS_UNSUPPORTED'
+                        ? 'readiness-unsupported'
+                        : failure.code === 'IOS_CONNECTION_INITIALIZATION_DISABLED'
+                          ? 'initialization-disabled'
+                          : failure.code === 'IOS_WDA_SECURITY_REJECTED'
+                            ? 'wda-security'
+                            : 'connection';
         confirmed = false;
       } else if (event.toolName === 'check_device_ready' && facts.ready === true) {
         // Only an actual recent channel check resolves the connection warning.
@@ -230,12 +286,10 @@ export function createMobileUi(pi: ExtensionAPI, maat: MaatApi) {
                   : zh
                     ? '待执行'
                     : 'Queued';
-          return new Text(
-            theme.fg('toolOutput', `${title}${phase ? ` · ${phase}` : ''}`) +
-              (context.expanded ? `\n${JSON.stringify(args, null, 2)}` : ''),
-            0,
-            0,
-          ).render(width);
+          const header = theme.fg('toolOutput', `${title}${phase ? ` · ${phase}` : ''}`);
+          return context.expanded
+            ? new Text(`${header}\n${JSON.stringify(args, null, 2)}`, 0, 0).render(width)
+            : collapsedText([header]).render(width);
         },
         invalidate() {},
       }),
@@ -247,17 +301,19 @@ export function createMobileUi(pi: ExtensionAPI, maat: MaatApi) {
             ? failureSummary(result, locale)
             : compactResult(tool.name, result, locale);
         const raw = record(result);
-        const expanded = options.expanded
-          ? [
-              resultText(result),
-              ...(raw.details !== undefined ? [JSON.stringify(raw.details, null, 2)] : []),
-              ...(raw.structuredContent !== undefined
-                ? [JSON.stringify(raw.structuredContent, null, 2)]
-                : []),
-            ]
-              .filter(Boolean)
-              .join('\n')
-          : '';
+        if (!options.expanded)
+          return collapsedText(
+            lines.map((line) => theme.fg(context.isError ? 'error' : 'toolOutput', line)),
+          );
+        const expanded = [
+          resultText(result),
+          ...(raw.details !== undefined ? [JSON.stringify(raw.details, null, 2)] : []),
+          ...(raw.structuredContent !== undefined
+            ? [JSON.stringify(raw.structuredContent, null, 2)]
+            : []),
+        ]
+          .filter(Boolean)
+          .join('\n');
         return new Text(
           theme.fg(context.isError ? 'error' : 'toolOutput', lines.join('\n')) +
             (expanded ? `\n${expanded}` : ''),
@@ -267,5 +323,5 @@ export function createMobileUi(pi: ExtensionAPI, maat: MaatApi) {
       },
     };
   };
-  return Object.assign(decorate, { update, prepared });
+  return Object.assign(decorate, { update, prepared, enabled });
 }

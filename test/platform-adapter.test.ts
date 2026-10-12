@@ -82,6 +82,35 @@ test('Appium resolver requires user selection when multiple devices remain', asy
   );
 });
 
+test('remote iOS deviceName and nested physical routing cannot fall back to a local server', async () => {
+  const remote = 'https://remote.example/';
+  const probes: string[] = [];
+  const dependencies: SessionResolverDependencies = {
+    serverReady: async (url) => {
+      probes.push(url);
+      return url === 'http://127.0.0.1:4723/';
+    },
+    discoverDevices: async () => {
+      throw new Error('The remote endpoint must not discover or select a local phone.');
+    },
+  };
+  const capabilities = {
+    'appium:deviceName': 'iPhone',
+    'appium:options': { udid: 'MOCK_IPHONE', prebuildWDA: true },
+  };
+  await assert.rejects(
+    resolveAppiumSession({ platform: 'ios', serverUrl: remote, capabilities }, dependencies),
+    (error: unknown) => error instanceof SessionSetupError && error.code === 'server-unavailable',
+  );
+  assert.deepEqual(probes, [remote]);
+  const healthy = await resolveAppiumSession(
+    { platform: 'ios', serverUrl: remote, capabilities },
+    { ...dependencies, serverReady: async () => true },
+  );
+  assert.equal(healthy.environment.serverUrl, remote);
+  assert.deepEqual(healthy.capabilities, capabilities);
+});
+
 test('platform switching routes execution without closing other adapter Sessions', async () => {
   const events: string[] = [];
   const web = adapter('web', events);

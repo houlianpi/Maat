@@ -50,8 +50,9 @@ iOS 在无已有 Appium task 时 `status` 检查 WDA，`build-ios-wda` 总是先
 Core 返回真实 profile 日期/设备匹配及独立 certificate 有效期；付费/免费一视同仁，不默认七天。
 valid build 无需签名授权即可复用；missing/expired 须本人明确授权，保留现有 Team/bundle。
 工具只构建，不挑账号、不换 Team、不删 App、不购买、不部署；内部 caps 仅在原 adapter/
-device/hints 未变化时应用。后续 XCTest 部署/初始化须在明确授权范围；首次控制、签名、
-可能点亮只合并必要说明确认，不把内部 flags 抛给用户，也不反复确认。
+device/hints 未变化时应用。普通连接初始化默认复用手机已有 helper；首次 WDA 安装、
+重签名和重启仍需独立明确授权，一次合并必要的具体影响/可能提示，不把内部 flags
+抛给用户，不按每条命令或每个冷 Session 反复确认。
 
 ## iOS 准备、初始化与验收
 
@@ -59,16 +60,35 @@ device/hints 未变化时应用。后续 XCTest 部署/初始化须在明确授�
 Developer Mode 与 Appium，不验证 WDA 签名。Pi command/retry/diagnostics 始终保持 iOS，
 不误跳 macOS 设置，不提示 Android SDK 或读取项目源码修环境。
 
-不能证明当前点亮/解锁状态时，cold readiness 默认以 `IOS_DEVICE_LOCK_STATE_UNKNOWN`
-阻塞。CoreDevice `passcodeRequired:false`/`unlockedSinceBoot:true` 不是当前屏幕/解锁证明。
-解释 WDA 初始化可能点亮/触发提示、获得本人明确授权后，才能本次调用
-`check_device_ready({allowWdaInitialization:true})`。此参数不持久化，不授权修改签名，
-也不是解锁证明；危险/已锁状态仍停止，须 live WDA 解锁及真实 source/viewport、
-按需图片才能 ready。预算 iOS 180 秒、Android 15 秒；不声称普通 iOS/模拟器执行全面使用冷保护。
+普通手机任务自动建立必要控制连接。实际诊断后已有有效构建和手机 helper 时，直接
+`check_device_ready`（只需 screenshot 选项）继续原任务，不逐冷 Session 询问初始化授权。
+Core 精确使用所选 device/server、不 fallback root，连接前检查手机实际安装的 WDA 及签名；
+本机有效构建不等于手机已安装。普通路径只复用有效构建和已有 helper，不让 Appium 自动
+签名或首次安装。CoreDevice `passcodeRequired:false`/`unlockedSinceBoot:true` 不是当前
+解锁证明，但也不是初始化授权门槛。已知锁定拦截；连接后须 live WDA 确认解锁布尔值，
+之后才能读取 source、截图或业务 UI。`IOS_DEVICE_LOCK_STATE_UNKNOWN` 仅指真实锁读取
+失败/无布尔值，显示连接未确认，不是冷连接待授权。可用性未确认前无业务 UI、不自动解锁、
+不重放动作。预算 iOS 180 秒、Android 15 秒。
+
+`IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED` 在首次 WDA 安装未明确获准时停在 POST 前。
+一次说明所选手机安装控制组件及可能提示，明确获准后由模型内部处理
+`allowWdaInstallation:true`，不推断、不自动勾选，也不让用户配置参数。
+这不是签名更改、重启或解锁权限。`IOS_WDA_SIGNING_REQUIRED` 需独立签名授权，不自动续签；
+`IOS_WDA_INSPECTION_FAILED` 保留实际安装/签名检查失败，不当作缺少组件或自动重装理由；
+`IOS_CONNECTION_INITIALIZATION_DISABLED` 仅是旧调用方 existingSession opt-out，
+不是模型授权门槛。首次安装、重签名、重启仍独立授权，若同时必要则一次合并具体影响说明。
+密码、信任、Developer Mode 和认证仍由本人完成。
+
+`IOS_WDA_CONFIGURATION_CONFLICT` 表示签名 hint 不匹配或手机上有其它 testRunner，
+避免 Appium cleanup 删除组件。`IOS_READINESS_UNSUPPORTED` 表示 `useNewWDA`、
+`autoAcceptAlerts`/`autoDismissAlerts`、禁 prebuilt、强 preinstalled 或自定义 suffix
+不符合安全复用路径。仅报告明确配置问题并只读核查，不自动改配置、重装、改 Team、
+删除组件或改变用户服务/手机数据。首次安装授权不能绕过这些检查或允许重签名，
+过期签名仍需独立授权。
 
 复用用户管理 Appium 与目标真机绑定 WDA，保留其他服务。`IOS_DEVICE_LOCKED` 需本人解锁；
 `IOS_WDA_SECURITY_REJECTED` 可能涉及签名、权限或描述文件信任。只检查一次开发者 App
-信任，已信任或没有入口则只读核查签名/有效期；续期/部署须另获授权，不索取 Apple 凭据、
+信任，已信任或没有入口则只读核查签名/有效期；续期/首次安装须另获授权，不索取 Apple 凭据、
 不循环重装。等待本人操作后仍需手机时保留 Session，仅对话不再需要手机时 release。
 
 验收分开：目标真机 doctor 已准备通过；Pi 接入有回归；经授权续签/部署后，
