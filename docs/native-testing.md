@@ -151,10 +151,18 @@ not a control-driven acceptance result. Updating guidance does not establish
 that WeChat's control/text observations are now reliable; that needs a separate
 real task through the shipped `exe_js` path.
 
-`configure_session` supplies server URL, device selection and App capabilities.
-Local hints may be cached under `~/.maat/session-hints/<adapter>.json`; keep
-device identities, signing information and credentials out of source control.
-Use `find_applications` rather than hardcoding the wrong App variant.
+`configure_session` supplies server configuration, legacy device matching fields
+and App capabilities. Local hints may be cached under
+`~/.maat/session-hints/<adapter>.json`; they are legacy compatibility/configuration
+or matching hints only. They are not target selection, consent, authorization, a
+default device, readiness proof or a way to restore a target across lifecycles.
+Device fields may narrow the current target proposal only when they exactly and
+unambiguously match current discovery facts; the zero/single/multiple-candidate
+selection rules still apply. The accepted identity and endpoint pin exist only in
+volatile memory for the active lifecycle and are forgotten after successful
+release/close; they are not restored after a process/host restart or into another
+lifecycle. Keep device identities, signing information and credentials out of
+source control. Use `find_applications` rather than hardcoding the wrong App variant.
 
 `clearAppTarget=true` explicitly clears runtime App routing before a base
 readiness check. It uses the existing Session-close behavior, does not erase

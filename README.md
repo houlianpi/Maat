@@ -165,16 +165,16 @@ does not prove five-minute first use.
 
 ## Tools and runtime
 
-| Tools                                                                | Purpose                                                        |
-| -------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `list_platforms`, `select_platform`                                  | Discover and select an execution adapter                       |
-| `list_devices`, `find_applications`, `configure_session`             | Inspect devices/apps and supply connection hints               |
-| `check_platform_setup`, `get_setup_diagnostics`                      | Preparation diagnosis                                          |
-| `prepare_mobile`                                                     | Track local Appium startup / iOS WDA reuse or authorized build |
-| `open_setup_step`, `retry_setup_step`, `continue_without_capability` | Preparation instructions and permission recheck                |
-| `check_device_ready`                                                 | Verify the Android/iPhone channel and return observations      |
-| `configure_browser`, `get_browser_config`                            | Web browser configuration                                      |
-| `exe_js`                                                             | Execute code in the active persistent UI Session               |
+| Tools                                                                | Purpose                                                          |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `list_platforms`, `select_platform`                                  | Discover and select an execution adapter                         |
+| `list_devices`, `find_applications`, `configure_session`             | Inspect devices/apps; supply legacy configuration/matching hints |
+| `check_platform_setup`, `get_setup_diagnostics`                      | Preparation diagnosis                                            |
+| `prepare_mobile`                                                     | Track local Appium startup / iOS WDA reuse or authorized build   |
+| `open_setup_step`, `retry_setup_step`, `continue_without_capability` | Preparation instructions and permission recheck                  |
+| `check_device_ready`                                                 | Verify the Android/iPhone channel and return observations        |
+| `configure_browser`, `get_browser_config`                            | Web browser configuration                                        |
+| `exe_js`                                                             | Execute code in the active persistent UI Session                 |
 
 Web exposes Playwright `page/context/browser`; native adapters expose WebdriverIO
 `driver/browser`. Consult `list_platforms` for the current globals. Use `console.log`
@@ -182,10 +182,16 @@ for text and `display` for PNG/JPEG/WebP image bytes or image data URLs. The nat
 `evidence.screenshot()` helper returns a screenshot observation; it is not a formal
 Evidence store or report.
 
-Appium Sessions use local hints outside source control. Pi/standalone TUI tracks
-only its own service children and closes owned Sessions before owned processes;
-healthy user Appium remains untouched. Existing native close behavior may
-terminate the configured target App and is not changed by this cleanup.
+Appium Sessions may use local legacy compatibility/configuration or matching
+hints outside source control. These hints are not target selection, consent,
+authorization, a default device, readiness proof or cross-lifecycle target
+restoration. Device fields may narrow a current proposal only when they exactly
+and unambiguously match current facts; zero/single/multiple-candidate selection
+still applies. The active identity and endpoint pin live only in volatile memory
+for that lifecycle. Pi/standalone TUI tracks only its own service children and
+closes owned Sessions before owned processes; healthy user Appium remains
+untouched. Existing native close behavior may terminate the configured target
+App and is not changed by this cleanup.
 See [native setup](docs/native-testing.md) and [Setup Assistant](docs/setup-assistant.md).
 
 ## Architecture

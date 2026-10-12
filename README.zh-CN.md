@@ -132,7 +132,7 @@ ready 返回真实控件树、视口和截图；系统计算器 `3×3×8` 的显
 | 工具                                                                 | 用途                                          |
 | -------------------------------------------------------------------- | --------------------------------------------- |
 | `list_platforms`、`select_platform`                                  | 查看并选择 Adapter                            |
-| `list_devices`、`find_applications`、`configure_session`             | 发现设备/App，提供连接提示                    |
+| `list_devices`、`find_applications`、`configure_session`             | 发现设备/App，提供旧兼容配置／匹配提示        |
 | `check_platform_setup`、`get_setup_diagnostics`                      | 准备条件诊断                                  |
 | `prepare_mobile`                                                     | 跟踪本地 Appium 启动 / iOS WDA 复用或授权构建 |
 | `open_setup_step`、`retry_setup_step`、`continue_without_capability` | 准备指引、授权复查和可选能力选择              |
@@ -145,7 +145,10 @@ Web 暴露 Playwright `page/context/browser`，原生平台暴露 WebdriverIO `d
 PNG/JPEG/WebP 图片字节或 image data URL。原生 `evidence.screenshot()` 只是截图观察辅助，
 不是正式 Evidence 存储或报告系统。
 
-Appium 提示保存在源码之外。Pi/standalone TUI 只持有自己的 service child，
+Appium Session 可在源码之外使用旧兼容配置或匹配提示。这些提示不是目标选择、用户同意、
+动作授权、默认设备或 ready 证明，也不能跨生命周期恢复目标。设备字段只有与当前事实精确且
+无歧义匹配时，才可缩小本次候选方案；零／单／多候选选择规则仍然适用。active 生命周期的
+identity 与 endpoint pin 只存在于易失内存。Pi/standalone TUI 只持有自己的 service child，
 先清 owned Session 再清 owned process，不停止健康用户 Appium。
 现有原生关闭逻辑可能终止已配置的目标 App，本次清理没有改变这一行为。
 详见 [原生准备](docs/native-testing.md) 与 [Setup Assistant](docs/setup-assistant.zh-CN.md)。
