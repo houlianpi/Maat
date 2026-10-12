@@ -36,6 +36,23 @@ import {
   type JavaScriptSession,
 } from '../packages/core/src/core/exploration/runtime.ts';
 import type { JavaScriptObservation } from '../packages/core/src/core/exploration/protocol.ts';
+import type {
+  SetupReadiness,
+  SetupReadinessSuccess,
+} from '../packages/core/src/setup-assistant/types.ts';
+
+function successfulReadiness(result: SetupReadiness): SetupReadinessSuccess {
+  assert.equal(result.ready, true);
+  if (!result.ready) throw new Error('Expected readiness success.');
+  return result;
+}
+
+async function selectTestTarget(api: MaatApi) {
+  const adapter = api.registry.current;
+  assert.ok(adapter instanceof AppiumPlatformAdapter);
+  const result = await adapter.selectReadinessTarget();
+  assert.ok(result?.status === 'target-selected' || result?.status === 'selected');
+}
 
 let mockServerId = 0;
 type ReadinessAdbOptions = {
@@ -217,8 +234,24 @@ async function mockAppium(
 
 function androidReadinessApi(root: string, connectAdb: () => Socket) {
   class ReadinessAdapter extends AppiumPlatformAdapter {
-    protected override resolveReadiness(signal?: AbortSignal) {
-      return resolveAndroidReadinessSession(this.sessionHints!, signal, connectAdb);
+    protected override async discoverSelectionDevices() {
+      return [{ id: 'MOCK_LOCAL_DEVICE', name: 'mock', kind: 'device' as const }];
+    }
+    protected override resolveReadiness(
+      signal?: AbortSignal,
+      identity?: Parameters<typeof resolveAndroidReadinessSession>[3],
+      environment = this.sessionHints!,
+    ) {
+      return resolveAndroidReadinessSession(environment, signal, connectAdb, identity);
+    }
+    override async selectReadinessTarget(
+      selection?: Parameters<AppiumPlatformAdapter['selectReadinessTarget']>[0],
+      signal?: AbortSignal,
+    ) {
+      const result = await super.selectReadinessTarget(selection, signal);
+      return result?.status === 'target-selected'
+        ? super.selectReadinessTarget(undefined, signal)
+        : result;
     }
   }
   return new MaatApi(
@@ -328,7 +361,7 @@ test('Android ready reuses its unlock-safe Session and guards a locked new Sessi
       device: { kind: 'device', name: 'mock' },
       capabilities: hints,
     });
-    const result = await api.setup.ready();
+    const result = successfulReadiness(await api.setup.ready());
     assert.deepEqual(result.proof, {
       phoneUnlocked: true,
       sessionUsable: true,
@@ -345,7 +378,7 @@ test('Android ready reuses its unlock-safe Session and guards a locked new Sessi
     const adapter = api.registry.current as AppiumPlatformAdapter;
     assert.deepEqual(adapter.sessionHints?.capabilities, hints);
     assert.deepEqual(adapter.runtime.currentTarget?.environment.capabilities, hints);
-    assert.equal((await api.setup.ready()).proof.phoneUnlocked, true);
+    assert.equal(successfulReadiness(await api.setup.ready()).proof.phoneUnlocked, true);
     assert.equal(mock.created(), 1);
     assert.equal(mock.deleted(), 0);
     assert.equal(mock.lockQueries(), 4);
@@ -450,7 +483,7 @@ test('Android ready reuses a healthy Session with explicit unlock hints but refu
     });
     await adapter.runtime.execute("console.log('existing mock Session');");
     assert.equal(mock.sessionCapabilities[0]?.['appium:skipUnlock'], false);
-    assert.equal((await api.setup.ready()).proof.phoneUnlocked, true);
+    assert.equal(successfulReadiness(await api.setup.ready()).proof.phoneUnlocked, true);
     assert.equal(mock.created(), 1);
     assert.equal(mock.deleted(), 0);
     assert.equal(adapter.sessionHints?.capabilities['appium:skipUnlock'], false);
@@ -746,7 +779,7 @@ test('cold Android ready refuses remote/ambiguous routing; a healthy remote Sess
     });
     await adapter.runtime.execute("console.log('healthy remote transport mock');");
     const priorAdbReads = mock.adb!.requests.length;
-    assert.equal((await remote.setup.ready()).proof.phoneUnlocked, true);
+    assert.equal(successfulReadiness(await remote.setup.ready()).proof.phoneUnlocked, true);
     assert.equal(mock.adb!.requests.length, priorAdbReads);
     assert.equal(mock.lockQueries(), 3);
     assert.equal(mock.created(), 1);
@@ -806,6 +839,7 @@ test('ordinary Android cold execution preserves App intent, exact phone/endpoint
       device: { kind: 'device', name: 'mock' },
       capabilities: target,
     });
+    await selectTestTarget(api);
     for (const state of [
       { power: 'mWakefulness=Asleep\n', code: 'ANDROID_DEVICE_LOCKED' },
       { policy: 'KeyguardServiceDelegate\n  showing=true\n', code: 'ANDROID_DEVICE_LOCKED' },
@@ -828,24 +862,25 @@ test('ordinary Android cold execution preserves App intent, exact phone/endpoint
     const transportsBefore = mock.adb!.requests.filter((item) =>
       item.startsWith('host:transport:'),
     ).length;
-    await api.platforms.configureSession({ device: { kind: 'device', name: 'requestedPhone' } });
+    mock.adb!.options.devices = 'OTHER_LOCAL_DEVICE\tdevice model:other\n';
     await assert.rejects(api.exploration.executeJavaScript(code), /no other device was selected/);
     assert.equal(mock.created(), 0);
     assert.equal(
       mock.adb!.requests.filter((item) => item.startsWith('host:transport:')).length,
       transportsBefore,
     );
-    await api.platforms.configureSession({ device: { kind: 'device', name: 'mock' } });
+    mock.adb!.options.devices = 'MOCK_LOCAL_DEVICE\tdevice model:mock\n';
     const readsBefore = mock.adb!.requests.length;
-    await api.platforms.configureSession({ serverUrl: 'http://127.0.0.1:1/' });
-    await assert.rejects(api.exploration.executeJavaScript(code), /server.*responded/i);
+    await assert.rejects(
+      api.platforms.configureSession({ serverUrl: 'http://127.0.0.1:1/' }),
+      /pins its Appium endpoint/,
+    );
     assert.equal(mock.adb!.requests.length, readsBefore);
     assert.equal(mock.created(), 0);
     assert.equal(
       mock.requests.some((request) => /\/(element|click|activate_app)$/.test(request)),
       false,
     );
-    await api.platforms.configureSession({ serverUrl: mock.url });
     assert.deepEqual(await adapter.execute('console.log(app.id);'), [
       { type: 'text', text: 'com.example.target' },
     ]);
@@ -888,6 +923,7 @@ test('ordinary healthy Android guards every Core execution; locked/unknown/Abort
       device: { kind: 'device', name: 'mock' },
       capabilities: { 'appium:appPackage': 'com.example.target' },
     });
+    await selectTestTarget(api);
     await adapter.execute("console.log('healthy');");
     const code = "await driver.$('~send').click();";
     for (const state of [true, undefined, 'false']) {
@@ -1078,6 +1114,9 @@ test('Native API timeout/Worker exit invalidate Sessions without replay; ordinar
   const mock = await mockAppium({ readinessAdb: {} });
   class Adapter extends AppiumPlatformAdapter {
     override readonly runtime = new NativeManager(1_000);
+    protected override async discoverSelectionDevices() {
+      return [{ id: 'MOCK_LOCAL_DEVICE', name: 'mock', kind: 'device' as const }];
+    }
     protected override resolveReadiness(signal?: AbortSignal) {
       return resolveAndroidReadinessSession(this.sessionHints!, signal, mock.adb!.connect);
     }
@@ -1095,6 +1134,7 @@ test('Native API timeout/Worker exit invalidate Sessions without replay; ordinar
       device: { kind: 'device', name: 'mock' },
       capabilities: { 'appium:deviceName': 'mock', 'appium:appPackage': 'com.example.target' },
     });
+    await selectTestTarget(api);
     await api.exploration.executeJavaScript("console.log('first');");
     await assert.rejects(
       api.exploration.executeJavaScript(
@@ -1175,6 +1215,9 @@ test('native timeout plus remote DELETE failure is visible at API level and neve
   const mock = await mockAppium(options);
   class Adapter extends AppiumPlatformAdapter {
     override readonly runtime = new NativeManager(1_000);
+    protected override async discoverSelectionDevices() {
+      return [{ id: 'MOCK_LOCAL_DEVICE', name: 'mock', kind: 'device' as const }];
+    }
     protected override resolveReadiness(signal?: AbortSignal) {
       return resolveAndroidReadinessSession(this.sessionHints!, signal, mock.adb!.connect);
     }
@@ -1185,6 +1228,7 @@ test('native timeout plus remote DELETE failure is visible at API level and neve
     platformName: 'Android',
     automationName: 'UiAutomator2',
   });
+
   const api = new MaatApi(new PlatformRegistry([adapter], 'android'), root);
   try {
     await api.platforms.configureSession({
@@ -1192,6 +1236,7 @@ test('native timeout plus remote DELETE failure is visible at API level and neve
       device: { kind: 'device', name: 'mock' },
       capabilities: { 'appium:deviceName': 'mock', 'appium:appPackage': 'com.example.target' },
     });
+    await selectTestTarget(api);
     await assert.rejects(api.exploration.executeJavaScript('while (true) {}'), (error: unknown) => {
       assert.ok(error instanceof AggregateError);
       assert.ok(error.cause instanceof WorkerTerminatedError);
@@ -1211,6 +1256,90 @@ test('native timeout plus remote DELETE failure is visible at API level and neve
     if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
     else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
     mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('uncertain user release blocks ready, execute and configure without a second Session POST', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-close-uncertain-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const mock = await mockAppium({ deleteFailure: true, readinessAdb: {} });
+  class Adapter extends AppiumPlatformAdapter {
+    protected override async discoverSelectionDevices() {
+      return [{ id: 'MOCK_LOCAL_DEVICE', name: 'mock', kind: 'device' as const }];
+    }
+    protected override resolveReadiness(
+      signal?: AbortSignal,
+      identity?: Parameters<typeof resolveAndroidReadinessSession>[3],
+      environment = this.sessionHints!,
+    ) {
+      return resolveAndroidReadinessSession(environment, signal, mock.adb!.connect, identity);
+    }
+  }
+  const adapter = new Adapter({
+    id: 'android',
+    label: 'Android',
+    platformName: 'Android',
+    automationName: 'UiAutomator2',
+  });
+  const api = new MaatApi(new PlatformRegistry([adapter], 'android'), root, {
+    androidDetector: async () =>
+      aggregateSetup({
+        platform: 'android',
+        capabilities: [
+          {
+            id: 'uiInteraction',
+            status: 'ready',
+            required: true,
+            messageKey: 'capability.interaction.ready',
+          },
+        ],
+      }),
+  });
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock' },
+    });
+    await selectTestTarget(api);
+    await api.exploration.executeJavaScript("console.log('first dispatch');");
+    assert.equal(mock.created(), 1);
+    let primary: unknown;
+    await assert.rejects(api.mobile.releaseCurrentSession(), (error: unknown) => {
+      primary = error;
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /delete Session failed/);
+      assert.notEqual((error as Error & { code?: string }).code, 'phone-close-uncertain');
+      return true;
+    });
+    assert.equal(adapter.runtime.hasUncertainOwnedSession, true);
+    assert.equal(adapter.runtime.isRunning, false);
+    const requestsAfterClose = mock.requests.length;
+    const blocked = (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.equal((error as Error & { code?: string }).code, 'phone-close-uncertain');
+      assert.notEqual(error, primary);
+      return true;
+    };
+    await assert.rejects(api.setup.ready(), blocked);
+    await assert.rejects(adapter.selectReadinessTarget(), blocked);
+    await assert.rejects(
+      api.exploration.executeJavaScript("console.log('must not dispatch');"),
+      blocked,
+    );
+    await assert.rejects(api.platforms.configureSession({ device: { name: 'other' } }), blocked);
+    await assert.rejects(api.mobile.releaseCurrentSession(), blocked);
+    await assert.rejects(adapter.runtime.execute("console.log('must not execute');"), /ownership/);
+    assert.equal(adapter.runtime.hasUncertainOwnedSession, true);
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.deleted(), 1);
+    assert.equal(mock.requests.length, requestsAfterClose);
+  } finally {
+    mock.adb!.close();
+    mock.server.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -1509,6 +1638,7 @@ test('native API reuses its Session after execution failure and retains the exte
     await projects.platforms.configureSession({
       capabilities: { 'appium:newCommandTimeout': 180 },
     });
+    await selectTestTarget(projects);
     assert.ok(projects.platforms.current() instanceof AppiumPlatformAdapter);
     const adapter = projects.platforms.current() as AppiumPlatformAdapter;
     assert.equal(adapter.sessionHints?.serverUrl, mock.url);
@@ -1525,6 +1655,7 @@ test('native API reuses its Session after execution failure and retains the exte
     await projects.close();
     assert.equal(mock.deleted(), 1);
     assert.equal(adapter.runtime.isRunning, false);
+    assert.equal(adapter.runtime.hasUncertainOwnedSession, false);
     assert.equal(mock.server.listening, true);
   } finally {
     if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
@@ -1543,13 +1674,27 @@ function iosReadinessApi(
   wdaCheck: (allowInstallation: boolean) => Promise<Record<string, unknown>> = async () => ({}),
 ) {
   class IosReadinessAdapter extends AppiumPlatformAdapter {
+    protected override async discoverSelectionDevices() {
+      return [
+        {
+          id: 'MOCK_IPHONE',
+          name: 'mock iPhone',
+          kind: 'device' as const,
+          connected: true,
+          paired: true,
+          developerMode: 'enabled' as const,
+        },
+      ];
+    }
     protected override resolveIosReadiness(
       signal?: AbortSignal,
       currentTarget?: ResolvedNativeSession,
       allowWdaInstallation = false,
+      identity?: Parameters<typeof resolveIosReadinessSession>[5],
+      environment = this.sessionHints!,
     ) {
       return resolveIosReadinessSession(
-        this.sessionHints!,
+        environment,
         signal,
         {
           serverReady: async () => true,
@@ -1571,7 +1716,17 @@ function iosReadinessApi(
         },
         currentTarget,
         allowWdaInstallation,
+        identity,
       );
+    }
+    override async selectReadinessTarget(
+      selection?: Parameters<AppiumPlatformAdapter['selectReadinessTarget']>[0],
+      signal?: AbortSignal,
+    ) {
+      const result = await super.selectReadinessTarget(selection, signal);
+      return result?.status === 'target-selected'
+        ? super.selectReadinessTarget(undefined, signal)
+        : result;
     }
   }
   return new MaatApi(
@@ -1618,7 +1773,7 @@ test('mock iOS readiness uses the real Worker, observations and healthy Session 
       serverUrl: mock.url,
       device: { kind: 'device', name: 'mock iPhone' },
     });
-    const result = await api.setup.ready({ screenshot: true });
+    const result = successfulReadiness(await api.setup.ready({ screenshot: true }));
     assert.equal(result.platform, 'ios');
     assert.equal(result.proof.phoneUnlocked, true);
     assert.equal(result.proof.screenshotReadable, true);
@@ -1773,7 +1928,11 @@ test('iOS normal connection needs no extra grant; first installation permission 
     });
     await assert.rejects(api.setup.ready(), /IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED/);
     assert.equal(mock.created(), 0);
-    assert.equal((await api.setup.ready({ allowWdaInstallation: true })).proof.phoneUnlocked, true);
+    assert.equal(
+      successfulReadiness(await api.setup.ready({ allowWdaInstallation: true })).proof
+        .phoneUnlocked,
+      true,
+    );
     assert.equal(mock.created(), 1);
     assert.equal(mock.sessionCapabilities[0]?.allowWdaInstallation, undefined);
     assert.doesNotMatch(
@@ -1781,7 +1940,7 @@ test('iOS normal connection needs no extra grant; first installation permission 
       /allowWdaInstallation/,
     );
     await api.registry.current.close();
-    assert.equal((await api.setup.ready()).proof.phoneUnlocked, true);
+    assert.equal(successfulReadiness(await api.setup.ready()).proof.phoneUnlocked, true);
     assert.equal(mock.created(), 2);
   } finally {
     await api.close();
@@ -1861,6 +2020,7 @@ test('ordinary local iOS execution with absent or name-only selectors cannot byp
         );
         try {
           await api.platforms.configureSession({ serverUrl: mock.url, device });
+          await selectTestTarget(api);
           await assert.rejects(
             api.exploration.executeJavaScript("await driver.$('~send').click();"),
             new RegExp(failure),
@@ -1945,6 +2105,7 @@ test('unsafe iOS connection hints fail before POST through readiness and ordinar
         device: { name: 'mock iPhone' },
         capabilities: target,
       });
+      await selectTestTarget(api);
       await assert.rejects(
         api.exploration.executeJavaScript("await driver.$('~send').click();"),
         /IOS_READINESS_BASE_SESSION_REQUIRED/,
@@ -2165,6 +2326,7 @@ test('iOS readiness rejects App targets and explicit simulator routing before in
     assert.deepEqual((api.registry.current as AppiumPlatformAdapter).appTarget, {
       'appium:bundleId': 'com.example.target',
     });
+    await api.registry.current.close();
     await api.platforms.configureSession({
       clearAppTarget: true,
       device: { kind: 'simulator', name: 'mock iPhone' },
@@ -2226,21 +2388,24 @@ function operationAdapter(
 }
 
 function operationApi(adapter: PlatformAdapter, setupChecks?: () => void) {
+  const detector = async () => {
+    setupChecks?.();
+    return aggregateSetup({
+      platform: adapter.id,
+      capabilities: [
+        {
+          id: 'uiInteraction',
+          status: 'ready',
+          required: true,
+          messageKey: 'capability.interaction.ready',
+        },
+      ],
+    });
+  };
   return new MaatApi(new PlatformRegistry([adapter], adapter.id), process.cwd(), {
-    detector: async () => {
-      setupChecks?.();
-      return aggregateSetup({
-        platform: adapter.id,
-        capabilities: [
-          {
-            id: 'uiInteraction',
-            status: 'ready',
-            required: true,
-            messageKey: 'capability.interaction.ready',
-          },
-        ],
-      });
-    },
+    detector,
+    androidDetector: detector,
+    iosDetector: detector,
   });
 }
 
@@ -2278,6 +2443,7 @@ test('one process-wide mobile execute blocks other instances before configure, r
   const running = owner.exploration.executeJavaScript('owner');
   await assert.rejects(contender.platforms.configureSession({}), assertMobileBusy);
   await assert.rejects(contender.setup.ready(), assertMobileBusy);
+  await assert.rejects(contender.mobile.releaseCurrentSession(), assertMobileBusy);
   await assert.rejects(contender.close(), assertMobileBusy);
   assert.deepEqual(
     { configures, initializes, setupChecks, closes },
@@ -2303,6 +2469,7 @@ test('one process-wide mobile execute blocks other instances before configure, r
   await running;
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(entered, false);
+  assert.equal(closes, 0);
   await contender.platforms.configureSession({});
   assert.equal(configures, 1);
 });

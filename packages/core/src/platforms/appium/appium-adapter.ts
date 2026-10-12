@@ -1,3 +1,4 @@
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { homedir } from 'node:os';
@@ -22,8 +23,21 @@ import {
   isLocalAppiumEndpoint,
 } from './session-resolver.ts';
 import { discoverDevices } from '../../setup/devices.ts';
+import type { Device } from '../../setup/devices.ts';
+import { discoverAndroidReadinessDevices } from '../../setup/devices.ts';
+import { discoverIosDevices, type IosDevice } from '../../setup/ios-devices.ts';
 import { discoverApplications } from '../../setup/applications.ts';
 import type { SessionSetup, SetupInspection } from '../../core/platforms/contracts.ts';
+import {
+  canonicalDeviceKey,
+  identityFromLocalFact,
+  sameDeviceIdentity,
+  type DeviceIdentity,
+  type PublicDeviceCandidate,
+  type TargetSelectionInput,
+  type TargetSelectionResult,
+  PhoneCloseUncertainError,
+} from '../../mobile/contracts/device.ts';
 
 export type AppiumAdapterDefinition = {
   id: NativePlatform;
@@ -96,6 +110,19 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   private notices: string[] = [];
   private readonly definition: AppiumAdapterDefinition;
   private initialized = false;
+  private readonly selectionSecret = randomBytes(32);
+  private selectionSnapshot?: {
+    id: string;
+    identities: DeviceIdentity[];
+    candidates: PublicDeviceCandidate[];
+  };
+  private target?: {
+    identity: DeviceIdentity;
+    endpoint: string;
+    selectedBy: 'single-candidate' | 'explicit-user-selection';
+    candidate: PublicDeviceCandidate;
+  };
+  private closeUncertain = false;
   private get hintsFile(): string {
     const directory =
       process.env.MAAT_SESSION_HINTS_DIR ?? path.join(homedir(), '.maat', 'session-hints');
@@ -126,6 +153,7 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   }
 
   async configureSession(input: SessionSetup): Promise<void> {
+    this.assertCloseCertain();
     if (input.clearAppTarget !== undefined && typeof input.clearAppTarget !== 'boolean')
       throw new Error('clearAppTarget must be a boolean.');
     if (!this.environment) await this.initialize();
@@ -149,6 +177,13 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       device: (input.device as NativeEnvironment['device']) ?? base.device,
       capabilities: { ...sanitizedBase, ...split.environment },
     };
+    if (
+      this.target &&
+      new URL(nextEnvironment.serverUrl ?? 'http://127.0.0.1:4723/').href !== this.target.endpoint
+    )
+      throw new Error(
+        'The active phone target pins its Appium endpoint. Release it before changing endpoints.',
+      );
     const nextApp = input.clearAppTarget
       ? undefined
       : Object.keys(split.app).length
@@ -159,6 +194,8 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       capabilities: nextEnvironment.capabilities,
       app: nextApp,
     });
+    // Candidate handles describe the exact prior configuration/discovery generation.
+    this.selectionSnapshot = undefined;
     this.environment = nextEnvironment;
     this.app = nextApp;
     this.issue = undefined;
@@ -166,11 +203,213 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   }
 
   async inspectSetup(request: SetupInspection): Promise<unknown> {
-    if (request.kind === 'devices') return discoverDevices(this.id);
+    if (request.kind === 'devices') {
+      const devices = await discoverDevices(this.id);
+      if (this.id === 'macos') return devices;
+      return devices.map((device, index) => ({
+        number: index + 1,
+        displayName: device.name,
+        platform: this.id,
+        kind: device.kind,
+        discriminator: `${device.kind}-${createHmac('sha256', this.selectionSecret)
+          .update(`${this.id}\0${device.kind}\0${device.id}`)
+          .digest('hex')
+          .slice(0, 8)}`,
+      }));
+    }
     if (!this.environment) await this.initialize();
-    const apps = await discoverApplications(this.environment!, request.query ?? '');
+    if (
+      (this.id === 'android' ||
+        (this.id === 'ios' && this.environment!.device?.kind !== 'simulator')) &&
+      isLocalAppiumEndpoint(this.environment!.serverUrl ?? 'http://127.0.0.1:4723/') &&
+      !this.target
+    )
+      throw new Error('Select the current phone with check_device_ready before finding apps.');
+    const apps = await discoverApplications(
+      this.targetEnvironment() ?? this.environment!,
+      request.query ?? '',
+      undefined,
+      this.target?.identity,
+    );
     const appCapability = this.id === 'android' ? 'appium:appPackage' : 'appium:bundleId';
     return apps.map((app) => ({ ...app, capabilities: { [appCapability]: app.id } }));
+  }
+
+  protected discoverSelectionDevices(signal?: AbortSignal): Promise<(Device | IosDevice)[]> {
+    return this.id === 'ios'
+      ? discoverIosDevices(signal)
+      : this.discoverAndroidSelectionDevices(signal);
+  }
+
+  /** Selection talks only to an existing daemon; the connector parameter is an offline-test seam. */
+  protected discoverAndroidSelectionDevices(
+    signal?: AbortSignal,
+    connectAdb?: Parameters<typeof discoverAndroidReadinessDevices>[1],
+  ): Promise<Device[]> {
+    return discoverAndroidReadinessDevices(signal, connectAdb);
+  }
+
+  private publicCandidate(
+    identity: DeviceIdentity,
+    candidateNumber: number,
+  ): PublicDeviceCandidate {
+    return {
+      candidateNumber,
+      displayName: identity.displayName ?? `${identity.platform} ${identity.kind}`,
+      platform: identity.platform,
+      kind: identity.kind,
+      discriminator: `${identity.kind}-${createHmac('sha256', this.selectionSecret)
+        .update(canonicalDeviceKey(identity))
+        .digest('hex')
+        .slice(0, 8)}`,
+    };
+  }
+
+  private async currentSelectionIdentities(signal?: AbortSignal): Promise<DeviceIdentity[]> {
+    if (this.id !== 'android' && this.id !== 'ios')
+      throw new Error('Phone target selection supports only Android and iOS.');
+    const platform = this.id;
+    const source = this.id === 'ios' ? 'local-core-device' : 'local-adb';
+    return (await this.discoverSelectionDevices(signal)).map((device) =>
+      identityFromLocalFact({ source, platform, device }),
+    );
+  }
+
+  private sameGeneration(left: DeviceIdentity[], right: DeviceIdentity[]): boolean {
+    return (
+      left.length === right.length &&
+      left.every((identity) => right.some((candidate) => sameDeviceIdentity(identity, candidate)))
+    );
+  }
+
+  async selectReadinessTarget(
+    selection?: TargetSelectionInput,
+    signal?: AbortSignal,
+  ): Promise<TargetSelectionResult | undefined> {
+    this.assertCloseCertain();
+    signal?.throwIfAborted();
+    if (!this.environment) await this.initialize();
+    if (this.id !== 'android' && this.id !== 'ios') return;
+    const platform = this.id;
+    const endpoint = new URL(this.environment!.serverUrl ?? 'http://127.0.0.1:4723/').href;
+    // Remote providers and the legacy simulator route are deliberately outside this slice.
+    if (
+      !isLocalAppiumEndpoint(endpoint) ||
+      (this.id === 'ios' && this.environment!.device?.kind === 'simulator')
+    )
+      return;
+
+    if (this.target) {
+      return {
+        status: 'selected',
+        platform,
+        selectedBy: this.target.selectedBy,
+        candidate: this.target.candidate,
+      };
+    }
+
+    if (selection) {
+      const snapshot = this.selectionSnapshot;
+      if (!snapshot || selection.discoveryId !== snapshot.id)
+        return { status: 'selection-stale', platform };
+      if (
+        !Number.isSafeInteger(selection.candidateNumber) ||
+        selection.candidateNumber < 1 ||
+        selection.candidateNumber > snapshot.identities.length
+      )
+        return { status: 'selection-invalid', platform };
+      const current = await this.currentSelectionIdentities(signal);
+      if (!this.sameGeneration(snapshot.identities, current)) {
+        this.selectionSnapshot = undefined;
+        return { status: 'selection-stale', platform };
+      }
+      const expected = snapshot.identities[selection.candidateNumber - 1]!;
+      const identity = current.find((candidate) => sameDeviceIdentity(candidate, expected));
+      if (!identity) {
+        this.selectionSnapshot = undefined;
+        return { status: 'selection-stale', platform };
+      }
+      const candidate = this.publicCandidate(identity, selection.candidateNumber);
+      this.target = {
+        identity,
+        endpoint,
+        selectedBy: 'explicit-user-selection',
+        candidate,
+      };
+      this.selectionSnapshot = undefined;
+      return {
+        status: 'target-selected',
+        platform,
+        selectedBy: 'explicit-user-selection',
+        candidate,
+      };
+    }
+
+    const identities = await this.currentSelectionIdentities(signal);
+    if (!identities.length) {
+      this.selectionSnapshot = undefined;
+      return { status: 'device-not-found', platform };
+    }
+    const candidates = identities.map((identity, index) =>
+      this.publicCandidate(identity, index + 1),
+    );
+    if (identities.length > 1) {
+      const id = randomUUID();
+      this.selectionSnapshot = { id, identities, candidates };
+      return {
+        status: 'selection-required',
+        platform,
+        discoveryId: id,
+        candidates,
+      };
+    }
+    const identity = identities[0]!;
+    const candidate = candidates[0]!;
+    this.target = {
+      identity,
+      endpoint,
+      selectedBy: 'single-candidate',
+      candidate,
+    };
+    this.selectionSnapshot = undefined;
+    return {
+      status: 'target-selected',
+      platform,
+      selectedBy: 'single-candidate',
+      candidate,
+    };
+  }
+
+  private targetEnvironment(): NativeEnvironment | undefined {
+    if (!this.target || !this.environment) return;
+    return {
+      ...this.environment,
+      serverUrl: this.target.endpoint,
+      device: {
+        kind: this.target.identity.kind,
+        name: this.target.identity.displayName,
+      },
+    };
+  }
+
+  private requiresTargetSelection(): boolean {
+    if (!this.environment || (this.id !== 'android' && this.id !== 'ios')) return false;
+    return (
+      isLocalAppiumEndpoint(this.environment.serverUrl ?? 'http://127.0.0.1:4723/') &&
+      !(this.id === 'ios' && this.environment.device?.kind === 'simulator')
+    );
+  }
+
+  private assertTargetSelected() {
+    this.assertCloseCertain();
+    if (this.requiresTargetSelection() && !this.target)
+      throw new Error(
+        'PHONE_TARGET_SELECTION_REQUIRED: call check_device_ready to select the current phone before creating or using a Session.',
+      );
+  }
+
+  private assertCloseCertain() {
+    if (this.closeUncertain) throw new PhoneCloseUncertainError();
   }
 
   private async prepare(
@@ -191,11 +430,18 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         throw new Error(
           'IOS_READINESS_BASE_SESSION_REQUIRED: establish a base connection before launching an App through exe_js. The configured App target was not cleared automatically.',
         );
+      const selectedEnvironment = this.targetEnvironment() ?? this.environment!;
       let resolved = safeIos
-        ? await this.resolveIosReadiness(signal, undefined, allowWdaInstallation)
+        ? await this.resolveIosReadiness(
+            signal,
+            undefined,
+            allowWdaInstallation,
+            this.target?.identity,
+            selectedEnvironment,
+          )
         : safeAndroid
-          ? await this.resolveReadiness(signal)
-          : await resolveAppiumSession(this.environment!, undefined, signal);
+          ? await this.resolveReadiness(signal, this.target?.identity, selectedEnvironment)
+          : await resolveAppiumSession(selectedEnvironment, undefined, signal);
       if (
         this.id === 'ios' &&
         !safeIos &&
@@ -224,21 +470,28 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     }
   }
 
-  protected resolveReadiness(signal?: AbortSignal) {
-    return resolveAndroidReadinessSession(this.environment!, signal);
+  protected resolveReadiness(
+    signal?: AbortSignal,
+    identity?: DeviceIdentity,
+    environment = this.environment!,
+  ) {
+    return resolveAndroidReadinessSession(environment, signal, undefined, identity);
   }
 
   protected resolveIosReadiness(
     signal?: AbortSignal,
     currentTarget?: ResolvedNativeSession,
     allowWdaInstallation = false,
+    identity?: DeviceIdentity,
+    environment = this.environment!,
   ) {
     return resolveIosReadinessSession(
-      this.environment!,
+      environment,
       signal,
       undefined,
       currentTarget,
       allowWdaInstallation,
+      identity,
     );
   }
 
@@ -251,6 +504,7 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       throw new Error('Only Android and iOS support setup readiness.');
     signal?.throwIfAborted();
     if (!this.environment) await this.initialize();
+    this.assertTargetSelected();
     const options = this.environment!.capabilities['appium:options'];
     if (
       (this.app && Object.keys(this.app).length > 0) ||
@@ -279,7 +533,13 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         throw new Error(
           'IOS_READINESS_UNSUPPORTED: the running Session has no provable device routing.',
         );
-      await this.resolveIosReadiness(signal, target);
+      await this.resolveIosReadiness(
+        signal,
+        target,
+        false,
+        this.target?.identity,
+        this.targetEnvironment() ?? this.environment!,
+      );
       return this.executePrepared(code, signal, false, generation);
     }
     return this.executePrepared(code, signal, false);
@@ -308,6 +568,8 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
 
   async execute(code: string, signal?: AbortSignal) {
     signal?.throwIfAborted();
+    if (!this.environment) await this.initialize();
+    this.assertTargetSelected();
     if (this.id === 'android') {
       const bounded = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(60_000)]);
       await this.prepareAndroidExecution(bounded);
@@ -374,6 +636,15 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     };
   }
   async close() {
-    await this.runtime.close();
+    if (this.closeUncertain) throw new PhoneCloseUncertainError();
+    try {
+      await this.runtime.close();
+    } catch (error) {
+      if (this.id === 'android' || this.id === 'ios') this.closeUncertain = true;
+      throw error;
+    }
+    this.target = undefined;
+    this.selectionSnapshot = undefined;
+    this.closeUncertain = false;
   }
 }

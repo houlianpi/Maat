@@ -4,9 +4,15 @@ import { mkdtemp, readFile, rm, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { NativeEnvironment } from '../platforms/appium/schema.ts';
-import { resolveDevice } from './devices.ts';
+import { discoverDevices, resolveDevice } from './devices.ts';
+import { discoverIosDevices } from './ios-devices.ts';
 import { assertAdbServerCompatible, resolveAndroidTools } from './android-tools.ts';
 import { isRecord } from '../core/exploration/protocol.ts';
+import {
+  identityFromLocalFact,
+  sameDeviceIdentity,
+  type DeviceIdentity,
+} from '../mobile/contracts/device.ts';
 const exec = promisify(execFile);
 
 export async function discoverApplications(
@@ -16,18 +22,51 @@ export async function discoverApplications(
     resolveDevice: typeof resolveDevice;
     resolveAndroidTools: typeof resolveAndroidTools;
     assertAdbServerCompatible: typeof assertAdbServerCompatible;
+    discoverDevices?: typeof discoverDevices;
+    discoverIosDevices?: typeof discoverIosDevices;
     command(
       file: string,
       args: string[],
       options: { timeout: number },
     ): Promise<{ stdout: string }>;
   } = { resolveDevice, resolveAndroidTools, assertAdbServerCompatible, command: exec },
+  exactIdentity?: DeviceIdentity,
 ) {
   if (input.serverUrl && !input.device)
     throw new Error(
       'Remote installed-app discovery is driver-specific. Supply an app identifier or package path.',
     );
-  const target = await dependencies.resolveDevice(input);
+  let target: Awaited<ReturnType<typeof resolveDevice>>;
+  if (exactIdentity) {
+    const devices =
+      input.platform === 'ios'
+        ? await (dependencies.discoverIosDevices ?? discoverIosDevices)()
+        : await (dependencies.discoverDevices ?? discoverDevices)('android');
+    const source = input.platform === 'ios' ? 'local-core-device' : 'local-adb';
+    const device = devices.find((candidate) =>
+      sameDeviceIdentity(
+        exactIdentity,
+        identityFromLocalFact({ source, platform: input.platform, device: candidate }),
+      ),
+    );
+    if (!device)
+      throw new Error(
+        'SELECTED_DEVICE_UNAVAILABLE: the selected phone is unavailable; no other device was used.',
+      );
+    target = {
+      environment: {
+        ...input,
+        device: { kind: device.kind, name: device.name },
+      },
+      capabilities: {
+        ...input.capabilities,
+        'appium:udid': device.id,
+        'appium:deviceName': device.name,
+      },
+    };
+  } else {
+    target = await dependencies.resolveDevice(input);
+  }
   let apps: Array<{ name: string; id: string }> = [];
   if (target.environment.platform === 'android') {
     const tools = await dependencies.resolveAndroidTools();

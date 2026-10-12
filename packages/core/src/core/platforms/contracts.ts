@@ -1,4 +1,5 @@
 import type { JavaScriptObservation } from '../exploration/protocol.ts';
+import type { TargetSelectionInput, TargetSelectionResult } from '../../mobile/contracts/device.ts';
 
 export type PlatformStatus = {
   id: string;
@@ -30,6 +31,10 @@ export interface PlatformAdapter {
   configure?(configuration: Record<string, unknown>): Promise<unknown>;
   configureSession?(setup: SessionSetup): Promise<void>;
   inspectSetup?(request: SetupInspection): Promise<unknown>;
+  selectReadinessTarget?(
+    selection?: TargetSelectionInput,
+    signal?: AbortSignal,
+  ): Promise<TargetSelectionResult | undefined>;
   execute(code: string, signal?: AbortSignal): Promise<JavaScriptObservation[]>;
   /** Phone readiness: first-installation permission is transient, never an unlocked proof. */
   executeReadiness?(

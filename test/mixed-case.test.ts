@@ -71,8 +71,12 @@ test('UI execution reuses Web state around native execution without saved Cases'
       capabilities: { 'appium:deviceName': 'mock', 'appium:skipUnlock': true },
     });
     await native.runtime.execute('void 0;');
+    await assert.rejects(
+      maat.exploration.executeJavaScript("console.log(await driver.$('~status').getText());"),
+      /PHONE_TARGET_SELECTION_REQUIRED/,
+    );
     assert.deepEqual(
-      await maat.exploration.executeJavaScript("console.log(await driver.$('~status').getText());"),
+      await native.runtime.execute("console.log(await driver.$('~status').getText());"),
       [{ type: 'text', text: 'Native ready' }],
     );
     await maat.platforms.select('web');

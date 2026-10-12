@@ -240,6 +240,7 @@ export type SetupInterruption = {
 };
 import type { JavaScriptObservation } from '../core/exploration/protocol.ts';
 import type { NativeDeviceSelector } from '../platforms/appium/schema.ts';
+import type { PublicDeviceCandidate, TargetSelectionInput } from '../mobile/contracts/device.ts';
 
 export type AndroidSetupCheckInput = {
   serverUrl?: string;
@@ -250,9 +251,21 @@ export type AndroidSetupCheckInput = {
 
 export type IosSetupCheckInput = Pick<AndroidSetupCheckInput, 'serverUrl' | 'device' | 'signal'>;
 
-export type SetupReadiness = {
+export type SetupReadyInput = {
+  screenshot?: boolean;
+  signal?: AbortSignal;
+  allowWdaInitialization?: boolean;
+  allowWdaInstallation?: boolean;
+  targetSelection?: TargetSelectionInput;
+};
+
+export type SetupReadinessSuccess = {
   platform: 'android' | 'ios';
   ready: true;
+  targetSelection?: {
+    selectedBy: 'single-candidate' | 'explicit-user-selection';
+    candidate: PublicDeviceCandidate;
+  };
   proof: {
     /** driver.isLocked() returned false before and after this observation, not a lasting guarantee. */
     phoneUnlocked: true;
@@ -263,3 +276,26 @@ export type SetupReadiness = {
   };
   observations: JavaScriptObservation[];
 };
+
+export type SetupReadinessSelection =
+  | {
+      platform: 'android' | 'ios';
+      ready: false;
+      status: 'device-not-found' | 'selection-stale' | 'selection-invalid';
+    }
+  | {
+      platform: 'android' | 'ios';
+      ready: false;
+      status: 'selection-required';
+      discoveryId: string;
+      candidates: readonly PublicDeviceCandidate[];
+    }
+  | {
+      platform: 'android' | 'ios';
+      ready: false;
+      status: 'target-selected';
+      selectedBy: 'single-candidate' | 'explicit-user-selection';
+      candidate: PublicDeviceCandidate;
+    };
+
+export type SetupReadiness = SetupReadinessSuccess | SetupReadinessSelection;

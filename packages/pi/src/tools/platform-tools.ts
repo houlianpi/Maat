@@ -14,17 +14,14 @@ export function createPlatformTools(maat: MaatApi): ToolDefinition<any, any, any
         'Release the owned Android or iPhone Worker and Appium Session when this conversation no longer needs phone interaction. Keep the Pi conversation, App data/login and external services. Do not release while waiting for a user action followed by more phone work or merely at model-turn end. Never infer business completion from release.',
       parameters: Type.Object({}, { additionalProperties: false }),
       async execute(_id, _input, _signal, _update, ctx) {
-        const adapter = maat.platforms.current();
-        if (adapter.id !== 'android' && adapter.id !== 'ios')
-          throw new Error('release_device_session requires the Android or iOS platform.');
-        await adapter.close();
+        const released = await maat.mobile.releaseCurrentSession();
         const locale = resolveSetupLocale(undefined, ctx);
         return {
           content: [
             {
               type: 'text',
               text:
-                adapter.id === 'ios'
+                released.platform === 'ios'
                   ? locale === 'zh-CN'
                     ? '手机操作连接已释放，Pi 对话继续保留。未停止外部服务；释放不代表业务任务完成。'
                     : 'Phone control Session released; the Pi conversation remains available. External services were not stopped; release is not business validation.'
@@ -33,7 +30,7 @@ export function createPlatformTools(maat: MaatApi): ToolDefinition<any, any, any
                     : 'Phone control Session released; the Pi conversation remains available. No explicit App termination or external-service stop was requested.',
             },
           ],
-          details: { released: true, platform: adapter.id },
+          details: released,
         };
       },
     }),
@@ -113,7 +110,8 @@ export function createPlatformTools(maat: MaatApi): ToolDefinition<any, any, any
     defineTool({
       name: 'list_devices',
       label: 'Discover Devices',
-      description: 'Discover online devices for the active Appium platform.',
+      description:
+        'List sanitized current device facts for diagnostics. This does not select a target; use check_device_ready for lifecycle selection.',
       parameters: Type.Object({}),
       async execute() {
         const devices = await maat.platforms.inspectSetup({ kind: 'devices' });

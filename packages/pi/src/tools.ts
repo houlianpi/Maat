@@ -16,7 +16,9 @@ export function createMaatPiTools(
   return [
     createExecJsTool(
       {
-        close: () => maat.platforms.current().close(),
+        close: async () => {
+          await maat.mobile.releaseCurrentSession();
+        },
         execute: (code, signal) => maat.exploration.executeJavaScript(code, signal),
       },
       {

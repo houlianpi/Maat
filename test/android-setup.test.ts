@@ -26,7 +26,15 @@ import { SetupAssistant } from '../packages/core/src/setup-assistant/setup-assis
 import type {
   SetupSnapshot,
   AndroidSetupCheckInput,
+  SetupReadiness,
+  SetupReadinessSuccess,
 } from '../packages/core/src/setup-assistant/types.ts';
+
+function successfulReadiness(result: SetupReadiness): SetupReadinessSuccess {
+  assert.equal(result.ready, true);
+  if (!result.ready) throw new Error('Expected readiness success.');
+  return result;
+}
 
 const serial = 'PRIVATE_DEVICE_SERIAL_123456';
 const privateRoot = '/Users/private-user/secret-sdk';
@@ -570,7 +578,7 @@ test('Android ready returns deterministic Worker proof and optional image withou
   try {
     for (const removed of ['drafts', 'cases', 'evidence', 'tests'])
       assert.equal(removed in fake.maat, false);
-    const result = await fake.maat.setup.ready();
+    const result = successfulReadiness(await fake.maat.setup.ready());
     assert.equal(result.ready, true);
     assert.equal(result.platform, 'android');
     assert.deepEqual(result.proof, {
@@ -586,7 +594,7 @@ test('Android ready returns deterministic Worker proof and optional image withou
     assert.equal(observed.phoneUnlocked, true);
     assert.equal(observed.source, '<hierarchy />');
     assert.deepEqual(observed.viewport, { width: 1080, height: 2400 });
-    const screenshot = await fake.maat.setup.ready({ screenshot: true });
+    const screenshot = successfulReadiness(await fake.maat.setup.ready({ screenshot: true }));
     assert.equal(screenshot.proof.screenshotReadable, true);
     assert.ok(screenshot.observations.some((observation) => observation.type === 'image'));
     assert.deepEqual(fake.reads, [
@@ -791,7 +799,7 @@ test('Android ready returns only deterministic proof and image observations, not
   const fake = fakeMaat('/unused', {
     observations: [{ type: 'text', text: `${serial} ${privateRoot} secret=value` }, proof, image],
   });
-  const result = await fake.maat.setup.ready({ screenshot: true });
+  const result = successfulReadiness(await fake.maat.setup.ready({ screenshot: true }));
   assert.deepEqual(result.observations, [proof, image]);
   assert.equal(JSON.stringify(result).includes(serial), false);
   assert.equal(JSON.stringify(result).includes(privateRoot), false);
@@ -800,7 +808,7 @@ test('Android ready returns only deterministic proof and image observations, not
 test('Android ready retains the complete current tree beyond console inspection limits and enforces the Worker output limit', async () => {
   const source = `<hierarchy><node text="${'tree'.repeat(2_000)}" /></hierarchy>`;
   const fake = fakeMaat('/unused', { source, viewport: { width: 360, height: 800 } });
-  const result = await fake.maat.setup.ready();
+  const result = successfulReadiness(await fake.maat.setup.ready());
   const observation = result.observations.find((item) => item.type === 'text');
   assert.ok(observation && observation.type === 'text');
   const current = JSON.parse(observation.text);
@@ -871,7 +879,12 @@ test('explicit App target clearing restores Android ready in the same API withou
   const root = await mkdtemp(path.join(tmpdir(), 'maat-android-clear-target-'));
   const previousHintsDirectory = process.env.MAAT_SESSION_HINTS_DIR;
   process.env.MAAT_SESSION_HINTS_DIR = root;
-  const adapter = new AppiumPlatformAdapter({
+  class TestAdapter extends AppiumPlatformAdapter {
+    protected override async discoverSelectionDevices() {
+      return [{ id: 'PRIVATE_DEVICE_SERIAL_123456', name: 'Pixel_8', kind: 'device' as const }];
+    }
+  }
+  const adapter = new TestAdapter({
     id: 'android',
     label: 'Android',
     platformName: 'Android',
@@ -893,6 +906,9 @@ test('explicit App target clearing restores Android ready in the same API withou
     });
     await maat.platforms.configureSession({ capabilities: {} });
     assert.deepEqual(adapter.appTarget, { 'appium:appPackage': 'com.example.legacy' });
+    const selection = await maat.setup.ready();
+    assert.equal(selection.ready, false);
+    if (!selection.ready) assert.equal(selection.status, 'target-selected');
     await assert.rejects(maat.setup.ready(), /configureSession\(\{clearAppTarget:true\}\)/);
     assert.equal(fake.counts().executes, 0);
     // A closed runtime may retain its last target as a hint; it is not an active App route.

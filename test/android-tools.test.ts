@@ -29,6 +29,7 @@ import {
 } from '../packages/core/src/setup/android-tools.ts';
 import { discoverDevices } from '../packages/core/src/setup/devices.ts';
 import { discoverApplications } from '../packages/core/src/setup/applications.ts';
+import type { DeviceIdentity } from '../packages/core/src/mobile/contracts/device.ts';
 import {
   defaultCommand,
   defaultSdkTools,
@@ -1158,11 +1159,43 @@ test('Core device and Android app consumers use resolved paths and gate CLI on s
     resolveDevice: async () => ({ environment, capabilities: { 'appium:udid': 'fixture-serial' } }),
   });
   assert.deepEqual(apps, [{ name: 'org.example.app', id: 'org.example.app' }]);
+  const exactIdentity: DeviceIdentity = {
+    platform: 'android',
+    providerInstanceId: 'local-adb',
+    routingId: 'selected-serial',
+    kind: 'device',
+    transportScope: 'local-adb',
+    displayName: 'Duplicate Name',
+  };
+  const exactApps = await discoverApplications(
+    environment,
+    'example',
+    {
+      ...dependencies,
+      resolveDevice: async () => {
+        throw new Error('Exact app discovery must not use legacy name matching.');
+      },
+      discoverDevices: async () => [
+        { id: 'other-serial', name: 'Duplicate Name', kind: 'device' },
+        { id: 'selected-serial', name: 'Duplicate Name', kind: 'device' },
+      ],
+    },
+    exactIdentity,
+  );
+  assert.deepEqual(exactApps, [{ name: 'org.example.app', id: 'org.example.app' }]);
+  assert.deepEqual(calls.at(-1)?.args.slice(0, 2), ['-s', 'selected-serial']);
   assert.equal(
     calls.every(({ file }) => file === tools.adbPath),
     true,
   );
-  assert.deepEqual(order, ['compatibility', 'command', 'compatibility', 'command']);
+  assert.deepEqual(order, [
+    'compatibility',
+    'command',
+    'compatibility',
+    'command',
+    'compatibility',
+    'command',
+  ]);
   await assert.rejects(
     discoverDevices('android', undefined, {
       ...dependencies,
@@ -1172,5 +1205,5 @@ test('Core device and Android app consumers use resolved paths and gate CLI on s
     }),
     /ADB_SERVER_VERSION_MISMATCH/,
   );
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
 });

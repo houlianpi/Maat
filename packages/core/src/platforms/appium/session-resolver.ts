@@ -16,6 +16,7 @@ import {
 } from '../../setup/ios-devices.ts';
 import { defaultFetchStatus } from '../../setup-assistant/probes.ts';
 import { resolveIosWdaReuse } from '../../setup/ios-wda.ts';
+import { sameDeviceIdentity, type DeviceIdentity } from '../../mobile/contracts/device.ts';
 
 export type SessionIssueCode =
   | 'server-unavailable'
@@ -151,6 +152,7 @@ export async function resolveIosReadinessSession(
   },
   currentTarget?: ResolvedNativeSession,
   allowWdaInstallation = false,
+  selectedIdentity?: DeviceIdentity,
 ): Promise<ResolvedNativeSession> {
   signal?.throwIfAborted();
   const { url, caps } = iosReadinessRouting(environment);
@@ -167,7 +169,18 @@ export async function resolveIosReadinessSession(
   signal?.throwIfAborted();
   const devices = await dependencies.devices(signal);
   signal?.throwIfAborted();
-  const matches = matchIosDevices(devices, environment.device);
+  const matches = selectedIdentity
+    ? devices.filter((device) =>
+        sameDeviceIdentity(selectedIdentity, {
+          platform: 'ios',
+          providerInstanceId: 'local-core-device',
+          routingId: device.id,
+          kind: 'device',
+          transportScope: 'core-device',
+          displayName: device.name,
+        }),
+      )
+    : matchIosDevices(devices, environment.device);
   if (matches.length !== 1)
     throw new Error(
       matches.length
@@ -183,7 +196,9 @@ export async function resolveIosReadinessSession(
     );
   if (
     (caps['appium:udid'] !== undefined && caps['appium:udid'] !== device.id) ||
-    (caps['appium:deviceName'] !== undefined && caps['appium:deviceName'] !== device.name)
+    (!selectedIdentity &&
+      caps['appium:deviceName'] !== undefined &&
+      caps['appium:deviceName'] !== device.name)
   )
     throw new Error(
       'IOS_READINESS_UNSUPPORTED: capabilities conflict with the selected iPhone; no other device was selected.',
@@ -192,8 +207,7 @@ export async function resolveIosReadinessSession(
     if (
       new URL(current.url).href !== new URL(url).href ||
       currentTarget.environment.device?.kind !== 'device' ||
-      current.caps['appium:udid'] !== device.id ||
-      current.caps['appium:deviceName'] !== device.name
+      current.caps['appium:udid'] !== device.id
     )
       throw new Error(
         'IOS_READINESS_UNSUPPORTED: the running Session cannot be bound to the selected physical iPhone and endpoint; no Session was rebuilt.',
@@ -231,6 +245,7 @@ export async function resolveAndroidReadinessSession(
   environment: NativeEnvironment,
   signal?: AbortSignal,
   connectAdb?: () => Socket,
+  selectedIdentity?: DeviceIdentity,
 ): Promise<ResolvedNativeSession> {
   signal?.throwIfAborted();
   const url = environment.serverUrl ?? 'http://127.0.0.1:4723/';
@@ -272,11 +287,23 @@ export async function resolveAndroidReadinessSession(
         candidate === url ? defaultServerReady(candidate, checkSignal) : Promise.resolve(false),
       discoverDevices: async (_platform, checkSignal) => {
         const devices = await discoverAndroidReadinessDevices(checkSignal, connectAdb);
-        if (matchDevices(devices, environment.device).length !== 1)
+        const exact = selectedIdentity
+          ? devices.filter((device) =>
+              sameDeviceIdentity(selectedIdentity, {
+                platform: 'android',
+                providerInstanceId: 'local-adb',
+                routingId: device.id,
+                kind: device.kind === 'emulator' ? 'emulator' : 'device',
+                transportScope: 'local-adb',
+                displayName: device.name,
+              }),
+            )
+          : matchDevices(devices, environment.device);
+        if (exact.length !== 1)
           throw new Error(
             'ANDROID_DEVICE_LOCK_STATE_UNKNOWN: the selected local device is unavailable or ambiguous; no other device was selected. Check the connection then recheck.',
           );
-        return devices;
+        return exact;
       },
     },
     signal,

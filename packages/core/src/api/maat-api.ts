@@ -6,6 +6,7 @@ import type {
   SetupAction,
   AndroidSetupCheckInput,
   SetupReadiness,
+  SetupReadyInput,
 } from '../setup-assistant/types.ts';
 import { sameFingerprint } from '../setup-assistant/storage.ts';
 import type { NativeAppTarget, NativeEnvironment } from '../platforms/appium/schema.ts';
@@ -106,6 +107,21 @@ export class MaatApi {
     },
   };
 
+  /** Phone-only lifecycle facade. Adapter resolution and close share one process-wide slot. */
+  readonly mobile = {
+    releaseCurrentSession: (): Promise<{
+      released: true;
+      platform: 'android' | 'ios';
+    }> =>
+      runMobileOperation(async () => {
+        const adapter = this.registry.current;
+        if (!isMobilePlatform(adapter.id))
+          throw new Error('releaseCurrentSession requires the Android or iOS platform.');
+        await adapter.close();
+        return { released: true, platform: adapter.id };
+      }),
+  };
+
   readonly setup = {
     current: () => this.setupAssistant.current(),
     check: async (input: AndroidSetupCheckInput & { platform?: string } = {}) => {
@@ -147,14 +163,7 @@ export class MaatApi {
       }
       return snapshot;
     },
-    ready: async (
-      input: {
-        screenshot?: boolean;
-        signal?: AbortSignal;
-        allowWdaInitialization?: boolean;
-        allowWdaInstallation?: boolean;
-      } = {},
-    ): Promise<SetupReadiness> => {
+    ready: async (input: SetupReadyInput = {}): Promise<SetupReadiness> => {
       const adapter = this.registry.current;
       if (adapter.id !== 'android' && adapter.id !== 'ios')
         throw new Error(
@@ -164,6 +173,14 @@ export class MaatApi {
       // Keep the established readiness flow together while the outer operation owns the slot.
       // prettier-ignore
       return runMobileOperation(async () => {
+      if (
+        input.targetSelection !== undefined &&
+        (!isRecord(input.targetSelection) ||
+          typeof input.targetSelection.discoveryId !== 'string' ||
+          !Number.isSafeInteger(input.targetSelection.candidateNumber) ||
+          typeof input.targetSelection.candidateNumber !== 'number')
+      )
+        throw new Error('Target selection requires a string discoveryId and integer candidateNumber.');
       if (input.screenshot !== undefined && typeof input.screenshot !== 'boolean')
         throw new Error('Setup readiness screenshot must be a boolean.');
       if (
@@ -188,6 +205,16 @@ export class MaatApi {
       ]);
       input.signal?.throwIfAborted();
       const label = adapter.label;
+      const targetSelection = await adapter.selectReadinessTarget?.(
+        input.targetSelection,
+        signal,
+      );
+      signal.throwIfAborted();
+      if (targetSelection && targetSelection.status !== 'selected')
+        return {
+          ...targetSelection,
+          ready: false as const,
+        };
       const snapshot = await this.setup.check({ platform: adapter.id, signal });
       signal.throwIfAborted();
       if (!snapshot.canContinue)
@@ -307,6 +334,14 @@ export class MaatApi {
       return {
         platform,
         ready: true,
+        ...(targetSelection
+          ? {
+              targetSelection: {
+                selectedBy: targetSelection.selectedBy,
+                candidate: targetSelection.candidate,
+              },
+            }
+          : {}),
         proof: {
           phoneUnlocked: true,
           sessionUsable: true,

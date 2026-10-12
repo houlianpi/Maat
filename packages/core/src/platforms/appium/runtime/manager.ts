@@ -9,6 +9,10 @@ export class NativeManager implements JavaScriptSession {
     this.executionTimeoutMs = executionTimeoutMs;
   }
   private session?: JavaScriptSession;
+  private uncertainOwnership?: Readonly<{
+    session: JavaScriptSession;
+    closeResult: Promise<void>;
+  }>;
   private sessionGeneration = 0;
   private resolved?: ResolvedNativeSession;
   private busy = false;
@@ -21,11 +25,16 @@ export class NativeManager implements JavaScriptSession {
   get isRunning() {
     return this.session !== undefined && !this.session.isClosed;
   }
+  /** Internal diagnostic state only; never exposes the owned Session or its identifiers. */
+  get hasUncertainOwnedSession() {
+    return this.uncertainOwnership !== undefined;
+  }
   get currentSessionGeneration(): number | undefined {
     return this.isRunning ? this.sessionGeneration : undefined;
   }
   async configureResolved(resolved: ResolvedNativeSession) {
     capabilities(resolved);
+    this.assertOwnershipCertain();
     await this.close();
     this.resolved = resolved;
   }
@@ -36,6 +45,7 @@ export class NativeManager implements JavaScriptSession {
     return this.executeSession(code, signal, generation);
   }
   private async executeSession(code: string, signal?: AbortSignal, generation?: number) {
+    this.assertOwnershipCertain();
     if (this.busy) throw new Error('Native execution already in progress.');
     signal?.throwIfAborted();
     if (!this.resolved) throw new Error('Select and configure a native project first.');
@@ -45,7 +55,7 @@ export class NativeManager implements JavaScriptSession {
         throw new Error(
           'NATIVE_SESSION_CHANGED: the checked Session was closed or replaced; no new Session was created.',
         );
-      if (generation === undefined && this.session?.isClosed) await this.close();
+      if (generation === undefined && this.session?.isClosed) await this.invalidateSession();
       if (generation === undefined && !this.session) {
         signal?.throwIfAborted();
         this.session = await startNativeSession(this.resolved, this.executionTimeoutMs, { signal });
@@ -56,7 +66,7 @@ export class NativeManager implements JavaScriptSession {
     } catch (error) {
       if (signal?.aborted || this.session?.isClosed) {
         try {
-          await this.close();
+          await this.invalidateSession();
         } catch (cleanup) {
           throw errorWithCleanupFailure(error, cleanup);
         }
@@ -66,9 +76,31 @@ export class NativeManager implements JavaScriptSession {
       this.busy = false;
     }
   }
-  async close() {
+  private assertOwnershipCertain() {
+    if (this.uncertainOwnership)
+      throw new Error('Native Session ownership is uncertain after cleanup failure.');
+  }
+  private async invalidateSession() {
     const current = this.session;
-    this.session = undefined;
+    if (this.session === current) this.session = undefined;
     await current?.close();
+  }
+  async close() {
+    if (this.uncertainOwnership) {
+      await this.uncertainOwnership.closeResult;
+      return;
+    }
+    const current = this.session;
+    if (!current) return;
+    // Explicit release immediately revokes execution, while retaining the exact ownership
+    // and one-shot close result until cleanup is known to have succeeded.
+    this.session = undefined;
+    const ownership = Object.freeze({
+      session: current,
+      closeResult: Promise.resolve().then(() => current.close()),
+    });
+    this.uncertainOwnership = ownership;
+    await ownership.closeResult;
+    if (this.uncertainOwnership === ownership) this.uncertainOwnership = undefined;
   }
 }

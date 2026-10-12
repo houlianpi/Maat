@@ -53,6 +53,21 @@ export function createSetupTools(
                 'iOS only, this attempt only. Set true only after the user explicitly authorizes first installation of the WDA control component on the selected phone. Never infer this grant from an ordinary phone task or set it automatically. Not permission for signing changes, restart or unlock. Handle this internal grant yourself, not as a technical parameter assignment for the user.',
             }),
           ),
+          targetSelection: Type.Optional(
+            Type.Object(
+              {
+                discoveryId: Type.String({
+                  description:
+                    'Ephemeral discovery snapshot returned by the latest check_device_ready result.',
+                }),
+                candidateNumber: Type.Integer({
+                  minimum: 1,
+                  description: 'Number shown for the candidate in that same discovery snapshot.',
+                }),
+              },
+              { additionalProperties: false },
+            ),
+          ),
         },
         { additionalProperties: false },
       ),
@@ -64,6 +79,7 @@ export function createSetupTools(
           result = await maat.setup.ready({
             screenshot: params.screenshot,
             allowWdaInstallation: params.allowWdaInstallation,
+            ...(params.targetSelection ? { targetSelection: params.targetSelection } : {}),
             signal,
           });
         } catch (error) {
@@ -72,15 +88,39 @@ export function createSetupTools(
           if (guidance) throw new Error(`${message}\n${guidance}`, { cause: error });
           throw error;
         }
+        if (!result.ready) {
+          const text =
+            result.status === 'selection-required'
+              ? locale === 'zh-CN'
+                ? `需要选择当前手机。请只使用本结果中的临时 discoveryId 和候选编号再次调用 check_device_ready：\n${JSON.stringify(result)}`
+                : `Current phone selection is required. Call check_device_ready again using only this result's ephemeral discoveryId and candidate number:\n${JSON.stringify(result)}`
+              : result.status === 'target-selected'
+                ? locale === 'zh-CN'
+                  ? `已为本连接生命周期选择手机目标：${result.candidate.displayName}（${result.candidate.kind}，${result.candidate.discriminator}）；${result.selectedBy === 'single-candidate' ? '因当前仅有一个候选而自动选择' : '按本次明确选择确定'}。这只是选择披露，尚未执行环境检查、创建 Session 或读取手机界面。请先向用户披露此目标，然后再次调用 check_device_ready 继续准备。`
+                  : `Phone target selected for this connection lifecycle: ${result.candidate.displayName} (${result.candidate.kind}, ${result.candidate.discriminator}); ${result.selectedBy === 'single-candidate' ? 'auto-selected because it was the only current candidate' : 'chosen by explicit selection'}. This is selection disclosure, not readiness: no doctor check, Session creation, or phone UI read has run. Disclose this target, then call check_device_ready again to continue readiness.`
+                : locale === 'zh-CN'
+                  ? `手机目标尚未选择（${result.status}）。未创建 Session，也未执行手机操作。`
+                  : `No phone target was selected (${result.status}). No Session or phone action was started.`;
+          return {
+            content: [{ type: 'text', text }],
+            structuredContent: result,
+            details: result,
+          };
+        }
         const { observations, ...readiness } = result;
+        const disclosure = result.targetSelection
+          ? locale === 'zh-CN'
+            ? `本连接生命周期目标：${result.targetSelection.candidate.displayName}（${result.targetSelection.candidate.kind}，${result.targetSelection.candidate.discriminator}）；${result.targetSelection.selectedBy === 'single-candidate' ? '因当前仅有一个候选而自动选择' : '按本次明确选择确定'}。`
+            : `Connection lifecycle target: ${result.targetSelection.candidate.displayName} (${result.targetSelection.candidate.kind}, ${result.targetSelection.candidate.discriminator}); ${result.targetSelection.selectedBy === 'single-candidate' ? 'auto-selected because it was the only current candidate' : 'chosen by explicit selection'}.`
+          : '';
         return {
           content: [
             {
               type: 'text',
               text:
                 locale === 'zh-CN'
-                  ? `结论：可以开始手机任务。${result.platform === 'ios' ? 'iOS' : 'Android'} 操作通道已确认，请复用下面的当前界面观察继续；这不代表业务任务已完成。`
-                  : `Conclusion: phone tasks can start. The ${result.platform === 'ios' ? 'iOS' : 'Android'} control channel is ready; reuse the current observation below. This does not prove the business task completed.`,
+                  ? `${disclosure}\n结论：可以开始手机任务。${result.platform === 'ios' ? 'iOS' : 'Android'} 操作通道已确认，请复用下面的当前界面观察继续；这不代表业务任务已完成。`
+                  : `${disclosure}\nConclusion: phone tasks can start. The ${result.platform === 'ios' ? 'iOS' : 'Android'} control channel is ready; reuse the current observation below. This does not prove the business task completed.`,
             },
             ...observations,
           ],

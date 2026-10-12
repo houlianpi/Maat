@@ -34,7 +34,12 @@ export async function runAgent(prompt: string, options: RunAgentOptions = {}): P
       customTools: [
         createExecJsTool(
           {
-            close: () => maat.platforms.current().close(),
+            close: async () => {
+              const adapter = maat.platforms.current();
+              if (adapter.id === 'android' || adapter.id === 'ios')
+                await maat.mobile.releaseCurrentSession();
+              else await adapter.close();
+            },
             execute: (code, signal) => maat.exploration.executeJavaScript(code, signal),
           },
           {
