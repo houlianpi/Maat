@@ -94,6 +94,13 @@ artifacts/     Generated output, never editable source
   permission for direct implementation, not simulate delegation or silently take over.
   Every direct-implementation exception states its reason, scope and validation
   arrangements; it does not waive required independent review.
+- **Autonomous execution.** Once scope, AC, dependencies and authorization are
+  settled, Lead proceeds through delegation, implementation, tests, review,
+  fixes and local delivery-baseline commits without asking whether each routine
+  step should happen. Keep the user informed; seek decisions for unapproved scope,
+  major architecture/Gate changes, public API/privacy boundaries or other
+  human-confirmation matters below. Autonomy does not waive AC or review, nor
+  grant remote-push, release or device-operation authorization.
 - **One task package.** Every handoff includes a traceable TaskID and fixed-version
   requirement/design/AC references (commit + path/section, or content hash for
   uncommitted content); implementation HEAD does not substitute for Spec versions.
