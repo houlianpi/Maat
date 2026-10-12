@@ -249,6 +249,50 @@ function androidReadinessApi(root: string, connectAdb: () => Socket) {
   );
 }
 
+test('native codeContext advertises app only when the runtime can bind a configured App ID', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-native-context-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  try {
+    for (const platform of ['android', 'ios'] as const) {
+      const adapter = new AppiumPlatformAdapter({
+        id: platform,
+        label: platform,
+        platformName: platform === 'android' ? 'Android' : 'iOS',
+        automationName: platform === 'android' ? 'UiAutomator2' : 'XCUITest',
+      });
+      assert.equal(
+        adapter.codeContext.globals.some((global) => global.name === 'app'),
+        false,
+      );
+      assert.doesNotMatch(adapter.codeContext.guidelines.join('\n'), /app\.resourceId/);
+      await adapter.configureSession({
+        capabilities: {
+          [platform === 'android' ? 'appium:appPackage' : 'appium:bundleId']: 'com.example.target',
+        },
+      });
+      assert.equal(
+        adapter.codeContext.globals.some((global) => global.name === 'app'),
+        true,
+      );
+      assert.match(
+        adapter.codeContext.globals.find((global) => global.name === 'app')!.description,
+        /not the current foreground App/,
+      );
+      await adapter.configureSession({ clearAppTarget: true });
+      assert.equal(
+        adapter.codeContext.globals.some((global) => global.name === 'app'),
+        false,
+      );
+      await adapter.close();
+    }
+  } finally {
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('native defaults preserve data and device discovery excludes offline devices', () => {
   assert.equal(capabilities({ platform: 'ios', capabilities: {} })['appium:noReset'], true);
   assert.equal(
@@ -297,7 +341,7 @@ test('Android ready reuses its unlock-safe Session and guards a locked new Sessi
     assert.equal('appium:skipServerInstallation' in mock.sessionCapabilities[0]!, false);
     const adapter = api.registry.current as AppiumPlatformAdapter;
     assert.deepEqual(adapter.sessionHints?.capabilities, hints);
-    assert.deepEqual(adapter.runtime.currentEnvironment?.capabilities, hints);
+    assert.deepEqual(adapter.runtime.currentTarget?.environment.capabilities, hints);
     assert.equal((await api.setup.ready()).proof.phoneUnlocked, true);
     assert.equal(mock.created(), 1);
     assert.equal(mock.deleted(), 0);

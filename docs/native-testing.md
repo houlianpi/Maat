@@ -143,8 +143,10 @@ Use `find_applications` rather than hardcoding the wrong App variant.
 readiness check. It uses the existing Session-close behavior, does not erase
 App data, and cannot be combined with a new App target.
 
-Native `exe_js` exposes `driver`, `browser`, `app`, `expect`, `console`, `display`
-and `evidence`. The screenshot helper returns an observation, not a saved
+Native `exe_js` exposes `driver`, `browser`, `expect`, `console`, `display`
+and `evidence`. The optional `app` helper exists only when the Session has a
+configured App identifier; a base Session does not expose it. Activating another
+App does not retarget that helper. The screenshot helper returns an observation, not a saved
 Evidence manifest. Switching adapters preserves their independent execution
 Sessions. The Worker is killable, not an OS sandbox.
 

@@ -77,6 +77,14 @@ Extension/TUI shutdown closes Sessions before bounded owned-child cleanup;
 user services remain untouched. Raw stderr, PID and private signing/build hints
 never enter content. Embedders using `createMaatPiTools` can pass their owned
 `MobilePreparation` and must call `closeMobileRuntime` for the same lifecycle.
+Setup/model diagnostics no longer suggest a conflicting foreground Appium command
+or a generic host-background workaround. With an owner, they direct the Agent to
+`prepare_mobile({action:"start-appium",taskId:null,waitSeconds:20})` and read-only
+`status` polling of the returned taskId. Without an owner, tool factories report
+`HOST_TRACKED_PREPARATION_UNAVAILABLE`, not automatic startup. Standalone setup
+context/command embedders must explicitly pass `{prepareAvailable:true}` only when
+that tool is registered; the default is unavailable. The setup script's documented
+foreground Appium mode and ADB/SDK/driver installation commands remain available.
 Reuse requires the Appium ready message and supported build version, not arbitrary
 WebDriver `ready:true`. Owned listener logs must match the selected host/port.
 POSIX uses an owned process group with retained child handle/stdio, not an

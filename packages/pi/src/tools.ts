@@ -48,7 +48,7 @@ export function createMaatPiTools(
               ? `${label} 连接准备尚未完成。按 maat-setup Skill 的 ${platform} 流程使用已授权的宿主工具处理，不读项目源码修复环境，不要重放之前的手机动作。`
               : `${label} preparation is incomplete. Follow the ${platform} workflow in the maat-setup Skill using authorized host tools, not project source inspection; do not replay previous phone actions.`,
             ...setupPanel(snapshot, locale),
-            setupAgentContext(snapshot, locale),
+            setupAgentContext(snapshot, locale, { prepareAvailable: !!preparation }),
             `Execution error: ${message}`,
           ].join('\n');
         }
@@ -69,7 +69,7 @@ export function createMaatPiTools(
       },
     ),
     ...createPlatformTools(maat),
-    ...createSetupTools(maat),
+    ...createSetupTools(maat, preparation),
     ...(preparation ? [createMobilePreparationTool(preparation)] : []),
   ];
 }

@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { createExplorationWorker } from '../packages/core/src/core/exploration/worker-client.ts';
 import { parseObservations } from '../packages/core/src/core/exploration/protocol.ts';
-import { findBrowserExecutable } from '../packages/core/src/setup/browser-discovery.ts';
+import { findBrowserExecutable } from './fixtures/browser-executable.ts';
 import { createWebExplorationSession as launchJavaScriptSession } from '../packages/core/src/platforms/web/exploration-session.ts';
 import { WebExplorationManager } from '../packages/core/src/platforms/web/exploration-manager.ts';
 import { WebPlatformAdapter } from '../packages/core/src/platforms/web/web-adapter.ts';

@@ -649,6 +649,58 @@ test('real foreground child + controlled HTTP becomes ready and owned cleanup ex
   assert.throws(() => process.kill(descendantPid!, 0), /ESRCH/);
 });
 
+test(
+  'owned local child drains large stderr before readiness and still cleans up',
+  { timeout: 10_000 },
+  async (t) => {
+    const f = fixture();
+    let child: ChildProcess | undefined;
+    const preparation = new MobilePreparation(f.maat, {
+      ...f.dependencies,
+      spawn: () => {
+        child = spawn(
+          process.execPath,
+          [
+            '--input-type=module',
+            '-e',
+            `import {once} from 'node:events';
+const chunk = 'private-stderr-token\\n'.repeat(4096);
+for (let i = 0; i < 128; i++) {
+  if (!process.stderr.write(chunk)) await once(process.stderr, 'drain');
+}
+console.log('Appium REST http interface listener started on http://127.0.0.1:4723');
+setInterval(() => {}, 1000);`,
+          ],
+          {
+            shell: false,
+            detached: process.platform !== 'win32',
+            stdio: ['ignore', 'pipe', 'pipe'],
+          },
+        );
+        return child;
+      },
+      // No actual Appium or listening service: stdout ownership gates this fixture.
+      responding: async () => child !== undefined,
+      stop: stopOwnedAppiumChild,
+      appiumDeadlineMs: 5_000,
+      pollMs: 10,
+    });
+    t.after(() => preparation.close());
+    const result = await preparation.execute({ action: 'start-appium', waitSeconds: 6 });
+    assert.equal(result.state, 'ready');
+    assert.equal(result.owned, true);
+    assert.equal(result.serviceResponding, true);
+    assert.doesNotMatch(JSON.stringify(result), /private-stderr-token/);
+    const status = await preparation.execute({ action: 'status', taskId: result.taskId });
+    assert.equal(status.state, 'ready');
+    assert.doesNotMatch(JSON.stringify(status), /private-stderr-token/);
+    await preparation.close();
+    await preparation.close();
+    assert.ok(child);
+    assert.ok(child.exitCode !== null || child.signalCode !== null);
+  },
+);
+
 test('read/reuse requires Appium status features, not generic WebDriver ready', async (t) => {
   const cases = [
     { value: { ready: true } },

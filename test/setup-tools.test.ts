@@ -11,6 +11,7 @@ import { createSetupTools } from '../packages/pi/src/tools/setup-tools.ts';
 import { registerMaatSetupCommands } from '../packages/pi/src/setup-extension.ts';
 import { createMaatPiTools } from '../packages/pi/src/tools.ts';
 import { resultText } from '../packages/pi/src/mobile-summary.ts';
+import { MobilePreparation } from '../packages/pi/src/mobile-preparation.ts';
 
 function partialSnapshot() {
   return aggregateSetup({
@@ -47,6 +48,87 @@ const context = {
     getEntries: () => [{ type: 'message', message: { role: 'user', content: '请检查操作环境' } }],
   },
 } as unknown as ExtensionContext;
+
+for (const platform of ['android', 'ios'] as const) {
+  test(`${platform} all setup producers and execution diagnostics use the registered preparation availability`, async () => {
+    const maat = createMaat();
+    await maat.platforms.select(platform);
+    const snapshot = aggregateSetup({
+      platform,
+      capabilities: [
+        {
+          id: 'appiumServer',
+          status: 'action-required',
+          required: true,
+          messageKey: 'capability.appium.start',
+          action: {
+            id: 'start-appium',
+            labelKey: 'action.startAppium',
+            command: 'appium --address 127.0.0.1 --port 4723',
+          },
+        },
+      ],
+    });
+    maat.setup.check = async () => snapshot;
+    maat.setup.current = () => snapshot;
+    const original = new Error('ECONNREFUSED');
+    maat.exploration.executeJavaScript = async () => {
+      throw original;
+    };
+    const preparation = new MobilePreparation(maat);
+    const verify = (text: string, available: boolean) => {
+      assert.doesNotMatch(
+        text,
+        /appium --address|host-supported.*background|node .*android-tools\.mjs.*appium/,
+      );
+      if (available) {
+        assert.match(text, /"tool":"prepare_mobile"/);
+        assert.match(
+          text,
+          /"arguments":\{"action":"start-appium","taskId":null,"waitSeconds":20\}/,
+        );
+        assert.match(text, /same returned taskId/);
+      } else {
+        assert.match(text, /HOST_TRACKED_PREPARATION_UNAVAILABLE/);
+        assert.doesNotMatch(text, /prepare_mobile/);
+      }
+    };
+    try {
+      for (const owner of [undefined, preparation]) {
+        const tools = createMaatPiTools(maat, owner);
+        assert.equal(
+          tools.some((tool) => tool.name === 'prepare_mobile'),
+          !!owner,
+        );
+        for (const name of [
+          'check_platform_setup',
+          'open_setup_step',
+          'retry_setup_step',
+          'get_setup_diagnostics',
+        ]) {
+          const tool = tools.find((item) => item.name === name)!;
+          verify(
+            resultText(await tool.execute('check', {}, undefined, undefined, context)),
+            !!owner,
+          );
+        }
+        const execute = tools.find((item) => item.name === 'exe_js')!;
+        await assert.rejects(
+          execute.execute('exec', { code: 'action()' }, undefined, undefined, context),
+          (error) => {
+            assert.ok(error instanceof Error);
+            assert.equal(error.cause, original);
+            verify(error.message, !!owner);
+            return true;
+          },
+        );
+      }
+    } finally {
+      await maat.close();
+      await preparation.close();
+    }
+  });
+}
 
 test('select_platform returns the macOS setup action panel without a test draft', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'maat-setup-tools-'));
@@ -162,7 +244,8 @@ test('Android setup is the first-use command default and the only user command',
     await commands.get('maat-setup')?.handler('android zh-CN', ctx);
     assert.equal(maat.platforms.current().id, 'android');
     assert.match(messages[0]!, /APPIUM_SERVER_UNAVAILABLE/);
-    assert.match(messages[0]!, /android-tools\.mjs/);
+    assert.match(messages[0]!, /HOST_TRACKED_PREPARATION_UNAVAILABLE/);
+    assert.doesNotMatch(messages[0]!, /prepare_mobile|android-tools\.mjs.*appium/);
     await maat.platforms.select('web');
     await commands.get('maat-setup')?.handler('', ctx);
     assert.equal(maat.platforms.current().id, 'android');

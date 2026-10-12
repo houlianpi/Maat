@@ -1,11 +1,5 @@
 import { startNativeSession } from './session.ts';
-import {
-  capabilities,
-  type NativeAppTarget,
-  type NativeEnvironment,
-  type ResolvedNativeSession,
-} from '../schema.ts';
-import { resolveDevice } from '../../../setup/devices.ts';
+import { capabilities, type ResolvedNativeSession } from '../schema.ts';
 import type { JavaScriptSession } from '../../../core/exploration/runtime.ts';
 import { errorWithCleanupFailure } from '../../../core/exploration/runtime.ts';
 
@@ -16,25 +10,13 @@ export class NativeManager implements JavaScriptSession {
   }
   private session?: JavaScriptSession;
   private sessionGeneration = 0;
-  private environment?: NativeEnvironment;
-  private app?: NativeAppTarget;
   private resolved?: ResolvedNativeSession;
   private busy = false;
-  get currentEnvironment() {
-    return this.environment;
-  }
   get currentApp() {
-    return this.app;
+    return this.resolved?.app;
   }
   get currentTarget(): ResolvedNativeSession | undefined {
-    if (this.resolved) return { ...this.resolved, app: this.app };
-    return this.environment
-      ? {
-          environment: this.environment,
-          capabilities: { ...this.environment.capabilities },
-          app: this.app,
-        }
-      : undefined;
+    return this.resolved ? { ...this.resolved } : undefined;
   }
   get isRunning() {
     return this.session !== undefined && !this.session.isClosed;
@@ -42,18 +24,9 @@ export class NativeManager implements JavaScriptSession {
   get currentSessionGeneration(): number | undefined {
     return this.isRunning ? this.sessionGeneration : undefined;
   }
-  async configure(environment: NativeEnvironment, app?: NativeAppTarget) {
-    capabilities(environment);
-    await this.close();
-    this.environment = environment;
-    this.app = app;
-    this.resolved = undefined;
-  }
   async configureResolved(resolved: ResolvedNativeSession) {
     capabilities(resolved);
     await this.close();
-    this.environment = resolved.environment;
-    this.app = resolved.app;
     this.resolved = resolved;
   }
   async execute(code: string, signal?: AbortSignal) {
@@ -65,7 +38,7 @@ export class NativeManager implements JavaScriptSession {
   private async executeSession(code: string, signal?: AbortSignal, generation?: number) {
     if (this.busy) throw new Error('Native execution already in progress.');
     signal?.throwIfAborted();
-    if (!this.environment) throw new Error('Select and configure a native project first.');
+    if (!this.resolved) throw new Error('Select and configure a native project first.');
     this.busy = true;
     try {
       if (generation !== undefined && (!this.isRunning || this.sessionGeneration !== generation))
@@ -74,7 +47,6 @@ export class NativeManager implements JavaScriptSession {
         );
       if (generation === undefined && this.session?.isClosed) await this.close();
       if (generation === undefined && !this.session) {
-        this.resolved ??= { ...(await resolveDevice(this.environment, signal)), app: this.app };
         signal?.throwIfAborted();
         this.session = await startNativeSession(this.resolved, this.executionTimeoutMs, { signal });
         this.sessionGeneration++;

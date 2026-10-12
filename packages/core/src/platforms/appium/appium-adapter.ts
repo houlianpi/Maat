@@ -35,16 +35,23 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   readonly id: NativePlatform;
   readonly label: string;
   get codeContext() {
+    const target = this.runtime.isRunning ? this.runtime.currentApp : this.app;
+    const appId = target?.['appium:appPackage'] ?? target?.['appium:bundleId'];
     return {
       language: 'javascript' as const,
       globals: [
         { name: 'driver', description: 'WebdriverIO client attached to the Appium Session' },
         { name: 'browser', description: 'Alias of driver' },
         { name: 'expect', description: 'expect-webdriverio' },
-        {
-          name: 'app',
-          description: 'Runtime App target with id and package-aware resourceId(name)',
-        },
+        ...(appId
+          ? [
+              {
+                name: 'app',
+                description:
+                  'Configured Session App target; not the current foreground App after activation',
+              },
+            ]
+          : []),
         { name: 'display', description: 'Return a screenshot UI observation' },
         { name: 'evidence', description: 'Capture a screenshot UI observation with screenshot()' },
       ],
@@ -71,7 +78,11 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
               'Capture screenshots with evidence.screenshot(), not driver.takeScreenshot().',
             ]
           : []),
-        'Use app.resourceId(name) for Android resource IDs; never hardcode an App package prefix.',
+        ...(appId && this.id === 'android'
+          ? [
+              'The configured Android app target exposes app.resourceId(name); do not use it for a different foreground package.',
+            ]
+          : []),
         'Await every operation.',
         'Observe actual UI state; check only user-declared outcomes.',
       ],

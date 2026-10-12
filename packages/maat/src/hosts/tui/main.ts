@@ -79,7 +79,7 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
     settingsManager: maatSettings,
     resourceLoaderOptions: createMaatResourceOptions([
       maatExtension,
-      createMaatSetupExtension(maat),
+      createMaatSetupExtension(maat, { prepareAvailable: true }),
       {
         name: 'maat-cleanup',
         hidden: true,

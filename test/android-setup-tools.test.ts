@@ -7,7 +7,10 @@ import { PlatformRegistry } from '../packages/core/src/core/platforms/registry.t
 import type { PlatformAdapter } from '../packages/core/src/core/platforms/contracts.ts';
 import { createSetupTools } from '../packages/pi/src/tools/setup-tools.ts';
 import { createPlatformTools } from '../packages/pi/src/tools/platform-tools.ts';
-import { registerMaatSetupCommands } from '../packages/pi/src/setup-extension.ts';
+import {
+  createMaatSetupExtension,
+  registerMaatSetupCommands,
+} from '../packages/pi/src/setup-extension.ts';
 
 function fixture() {
   const adapter: PlatformAdapter = {
@@ -58,6 +61,48 @@ function fixture() {
   } as unknown as ExtensionContext;
   return { maat, checks, ctx };
 }
+
+test('exported setup commands and inline extension default unavailable and forward explicit availability', async () => {
+  const { maat, ctx } = fixture();
+  try {
+    for (const available of [false, true]) {
+      for (const inline of [false, true]) {
+        let handler: ((args: string, context: ExtensionContext) => unknown) | undefined;
+        let content = '';
+        const pi = {
+          registerCommand(
+            _name: string,
+            command: { handler: (args: string, context: ExtensionContext) => unknown },
+          ) {
+            handler = command.handler;
+          },
+          sendMessage(message: { content: string }) {
+            content = message.content;
+          },
+        } as unknown as ExtensionAPI;
+        const options = available ? { prepareAvailable: true } : undefined;
+        if (inline) {
+          const extension = createMaatSetupExtension(maat, options);
+          assert.ok(typeof extension !== 'function');
+          await extension.factory(pi);
+        } else registerMaatSetupCommands(pi, maat, undefined, options);
+        assert.ok(handler);
+        await handler('', ctx);
+        assert.doesNotMatch(content, /android-tools\.mjs.*appium|host-supported.*background/);
+        if (available) {
+          assert.match(content, /"tool":"prepare_mobile"/);
+          assert.match(content, /"taskId":null,"waitSeconds":20/);
+          assert.match(content, /same returned taskId/);
+        } else {
+          assert.match(content, /HOST_TRACKED_PREPARATION_UNAVAILABLE/);
+          assert.doesNotMatch(content, /prepare_mobile/);
+        }
+      }
+    }
+  } finally {
+    await maat.close();
+  }
+});
 
 test('Android setup and diagnostics remain on Android and propagate cancellation', async () => {
   const { maat, checks, ctx } = fixture();

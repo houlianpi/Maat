@@ -9,11 +9,17 @@ import {
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { createMaat } from '../packages/core/src/api/create-maat.ts';
 import { aggregateSetup } from '../packages/core/src/setup-assistant/model.ts';
-import { createSetupTools } from '../packages/pi/src/tools/setup-tools.ts';
+import { createMaatPiTools } from '../packages/pi/src/tools.ts';
+import { MobilePreparation } from '../packages/pi/src/mobile-preparation.ts';
 import { setupAgentContext } from '../packages/pi/src/setup-ui.ts';
 
-for (const platform of ['android', 'ios'] as const) {
-  test(`${platform} actual agent-loop model context retains setup categories and actions without MCP-only fields`, async () => {
+for (const [platform, prepareAvailable] of [
+  ['android', false],
+  ['android', true],
+  ['ios', false],
+  ['ios', true],
+] as const) {
+  test(`${platform} actual agent-loop model context retains setup categories and host availability (${prepareAvailable}) without MCP-only fields`, async () => {
     const maat = createMaat();
     const snapshot = aggregateSetup({
       platform,
@@ -24,7 +30,11 @@ for (const platform of ['android', 'ios'] as const) {
           status: 'action-required',
           messageKey: 'capability.appium.start',
           errorCode: 'APPIUM_SERVER_UNAVAILABLE',
-          action: { id: 'start-appium', labelKey: 'action.startAppium' },
+          action: {
+            id: 'start-appium',
+            labelKey: 'action.startAppium',
+            command: 'appium --address 127.0.0.1 --port 4723',
+          },
         },
       ],
       technicalDetails: {
@@ -36,7 +46,13 @@ for (const platform of ['android', 'ios'] as const) {
       },
     });
     maat.setup.check = async () => snapshot;
-    const tool = createSetupTools(maat).find((item) => item.name === 'check_platform_setup');
+    const preparation = prepareAvailable ? new MobilePreparation(maat) : undefined;
+    const tools = createMaatPiTools(maat, preparation);
+    assert.equal(
+      tools.some((item) => item.name === 'prepare_mobile'),
+      prepareAvailable,
+    );
+    const tool = tools.find((item) => item.name === 'check_platform_setup');
     assert.ok(tool);
     const model: Model<'openai-completions'> = {
       id: 'context-test',
@@ -98,7 +114,6 @@ for (const platform of ['android', 'ios'] as const) {
           if (platform === 'android') {
             assert.match(text, /ANDROID_SDK_INVALID/);
             assert.match(text, /"toolsSource":"managed"/);
-            assert.match(text, /android-tools\.mjs/);
           } else {
             assert.match(text, /"platform":"ios"/);
             assert.match(text, /IOS_DEVICE_LOCK_STATE_UNKNOWN/);
@@ -106,6 +121,28 @@ for (const platform of ['android', 'ios'] as const) {
             assert.doesNotMatch(text, /android-tools\.mjs|"toolsSource"|Maat · macOS/);
           }
           assert.doesNotMatch(text, /private-sdk|private-value|never-show/);
+          assert.doesNotMatch(
+            text,
+            /appium --address|android-tools\.mjs.*appium|host-supported.*background/,
+          );
+          const facts = JSON.parse(text.split('Maat setup facts:\n')[1]!);
+          if (prepareAvailable) {
+            assert.equal(facts.serviceStartup.status, 'available');
+            assert.equal(facts.nextStep.tool, 'prepare_mobile');
+            assert.deepEqual(facts.nextStep.arguments, {
+              action: 'start-appium',
+              taskId: null,
+              waitSeconds: 20,
+            });
+            assert.match(facts.serviceStartup.instruction, /same returned taskId/);
+            assert.match(facts.serviceStartup.instruction, /action:"status"/);
+            assert.match(facts.serviceStartup.instruction, /not deviceReady/);
+          } else {
+            assert.equal(facts.serviceStartup.status, 'unavailable');
+            assert.equal(facts.serviceStartup.category, 'HOST_TRACKED_PREPARATION_UNAVAILABLE');
+            assert.doesNotMatch(text, /prepare_mobile/);
+            assert.match(facts.nextStep.instruction, /Autonomous Appium startup is unavailable/);
+          }
           assert.equal('structuredContent' in result, false);
         }
         const final =
@@ -136,6 +173,7 @@ for (const platform of ['android', 'ios'] as const) {
       assert.equal(requests, 2);
     } finally {
       await maat.close();
+      await preparation?.close();
     }
   });
 }

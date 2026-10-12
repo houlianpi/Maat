@@ -76,7 +76,11 @@ const ui = {
   },
 } as const;
 
-export function setupAgentContext(snapshot: SetupSnapshot, locale: SetupLocale = 'en'): string {
+export function setupAgentContext(
+  snapshot: SetupSnapshot,
+  locale: SetupLocale = 'en',
+  options: { prepareAvailable?: boolean } = {},
+): string {
   const script = path.join(path.dirname(MAAT_SETUP_SKILL_PATH), 'scripts', 'android-tools.mjs');
   const quoted =
     process.platform === 'win32'
@@ -86,7 +90,6 @@ export function setupAgentContext(snapshot: SetupSnapshot, locale: SetupLocale =
     'install-adb': `node ${quoted} prepare`,
     'configure-android-sdk': `node ${quoted} prepare`,
     'start-adb': `node ${quoted} adb`,
-    'start-appium': `node ${quoted} appium`,
     'install-appium': 'npm install --global appium@3.7.0',
     'install-uiautomator2': 'appium driver install uiautomator2@8.7.0',
     'install-xcuitest': 'appium driver install xcuitest@12.13.2',
@@ -109,16 +112,33 @@ export function setupAgentContext(snapshot: SetupSnapshot, locale: SetupLocale =
       })
     : [];
   const action = snapshot.recommendedAction;
-  const command = action
-    ? snapshot.platform === 'android'
-      ? commands[action.id]
-      : snapshot.platform === 'ios'
-        ? (action.command ??
-          (action.id === 'install-appium' || action.id === 'install-xcuitest'
-            ? commands[action.id]
-            : undefined))
-        : action.command
-    : undefined;
+  const mobile = snapshot.platform === 'android' || snapshot.platform === 'ios';
+  const serviceStartup = options.prepareAvailable
+    ? {
+        status: 'available',
+        tool: 'prepare_mobile',
+        instruction:
+          'Use prepare_mobile({action:"start-appium",taskId:null,waitSeconds:20}) for the selected endpoint. Poll the same returned taskId with prepare_mobile({action:"status",taskId:<returned taskId>,waitSeconds:20}); wait expiry never restarts work. Preserve existing services. Ready means serviceResponding only, not deviceReady or business success.',
+      }
+    : {
+        status: 'unavailable',
+        category: 'HOST_TRACKED_PREPARATION_UNAVAILABLE',
+        instruction:
+          'This host has no tracked mobile preparation capability; report this limitation. Autonomous Appium startup is unavailable. Preserve existing services; do not bypass this limitation with foreground command timeouts or untracked shell startup.',
+      };
+  const command =
+    mobile && action?.id === 'start-appium'
+      ? undefined
+      : action
+        ? snapshot.platform === 'android'
+          ? commands[action.id]
+          : snapshot.platform === 'ios'
+            ? (action.command ??
+              (action.id === 'install-appium' || action.id === 'install-xcuitest'
+                ? commands[action.id]
+                : undefined))
+            : action.command
+        : undefined;
   return `Maat setup facts:\n${JSON.stringify({
     platform: snapshot.platform,
     preparationOnly: true,
@@ -129,6 +149,7 @@ export function setupAgentContext(snapshot: SetupSnapshot, locale: SetupLocale =
       ...(item.errorCode ? { errorCode: item.errorCode } : {}),
       message: setupMessage(locale, item.messageKey),
     })),
+    ...(mobile ? { serviceStartup } : {}),
     ...(snapshot.platform === 'android'
       ? {
           toolsSource: facts.androidToolsSource,
@@ -149,15 +170,22 @@ export function setupAgentContext(snapshot: SetupSnapshot, locale: SetupLocale =
             'Use the iOS section of the setup Skill, not project source or Android SDK tools. Reuse Xcode, XCUITest, existing Appium and WDA verified against the selected physical iPhone; an open WDA port or simulator is not device proof. Do not ask for Apple credentials or silently change signing, Developer Mode, trust or device selection. WDA signing/deployment is not verified by doctor.',
           coldReadiness:
             'IOS_DEVICE_LOCK_STATE_UNKNOWN blocks cold Session initialization by default. CoreDevice passcodeRequired:false and unlockedSinceBoot:true do not prove current unlock/screen state. Only explicit user authorization for this attempt after explaining WDA effects permits check_device_ready({allowWdaInitialization:true}); it is transient, not unlock proof or signing authorization. Live WDA unlock and real UI observations are still required. IOS_WDA_SECURITY_REJECTED may involve signing, entitlements or profile trust; if developer App trust is absent or already granted, inspect signing/profile expiry, not a retry loop.',
-          serviceStartup:
-            'Use the host-supported tracked background mechanism for the selected endpoint. Preserve existing services. If unavailable, report the host limitation; do not count manual terminal startup as autonomous setup success.',
         }
       : {}),
     nextStep: action
       ? {
           id: action.id,
           ...(command ? { command } : {}),
-          instruction: setupMessage(locale, action.labelKey),
+          ...(mobile && action.id === 'start-appium' && options.prepareAvailable
+            ? {
+                tool: 'prepare_mobile',
+                arguments: { action: 'start-appium', taskId: null, waitSeconds: 20 },
+              }
+            : {}),
+          instruction:
+            mobile && action.id === 'start-appium'
+              ? serviceStartup.instruction
+              : setupMessage(locale, action.labelKey),
         }
       : snapshot.canContinue
         ? {
@@ -175,8 +203,6 @@ export function setupAgentContext(snapshot: SetupSnapshot, locale: SetupLocale =
       ? {
           preparationGuidance:
             'Inherited SDK variables are candidates, not user requirements. Explain their warning and use verified tools. Do authorized preparation directly. Ask only for user-only actions or actual license acceptance. Do not modify global configuration, request repeated permission to look for tools, or read Maat source to recover.',
-          serviceStartup:
-            'This appium command is foreground. Use the host-supported background mechanism if available and retain its handle. If no background mechanism is available, report that exact host limitation; do not repeatedly run the foreground command with a timeout or falsely claim autonomous setup passed.',
         }
       : {}),
   })}`;
@@ -379,7 +405,9 @@ export function setupDoctor(snapshot: SetupSnapshot, locale: SetupLocale = 'en')
       ),
       ...detailLines(snapshot.technicalDetails),
       ...snapshot.capabilities.flatMap((item) =>
-        item.action?.command ? [`- ${item.action.command}`] : [],
+        item.action?.command && item.action.id !== 'start-appium'
+          ? [`- ${item.action.command}`]
+          : [],
       ),
     ].join('\n');
   const text = ui[locale];

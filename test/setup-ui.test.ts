@@ -5,6 +5,80 @@ import { setupAgentContext, setupDoctor, setupPanel } from '../packages/pi/src/s
 import { resolveSetupLocale } from '../packages/pi/src/setup-i18n.ts';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 
+test('setup context preserves Android SDK/ADB and mobile driver install commands', () => {
+  for (const [platform, id, labelKey, expected] of [
+    ['android', 'install-adb', 'action.installAdb', /android-tools\.mjs.*prepare/],
+    [
+      'android',
+      'configure-android-sdk',
+      'action.configureAndroidSdk',
+      /android-tools\.mjs.*prepare/,
+    ],
+    ['android', 'start-adb', 'action.startAdb', /android-tools\.mjs.*adb/],
+    ['android', 'install-appium', 'action.installAppium', /npm install --global appium@3\.7\.0/],
+    [
+      'android',
+      'install-uiautomator2',
+      'action.installUiAutomator2',
+      /appium driver install uiautomator2@8\.7\.0/,
+    ],
+    ['ios', 'install-appium', 'action.installAppium', /npm install --global appium@3\.7\.0/],
+    [
+      'ios',
+      'install-xcuitest',
+      'action.installXcuitest',
+      /appium driver install xcuitest@12\.13\.2/,
+    ],
+  ] as const) {
+    const snapshot = aggregateSetup({
+      platform,
+      capabilities: [
+        {
+          id: 'appiumServer',
+          status: 'action-required',
+          required: true,
+          messageKey: 'capability.appium.start',
+          action: { id, labelKey },
+        },
+      ],
+    });
+    assert.match(setupAgentContext(snapshot), expected);
+    assert.match(setupAgentContext(snapshot, 'en', { prepareAvailable: true }), expected);
+  }
+});
+
+test('mobile doctor drops only foreground startup commands, retaining installation diagnostics', () => {
+  const snapshot = aggregateSetup({
+    platform: 'ios',
+    capabilities: [
+      {
+        id: 'appiumServer',
+        status: 'action-required',
+        required: true,
+        messageKey: 'capability.appium.start',
+        action: {
+          id: 'start-appium',
+          labelKey: 'action.startAppium',
+          command: 'appium --address 127.0.0.1 --port 4723',
+        },
+      },
+      {
+        id: 'xcuitestDriver',
+        status: 'action-required',
+        required: true,
+        messageKey: 'capability.xcuitest.install',
+        action: {
+          id: 'install-xcuitest',
+          labelKey: 'action.installXcuitest',
+          command: 'appium driver install xcuitest@12.13.2',
+        },
+      },
+    ],
+  });
+  assert.doesNotMatch(setupDoctor(snapshot), /appium --address/);
+  assert.match(setupDoctor(snapshot), /appium driver install xcuitest@12\.13\.2/);
+});
+
 test('setup panel uses user language and one next action without implementation jargon', () => {
   const snapshot = aggregateSetup({
     platform: 'macos',

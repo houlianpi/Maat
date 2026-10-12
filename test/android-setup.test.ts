@@ -896,7 +896,11 @@ test('explicit App target clearing restores Android ready in the same API withou
     await assert.rejects(maat.setup.ready(), /configureSession\(\{clearAppTarget:true\}\)/);
     assert.equal(fake.counts().executes, 0);
     // A closed runtime may retain its last target as a hint; it is not an active App route.
-    await adapter.runtime.configure(adapter.sessionHints!, adapter.appTarget);
+    await adapter.runtime.configureResolved({
+      environment: adapter.sessionHints!,
+      capabilities: { ...adapter.sessionHints!.capabilities },
+      app: adapter.appTarget,
+    });
     await assert.rejects(
       maat.platforms.configureSession({
         clearAppTarget: true,

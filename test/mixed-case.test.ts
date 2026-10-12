@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createMaat } from '../packages/core/src/api/create-maat.ts';
-import { findBrowserExecutable } from '../packages/core/src/setup/browser-discovery.ts';
+import { findBrowserExecutable } from './fixtures/browser-executable.ts';
 import { AppiumPlatformAdapter } from '../packages/core/src/platforms/appium/appium-adapter.ts';
 
 async function mockAppium() {

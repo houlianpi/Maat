@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import maatPiExtension from '../packages/pi/src/extension.ts';
+import { MAAT_SYSTEM_PROMPT } from '../packages/pi/src/system-prompt.ts';
 
 test('Pi Extension registers execution/setup tools without legacy workflow tools', () => {
   const tools: string[] = [];
@@ -58,7 +59,7 @@ test('Pi Extension registers execution/setup tools without legacy workflow tools
 test('mobile renderers activate after Pi applies command-line flags', async () => {
   let enabled = false;
   const tools: Array<{ name: string; renderCall?: unknown }> = [];
-  const handlers = new Map<string, Function>();
+  const handlers = new Map<string, Function[]>();
   const pi = {
     registerFlag(name: string, options: { description: string; default: boolean }) {
       assert.equal(name, 'maat-mobile-ui');
@@ -75,16 +76,60 @@ test('mobile renderers activate after Pi applies command-line flags', async () =
     },
     registerCommand() {},
     on(name: string, handler: Function) {
-      handlers.set(name, handler);
+      const list = handlers.get(name) ?? [];
+      list.push(handler);
+      handlers.set(name, list);
     },
   } as unknown as ExtensionAPI;
   maatPiExtension(pi);
   assert.equal(tools.find((tool) => tool.name === 'exe_js')?.renderCall, undefined);
   enabled = true;
-  await handlers.get('session_start')!({}, { mode: 'print' });
+  for (const handler of handlers.get('session_start')!) await handler({}, { mode: 'print' });
   assert.equal(
     typeof tools.filter((tool) => tool.name === 'exe_js').at(-1)?.renderCall,
     'function',
   );
-  await handlers.get('session_shutdown')!();
+  for (const handler of handlers.get('session_shutdown')!) await handler();
+});
+
+test('before_agent_start appends the Maat prompt and refreshes mobile status exactly once', async () => {
+  const handlers = new Map<string, Function[]>();
+  const pi = {
+    registerFlag() {},
+    getFlag: () => true,
+    registerMessageRenderer() {},
+    registerTool() {},
+    registerCommand() {},
+    on(name: string, handler: Function) {
+      const list = handlers.get(name) ?? [];
+      list.push(handler);
+      handlers.set(name, list);
+    },
+  } as unknown as ExtensionAPI;
+  maatPiExtension(pi);
+  let refreshes = 0;
+  const ctx = {
+    mode: 'tui',
+    ui: {
+      setWidget(name: string) {
+        assert.equal(name, 'maat-status');
+        refreshes++;
+      },
+    },
+  };
+  try {
+    const results = [];
+    // Pi appends handlers; a Map<string, Function> silently hides this duplication.
+    assert.equal(handlers.get('before_agent_start')!.length, 2);
+    for (const handler of handlers.get('before_agent_start')!)
+      results.push(await handler({ systemPrompt: 'Original prompt' }, ctx));
+    assert.equal(refreshes, 1);
+    assert.deepEqual(results.filter(Boolean), [
+      { systemPrompt: `Original prompt\n\n${MAAT_SYSTEM_PROMPT}` },
+    ]);
+    assert.ok(handlers.has('tool_execution_end'));
+    assert.ok(handlers.has('agent_end'));
+  } finally {
+    for (const handler of handlers.get('session_shutdown')!) await handler();
+  }
 });

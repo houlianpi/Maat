@@ -26,6 +26,7 @@ export function registerMaatSetupCommands(
   pi: ExtensionAPI,
   maat: MaatApi,
   onPrepared?: (snapshot: SetupSnapshot, ctx: ExtensionContext) => void,
+  options: { prepareAvailable?: boolean } = {},
 ): void {
   pi.registerCommand('maat-setup', {
     description: 'Prepare Android or iPhone through the host Agent, or guide macOS setup',
@@ -56,7 +57,7 @@ export function registerMaatSetupCommands(
                 ? `用户请求准备当前 ${label}。请用宿主文件工具读取 Maat 内部准备工作流 ${MAAT_SETUP_SKILL_PATH} 的 ${platform} 流程，在授权范围内使用宿主工具处理必要准备；需要本人操作时明确等待，完成后调用 check_device_ready 并继续原任务。`
                 : `The user requested preparation of the current ${platform} phone. Read the ${platform} workflow in Maat's internal setup Skill at ${MAAT_SETUP_SKILL_PATH} with the host file tool, use authorized host tools for necessary preparation, wait for user-only actions, then call check_device_ready and continue the original task.`,
               ...setupPanel(snapshot, locale),
-              setupAgentContext(snapshot, locale),
+              setupAgentContext(snapshot, locale, options),
             ].join('\n'),
             display: true,
             details: { summary: preparationSummary(snapshot, locale) },
@@ -113,11 +114,14 @@ export function registerMaatSetupCommands(
   });
 }
 
-export function createMaatSetupExtension(maat: MaatApi): InlineExtension {
+export function createMaatSetupExtension(
+  maat: MaatApi,
+  options: { prepareAvailable?: boolean } = {},
+): InlineExtension {
   return {
     name: 'maat-setup-assistant',
     hidden: true,
-    factory: (pi) => registerMaatSetupCommands(pi, maat),
+    factory: (pi) => registerMaatSetupCommands(pi, maat, undefined, options),
   };
 }
 

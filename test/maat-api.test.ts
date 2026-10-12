@@ -10,7 +10,7 @@ import type { PlatformAdapter } from '../packages/core/src/core/platforms/contra
 import { PlatformRegistry } from '../packages/core/src/core/platforms/registry.ts';
 import { aggregateSetup } from '../packages/core/src/setup-assistant/model.ts';
 import { WebPlatformAdapter } from '../packages/core/src/platforms/web/web-adapter.ts';
-import { findBrowserExecutable } from '../packages/core/src/setup/browser-discovery.ts';
+import { findBrowserExecutable } from './fixtures/browser-executable.ts';
 import * as core from '../packages/core/src/index.ts';
 
 test('Core public exports retain execution/setup but remove formal product APIs', () => {

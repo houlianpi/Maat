@@ -2,6 +2,11 @@
 
 Host-neutral UI execution through one `MaatApi`, platform adapters and killable Workers.
 
+Adapters resolve native routing before configuring the runtime. The runtime keeps
+one resolved target; it has no separate raw-environment configuration/discovery
+path. Local browser executable detection used by regressions lives in test
+fixtures and is not shipped as a Core capability.
+
 `createMaat({ workspaceRoot?, setupAssistant? })` exposes `platforms`, `exploration`
 (`executeJavaScript`, `context`), `setup` (doctor checks, Android/iOS readiness and permission
 recovery), and `close()`. Execution returns text/image UI observations; a ready device

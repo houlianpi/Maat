@@ -69,6 +69,10 @@ try {
       ),
       'Packed package contains removed test, mode or Replay code.',
     );
+    assert.ok(
+      !files.has('dist/setup/browser-discovery.js'),
+      'Packed package contains the test-only browser executable helper.',
+    );
     if (workspace === '@houlianpi/maat-pi') {
       assert.ok(files.has('skills/maat-setup/SKILL.md'), 'Packed Pi setup Skill is missing.');
       assert.ok(files.has('skills/mobile-use/SKILL.md'), 'Packed Pi Mobile Use Skill is missing.');
@@ -203,7 +207,20 @@ try {
         registerMessageRenderer() {},
         registerTool(tool) { tools.push(tool.name); definitions.set(tool.name, tool); },
         registerCommand(name) { commands.push(name); },
-        on(event, handler) { handlers.set(event, handler); return () => {}; },
+        on(event, handler) {
+          const listeners = handlers.get(event) ?? [];
+          listeners.push(handler);
+          handlers.set(event, listeners);
+          return () => {};
+        },
+      };
+      const emit = async (event, payload, context) => {
+        let result;
+        for (const handler of handlers.get(event) ?? []) {
+          const value = await handler(payload, context);
+          if (value !== undefined) result = value;
+        }
+        return result;
       };
       extension(pi);
       for (const name of ['check_platform_setup', 'check_device_ready', 'prepare_mobile', 'open_setup_step', 'retry_setup_step', 'continue_without_capability'])
@@ -220,8 +237,8 @@ try {
       const mobileContext = { mode: 'print', sessionManager: {
         getEntries() { return [{ type: 'message', message: { role: 'user', content: '请检查手机' } }]; }
       } };
-      await handlers.get('session_start')?.({ reason: 'startup' }, mobileContext);
-      const promptResult = await handlers.get('before_agent_start')?.({ systemPrompt: 'original prompt' }, mobileContext);
+      await emit('session_start', { reason: 'startup' }, mobileContext);
+      const promptResult = await emit('before_agent_start', { systemPrompt: 'original prompt' }, mobileContext);
       if (!promptResult.systemPrompt.startsWith('original prompt'))
         throw new Error('Installed extension lost the host prompt');
       for (const tool of definitions.values())
@@ -243,7 +260,7 @@ try {
       card.setExpanded(true);
       if (!card.render(120).join('\\n').includes('codeContext'))
         throw new Error('Installed expanded renderer lost model facts');
-      await handlers.get('session_shutdown')?.();
+      await emit('session_shutdown');
     `;
     execFileSync(
       process.execPath,

@@ -1,5 +1,6 @@
 import { access } from 'node:fs/promises';
 
+// Test fixtures may reuse a local browser; product browser selection belongs to the adapter.
 const macOSChrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
 export async function findBrowserExecutable(): Promise<string | undefined> {

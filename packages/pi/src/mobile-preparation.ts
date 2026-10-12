@@ -48,7 +48,6 @@ type Task = {
   stop?: Promise<void>;
   endpoint?: URL;
   listening: boolean;
-  stderr: string;
   outputTail: string;
 };
 /** Also bound broken/misbehaving collaborators that do not honor AbortSignal. */
@@ -477,7 +476,6 @@ export class MobilePreparation {
       },
       controller: new AbortController(),
       listening: false,
-      stderr: '',
       outputTail: '',
     };
     this.tasks.set(task.result.taskId, task);
@@ -687,9 +685,7 @@ export class MobilePreparation {
           ),
         );
     });
-    child.stderr?.on('data', (chunk: Buffer) => {
-      task.stderr = (task.stderr + chunk.toString()).slice(-8_192);
-    });
+    child.stderr?.resume();
     child.stdout?.on('data', (chunk: Buffer) => {
       task.outputTail = (task.outputTail + chunk.toString()).slice(-2_048);
       if (listenerMatches(task.outputTail, endpoint)) task.listening = true;

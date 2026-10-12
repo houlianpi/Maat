@@ -37,10 +37,9 @@ export default function maatPiExtension(pi: ExtensionAPI): void {
   });
   pi.on('tool_execution_end', async (_event, ctx) => renderStatus(ctx));
   pi.on('session_shutdown', async () => closeMobileRuntime(maat, preparation));
-  pi.on('before_agent_start', (event, ctx) => {
-    mobileTool.update(ctx);
+  pi.on('before_agent_start', (event) => {
     return { systemPrompt: `${event.systemPrompt}\n\n${MAAT_SYSTEM_PROMPT}` };
   });
 
-  registerMaatSetupCommands(pi, maat, mobileTool.prepared);
+  registerMaatSetupCommands(pi, maat, mobileTool.prepared, { prepareAvailable: true });
 }

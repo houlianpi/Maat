@@ -5,10 +5,15 @@ import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent
 import { type MaatApi, type SetupAction } from '@houlianpi/maat-core';
 import { setupAgentContext, setupDoctor, setupPanel } from '../setup-ui.ts';
 import { phoneReadinessGuidance, resolveSetupLocale, setupMessage } from '../setup-i18n.ts';
+import type { MobilePreparation } from '../mobile-preparation.ts';
 
 const exec = promisify(execFile);
 
-export function createSetupTools(maat: MaatApi): ToolDefinition<any, any, any>[] {
+export function createSetupTools(
+  maat: MaatApi,
+  preparation?: MobilePreparation,
+): ToolDefinition<any, any, any>[] {
+  const options = { prepareAvailable: !!preparation };
   return [
     defineTool({
       name: 'check_platform_setup',
@@ -26,7 +31,7 @@ export function createSetupTools(maat: MaatApi): ToolDefinition<any, any, any>[]
           content: [
             {
               type: 'text',
-              text: `${setupPanel(snapshot, locale).join('\n')}\n\n${setupAgentContext(snapshot, locale)}`,
+              text: `${setupPanel(snapshot, locale).join('\n')}\n\n${setupAgentContext(snapshot, locale, options)}`,
             },
           ],
           structuredContent: snapshot,
@@ -108,7 +113,7 @@ export function createSetupTools(maat: MaatApi): ToolDefinition<any, any, any>[]
                 type: 'text',
                 text: [
                   setupMessage(locale, action.labelKey),
-                  setupAgentContext(snapshot, locale),
+                  setupAgentContext(snapshot, locale, options),
                   locale === 'zh-CN'
                     ? '尚未执行任何系统修改。请按 maat-setup Skill 使用宿主工具完成已授权的准备，再重新检查。'
                     : 'No system changes were executed. Follow the maat-setup Skill using authorized host tools, then recheck.',
@@ -162,7 +167,7 @@ export function createSetupTools(maat: MaatApi): ToolDefinition<any, any, any>[]
           content: [
             {
               type: 'text',
-              text: `${setupPanel(snapshot, locale).join('\n')}\n\n${setupAgentContext(snapshot, locale)}${resume ? `\n\n${locale === 'zh-CN' ? '准备状态已重新检查。请读取当前界面后继续原任务，不要重复已可能执行的操作。' : 'Preparation was rechecked. Read the current UI before continuing; do not repeat potentially executed actions.'}` : ''}`,
+              text: `${setupPanel(snapshot, locale).join('\n')}\n\n${setupAgentContext(snapshot, locale, options)}${resume ? `\n\n${locale === 'zh-CN' ? '准备状态已重新检查。请读取当前界面后继续原任务，不要重复已可能执行的操作。' : 'Preparation was rechecked. Read the current UI before continuing; do not repeat potentially executed actions.'}` : ''}`,
             },
           ],
           details: { snapshot, resume },
@@ -204,7 +209,7 @@ export function createSetupTools(maat: MaatApi): ToolDefinition<any, any, any>[]
           content: [
             {
               type: 'text',
-              text: `${setupDoctor(snapshot, locale)}\n\n${setupAgentContext(snapshot, locale)}`,
+              text: `${setupDoctor(snapshot, locale)}\n\n${setupAgentContext(snapshot, locale, options)}`,
             },
           ],
           details: snapshot,
