@@ -180,6 +180,7 @@ test('exe_js gives the model safe recovery for compile and runtime failures', as
         throw failure.error;
       },
     });
+
     await assert.rejects(
       tool.execute(
         'classified',
@@ -196,6 +197,36 @@ test('exe_js gives the model safe recovery for compile and runtime failures', as
       },
     );
   }
+});
+
+test('exe_js classifies a mobile slot conflict as not-started without exposing request data', async () => {
+  const busy = Object.assign(new Error('Another mobile operation is already in progress.'), {
+    code: 'mobile-busy',
+  });
+  const tool = createExecJsTool({
+    close: async () => {},
+    execute: async () => {
+      throw busy;
+    },
+  });
+  await assert.rejects(
+    tool.execute(
+      'busy',
+      { code: 'secret javascript' },
+      undefined,
+      undefined,
+      {} as Parameters<typeof tool.execute>[4],
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /category: mobile-busy/);
+      assert.match(error.message, /code: mobile-busy/);
+      assert.match(error.message, /actionState: not-started/);
+      assert.match(error.message, /Wait for the current mobile operation to settle/);
+      assert.doesNotMatch(error.message, /secret javascript|device|endpoint|session id/i);
+      return true;
+    },
+  );
 });
 
 test('supplemental diagnosis retains the primary error and cancellation signal', async () => {

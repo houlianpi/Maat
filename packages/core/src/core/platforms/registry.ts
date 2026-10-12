@@ -35,6 +35,12 @@ export class PlatformRegistry {
   }
 
   async close(): Promise<void> {
-    await Promise.all(this.list().map((adapter) => adapter.close()));
+    const results = await Promise.allSettled(this.list().map((adapter) => adapter.close()));
+    const failures = results.flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : [],
+    );
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1)
+      throw new AggregateError(failures, 'Multiple platform adapters failed to close.');
   }
 }

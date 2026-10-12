@@ -11,6 +11,7 @@ import { sameFingerprint } from '../setup-assistant/storage.ts';
 import type { NativeAppTarget, NativeEnvironment } from '../platforms/appium/schema.ts';
 import { isRecord, parseObservations } from '../core/exploration/protocol.ts';
 import { androidLockGuardCode, iosLockGuardCode } from '../platforms/appium/runtime/session.ts';
+import { isMobilePlatform, runMobileOperation } from '../mobile/devices/coordinator.ts';
 
 function readinessErrorSummary(error: unknown, depth = 0): string {
   if (error instanceof AggregateError && depth < 3) {
@@ -92,6 +93,8 @@ export class MaatApi {
       if (!adapter.configureSession) {
         throw new Error(`${adapter.label} does not accept Session hints.`);
       }
+      if (isMobilePlatform(adapter.id))
+        return runMobileOperation(() => adapter.configureSession!(setup));
       await adapter.configureSession(setup);
     },
     inspectSetup: async (request: SetupInspection) => {
@@ -157,6 +160,10 @@ export class MaatApi {
         throw new Error(
           `Setup readiness is unsupported for ${adapter.id}; only Android and iOS are supported.`,
         );
+      const platform = adapter.id;
+      // Keep the established readiness flow together while the outer operation owns the slot.
+      // prettier-ignore
+      return runMobileOperation(async () => {
       if (input.screenshot !== undefined && typeof input.screenshot !== 'boolean')
         throw new Error('Setup readiness screenshot must be a boolean.');
       if (
@@ -298,7 +305,7 @@ export class MaatApi {
       if (input.screenshot && !screenshotReadable)
         throw new Error(`${label} setup readiness did not return a screenshot observation.`);
       return {
-        platform: adapter.id,
+        platform,
         ready: true,
         proof: {
           phoneUnlocked: true,
@@ -311,6 +318,7 @@ export class MaatApi {
           (observation) => observation === proof || observation.type === 'image',
         ),
       };
+      });
     },
     action: (actionId?: SetupAction['id']) => this.setupAssistant.action(actionId),
     skip: (capabilityId: SetupCapabilityId) => this.setupAssistant.skip(capabilityId),
@@ -321,12 +329,18 @@ export class MaatApi {
   };
 
   readonly exploration = {
-    executeJavaScript: (code: string, signal?: AbortSignal) =>
-      this.registry.current.execute(code, signal),
+    executeJavaScript: (code: string, signal?: AbortSignal) => {
+      const adapter = this.registry.current;
+      return isMobilePlatform(adapter.id)
+        ? runMobileOperation(() => adapter.execute(code, signal))
+        : adapter.execute(code, signal);
+    },
     context: () => this.registry.current.codeContext,
   };
 
   close(): Promise<void> {
-    return this.registry.close();
+    return this.registry.list().some((adapter) => isMobilePlatform(adapter.id))
+      ? runMobileOperation(() => this.registry.close())
+      : this.registry.close();
   }
 }

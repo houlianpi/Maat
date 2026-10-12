@@ -9,6 +9,7 @@ function errorText(error: unknown): string {
 
 type ModelExecutionFailure = {
   category: string;
+  code?: string;
   phase: string;
   actionState: 'not-started' | 'uncertain';
   sessionState: 'reusable' | 'closed' | 'unknown';
@@ -17,6 +18,15 @@ type ModelExecutionFailure = {
 
 function executionFailure(error: unknown): ModelExecutionFailure {
   if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'mobile-busy')
+      return {
+        category: 'mobile-busy',
+        code: 'mobile-busy',
+        phase: 'acquire',
+        actionState: 'not-started',
+        sessionState: 'reusable',
+        summary: 'Another mobile operation is already in progress.',
+      };
     if (
       error.code === 'MAAT_EXECUTION_ERROR' &&
       'details' in error &&
@@ -58,9 +68,11 @@ function executionFailure(error: unknown): ModelExecutionFailure {
 function modelExecutionError(error: unknown): string {
   const failure = executionFailure(error);
   const recovery =
-    failure.actionState === 'not-started'
-      ? 'No UI action ran. Correct the JavaScript using only globals from the active adapter codeContext, then retry.'
-      : 'Earlier statements may already have changed the UI. Do not replay this code. First run a read-only exe_js observation of the current UI, then generate a new action from that state.';
+    failure.category === 'mobile-busy'
+      ? 'No UI action ran. Wait for the current mobile operation to settle, then make a new explicit request.'
+      : failure.actionState === 'not-started'
+        ? 'No UI action ran. Correct the JavaScript using only globals from the active adapter codeContext, then retry.'
+        : 'Earlier statements may already have changed the UI. Do not replay this code. First run a read-only exe_js observation of the current UI, then generate a new action from that state.';
   const hint =
     failure.category === 'reference-error' && /\bsetTimeout\b/.test(failure.summary)
       ? ' Appium wait hint: use await driver.pause(milliseconds).'
@@ -70,6 +82,7 @@ function modelExecutionError(error: unknown): string {
   return [
     'MAAT_EXECUTION_FAILED',
     `category: ${failure.category}`,
+    ...(failure.code ? [`code: ${failure.code}`] : []),
     `phase: ${failure.phase}`,
     `session: ${failure.sessionState}`,
     `actionState: ${failure.actionState}`,

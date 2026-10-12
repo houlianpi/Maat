@@ -28,11 +28,14 @@ import { createDefaultPlatformRegistry } from '../packages/core/src/platforms/de
 import { takeAppiumScreenshot } from '../packages/core/src/platforms/appium/screenshot.ts';
 import { NativeManager } from '../packages/core/src/platforms/appium/runtime/manager.ts';
 import { PlatformRegistry } from '../packages/core/src/core/platforms/registry.ts';
+import type { PlatformAdapter } from '../packages/core/src/core/platforms/contracts.ts';
 import { aggregateSetup } from '../packages/core/src/setup-assistant/model.ts';
 import {
+  ExplorationExecutionError,
   WorkerTerminatedError,
   type JavaScriptSession,
 } from '../packages/core/src/core/exploration/runtime.ts';
+import type { JavaScriptObservation } from '../packages/core/src/core/exploration/protocol.ts';
 
 let mockServerId = 0;
 type ReadinessAdbOptions = {
@@ -2187,4 +2190,316 @@ test('platform IDs are selected through the registry without formal platform roo
   );
   for (const adapter of projects.platforms.list()) assert.equal('root' in adapter, false);
   await projects.close();
+});
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function operationAdapter(
+  id: 'android' | 'ios' | 'web' | 'macos',
+  hooks: Partial<{
+    initialize: () => Promise<void>;
+    configureSession: () => Promise<void>;
+    execute: (signal?: AbortSignal) => Promise<JavaScriptObservation[]>;
+    executeReadiness: () => Promise<JavaScriptObservation[]>;
+    close: () => Promise<void>;
+  }> = {},
+): PlatformAdapter {
+  return {
+    id,
+    label: id,
+    codeContext: { language: 'javascript', globals: [], guidelines: [] },
+    initialize: hooks.initialize ?? (async () => {}),
+    configureSession: hooks.configureSession ?? (async () => {}),
+    execute: (_code, signal) => hooks.execute?.(signal) ?? Promise.resolve([]),
+    executeReadiness: hooks.executeReadiness ? () => hooks.executeReadiness!() : undefined,
+    status: () => ({ id, label: id, session: 'idle' }),
+    close: hooks.close ?? (async () => {}),
+  };
+}
+
+function operationApi(adapter: PlatformAdapter, setupChecks?: () => void) {
+  return new MaatApi(new PlatformRegistry([adapter], adapter.id), process.cwd(), {
+    detector: async () => {
+      setupChecks?.();
+      return aggregateSetup({
+        platform: adapter.id,
+        capabilities: [
+          {
+            id: 'uiInteraction',
+            status: 'ready',
+            required: true,
+            messageKey: 'capability.interaction.ready',
+          },
+        ],
+      });
+    },
+  });
+}
+
+function assertMobileBusy(error: unknown) {
+  assert.ok(error instanceof Error);
+  assert.equal((error as Error & { code?: string }).code, 'mobile-busy');
+  assert.doesNotMatch(error.message, /endpoint|session|device|javascript/i);
+  return true;
+}
+
+test('one process-wide mobile execute blocks other instances before configure, ready, or close side effects', async () => {
+  const execution = deferred<JavaScriptObservation[]>();
+  let configures = 0;
+  let initializes = 0;
+  let setupChecks = 0;
+  let closes = 0;
+  const owner = operationApi(operationAdapter('android', { execute: () => execution.promise }));
+  const contender = operationApi(
+    operationAdapter('ios', {
+      initialize: async () => {
+        initializes++;
+      },
+      configureSession: async () => {
+        configures++;
+      },
+      close: async () => {
+        closes++;
+      },
+    }),
+    () => {
+      setupChecks++;
+    },
+  );
+
+  const running = owner.exploration.executeJavaScript('owner');
+  await assert.rejects(contender.platforms.configureSession({}), assertMobileBusy);
+  await assert.rejects(contender.setup.ready(), assertMobileBusy);
+  await assert.rejects(contender.close(), assertMobileBusy);
+  assert.deepEqual(
+    { configures, initializes, setupChecks, closes },
+    {
+      configures: 0,
+      initializes: 0,
+      setupChecks: 0,
+      closes: 0,
+    },
+  );
+
+  let entered = false;
+  const rejected = contender.exploration.executeJavaScript('no queue').then(
+    () => {
+      entered = true;
+    },
+    (error) => {
+      assertMobileBusy(error);
+    },
+  );
+  await rejected;
+  execution.resolve([]);
+  await running;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(entered, false);
+  await contender.platforms.configureSession({});
+  assert.equal(configures, 1);
+});
+
+test('mobile readiness is a reverse holder and leases survive error or Abort until execution settles', async () => {
+  const readiness = deferred<JavaScriptObservation[]>();
+  const readyOwner = operationApi(
+    operationAdapter('ios', { executeReadiness: () => readiness.promise }),
+  );
+  let dispatches = 0;
+  const contender = operationApi(
+    operationAdapter('android', {
+      execute: async () => {
+        dispatches++;
+        return [];
+      },
+    }),
+  );
+  const runningReady = readyOwner.setup.ready();
+  await assert.rejects(contender.exploration.executeJavaScript('blocked'), assertMobileBusy);
+  assert.equal(dispatches, 0);
+  readiness.resolve([
+    {
+      type: 'text',
+      text: JSON.stringify({
+        maatSetupReadiness: 1,
+        phoneUnlocked: true,
+        sessionUsable: true,
+        sourceReadable: true,
+        viewportReadable: true,
+        source: '<App />',
+        viewport: { width: 1, height: 1 },
+      }),
+    },
+  ]);
+  await runningReady;
+
+  for (const outcome of ['error', 'abort'] as const) {
+    const execution = deferred<JavaScriptObservation[]>();
+    const controller = new AbortController();
+    const owner = operationApi(operationAdapter('android', { execute: () => execution.promise }));
+    const running = owner.exploration.executeJavaScript('owner', controller.signal);
+    if (outcome === 'abort') controller.abort();
+    await assert.rejects(
+      contender.exploration.executeJavaScript('still blocked'),
+      assertMobileBusy,
+    );
+    assert.equal(dispatches, 0);
+    execution.reject(new Error(`${outcome} settled`));
+    await assert.rejects(running, new RegExp(`${outcome} settled`));
+    await contender.exploration.executeJavaScript('new explicit request');
+    assert.equal(dispatches, 1);
+    dispatches = 0;
+  }
+});
+
+test('idle close is one mobile lease, waits for every adapter, and aggregates cleanup failures', async () => {
+  const slowWeb = deferred<void>();
+  const slowIos = deferred<void>();
+  const first = new Error('web close failed');
+  const second = new Error('ios close failed');
+  let androidCloses = 0;
+  const api = new MaatApi(
+    new PlatformRegistry(
+      [
+        operationAdapter('android', {
+          close: async () => {
+            androidCloses++;
+          },
+        }),
+        operationAdapter('web', {
+          close: async () => {
+            await slowWeb.promise;
+            throw first;
+          },
+        }),
+        operationAdapter('ios', {
+          close: async () => {
+            await slowIos.promise;
+            throw second;
+          },
+        }),
+      ],
+      'web',
+    ),
+    process.cwd(),
+  );
+  const contender = operationApi(operationAdapter('android'));
+  let closeSettled = false;
+  const closing = api.close().finally(() => {
+    closeSettled = true;
+  });
+  await assert.rejects(
+    contender.exploration.executeJavaScript('blocked by close'),
+    assertMobileBusy,
+  );
+  assert.equal(androidCloses, 1);
+  slowWeb.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(closeSettled, false);
+  slowIos.resolve();
+  await assert.rejects(closing, (error: unknown) => {
+    assert.ok(error instanceof AggregateError);
+    assert.deepEqual(error.errors, [first, second]);
+    return true;
+  });
+  await contender.exploration.executeJavaScript('after all cleanup settled');
+
+  const singleFailure = new Error('single close failure');
+  const single = new PlatformRegistry([
+    operationAdapter('web', {
+      close: async () => {
+        throw singleFailure;
+      },
+    }),
+    operationAdapter('macos'),
+  ]);
+  await assert.rejects(single.close(), (error: unknown) => error === singleFailure);
+});
+
+test('web and macOS operations never participate in the mobile slot', async () => {
+  const mobileExecution = deferred<JavaScriptObservation[]>();
+  const mobile = operationApi(
+    operationAdapter('android', { execute: () => mobileExecution.promise }),
+  );
+  let macExecutions = 0;
+  let macCloses = 0;
+  const mac = operationApi(
+    operationAdapter('macos', {
+      execute: async () => {
+        macExecutions++;
+        return [];
+      },
+      close: async () => {
+        macCloses++;
+      },
+    }),
+  );
+  const running = mobile.exploration.executeJavaScript('owner');
+  await mac.exploration.executeJavaScript('independent');
+  await mac.close();
+  assert.deepEqual({ macExecutions, macCloses }, { macExecutions: 1, macCloses: 1 });
+  mobileExecution.resolve([]);
+  await running;
+});
+
+test('iOS App-target fallback never re-dispatches JavaScript after a possible dispatch', async (t) => {
+  const adapter = new AppiumPlatformAdapter({
+    id: 'ios',
+    label: 'iOS',
+    platformName: 'iOS',
+    automationName: 'XCUITest',
+  });
+  t.mock.method(globalThis, 'fetch', async () => {
+    return new Response(JSON.stringify({ value: { ready: true } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  });
+  await adapter.configureSession({
+    serverUrl: 'https://remote.example/',
+    capabilities: {
+      'appium:deviceName': 'mock iPhone',
+      'appium:bundleId': 'com.example.target',
+    },
+  });
+  await adapter.runtime.configureResolved({
+    environment: {
+      platform: 'ios',
+      serverUrl: 'https://remote.example/',
+      capabilities: { 'appium:deviceName': 'mock iPhone' },
+    },
+    capabilities: { 'appium:deviceName': 'mock iPhone' },
+    app: { 'appium:bundleId': 'com.example.target' },
+  });
+  (adapter.runtime as unknown as { session?: JavaScriptSession }).session = {
+    isClosed: false,
+    execute: async () => [],
+    close: async () => {},
+  };
+  let dispatches = 0;
+  const possibleDispatch = new ExplorationExecutionError('App action failed', {
+    name: 'Error',
+    message: 'App action failed',
+    category: 'runtime-error',
+    phase: 'execute',
+    actionState: 'uncertain',
+  });
+  adapter.runtime.execute = async () => {
+    dispatches++;
+    if (dispatches === 1) {
+      (adapter.runtime as unknown as { session?: JavaScriptSession }).session = undefined;
+      throw possibleDispatch;
+    }
+    return [];
+  };
+  await assert.rejects(adapter.execute('await driver.$("~send").click()'), possibleDispatch);
+  assert.equal(dispatches, 1);
+  assert.deepEqual(adapter.appTarget, { 'appium:bundleId': 'com.example.target' });
 });

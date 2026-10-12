@@ -332,7 +332,9 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     } catch (error) {
       if (
         allowAppFallback &&
-        this.id !== 'android' &&
+        // The legacy macOS backend may retry Session creation without an App target.
+        // Mobile JavaScript can already have dispatched and must never be replayed.
+        this.id === 'macos' &&
         !this.runtime.isRunning &&
         !signal?.aborted &&
         !(error instanceof WorkerTerminatedError) &&
