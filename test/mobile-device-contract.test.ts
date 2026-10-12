@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   canonicalDeviceKey,
   identityFromLocalFact,
+  isLocalPhysicalMobileTarget,
   sameDeviceIdentity,
   type DeviceIdentity,
 } from '../packages/core/src/mobile/contracts/device.ts';
@@ -85,6 +86,22 @@ test('identity equality and canonical routing compare exactly the stable four-fi
     android.routingId,
     'device',
   ]);
+});
+
+test('migrated route predicate requires an exact local-provider physical target pin', () => {
+  assert.equal(isLocalPhysicalMobileTarget(android), true);
+  assert.equal(isLocalPhysicalMobileTarget({ ...android, kind: 'emulator' }), false);
+  assert.equal(isLocalPhysicalMobileTarget(undefined), false);
+  assert.equal(
+    isLocalPhysicalMobileTarget({
+      platform: 'ios',
+      providerInstanceId: 'local-core-device',
+      routingId: 'synthetic-ios-physical-udid-A',
+      kind: 'device',
+      transportScope: 'core-device',
+    }),
+    true,
+  );
 });
 
 test('normalization rejects malformed and cross-provider facts without echoing raw input', () => {

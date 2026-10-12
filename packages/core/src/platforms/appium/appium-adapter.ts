@@ -12,7 +12,7 @@ import {
   type ResolvedNativeSession,
 } from './schema.ts';
 import { NativeManager } from './runtime/manager.ts';
-import { NativeInitializationCancelledError } from './runtime/session.ts';
+import { NativeSessionCreationUncertainError } from './runtime/session.ts';
 import { WorkerTerminatedError } from '../../core/exploration/runtime.ts';
 import { isRecord } from '../../core/exploration/protocol.ts';
 import type { PlatformAdapter } from '../../core/platforms/contracts.ts';
@@ -31,6 +31,7 @@ import type { SessionSetup, SetupInspection } from '../../core/platforms/contrac
 import {
   canonicalDeviceKey,
   identityFromLocalFact,
+  isLocalPhysicalMobileTarget,
   sameDeviceIdentity,
   type DeviceIdentity,
   type PublicDeviceCandidate,
@@ -38,6 +39,7 @@ import {
   type TargetSelectionResult,
   PhoneCloseUncertainError,
 } from '../../mobile/contracts/device.ts';
+import { assertMobileCreationAllowed } from '../../mobile/devices/coordinator.ts';
 
 export type AppiumAdapterDefinition = {
   id: NativePlatform;
@@ -140,8 +142,13 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   get appTarget(): Readonly<NativeAppTarget> | undefined {
     return this.app;
   }
+  /** Side-effect-free route classification from an exact locally discovered target pin. */
+  isMigratedLocalPhysicalRoute(): boolean {
+    return isLocalPhysicalMobileTarget(this.target?.identity);
+  }
 
   async initialize(): Promise<void> {
+    assertMobileCreationAllowed(this.isMigratedLocalPhysicalRoute());
     if (this.initialized) return;
     this.environment = await readNativeEnvironment(this.hintsFile).catch((error) => {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -290,14 +297,15 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     signal?.throwIfAborted();
     if (!this.environment) await this.initialize();
     if (this.id !== 'android' && this.id !== 'ios') return;
+    if (
+      this.environment!.device?.kind === 'emulator' ||
+      this.environment!.device?.kind === 'simulator'
+    )
+      return;
     const platform = this.id;
     const endpoint = new URL(this.environment!.serverUrl ?? 'http://127.0.0.1:4723/').href;
     // Remote providers and the legacy simulator route are deliberately outside this slice.
-    if (
-      !isLocalAppiumEndpoint(endpoint) ||
-      (this.id === 'ios' && this.environment!.device?.kind === 'simulator')
-    )
-      return;
+    if (!isLocalAppiumEndpoint(endpoint)) return;
 
     if (this.target) {
       return {
@@ -318,7 +326,9 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         selection.candidateNumber > snapshot.identities.length
       )
         return { status: 'selection-invalid', platform };
-      const current = await this.currentSelectionIdentities(signal);
+      const current = (await this.currentSelectionIdentities(signal)).filter(
+        isLocalPhysicalMobileTarget,
+      );
       if (!this.sameGeneration(snapshot.identities, current)) {
         this.selectionSnapshot = undefined;
         return { status: 'selection-stale', platform };
@@ -336,6 +346,7 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         selectedBy: 'explicit-user-selection',
         candidate,
       };
+      assertMobileCreationAllowed(this.isMigratedLocalPhysicalRoute());
       this.selectionSnapshot = undefined;
       return {
         status: 'target-selected',
@@ -345,7 +356,14 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       };
     }
 
-    const identities = await this.currentSelectionIdentities(signal);
+    const discovered = await this.currentSelectionIdentities(signal);
+    const identities = discovered.filter(isLocalPhysicalMobileTarget);
+    // A local emulator remains on the pre-migration resolver path. Discovery
+    // classifies it but never turns it into a migrated target pin.
+    if (!identities.length && discovered.length) {
+      this.selectionSnapshot = undefined;
+      return;
+    }
     if (!identities.length) {
       this.selectionSnapshot = undefined;
       return { status: 'device-not-found', platform };
@@ -371,6 +389,7 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       selectedBy: 'single-candidate',
       candidate,
     };
+    assertMobileCreationAllowed(this.isMigratedLocalPhysicalRoute());
     this.selectionSnapshot = undefined;
     return {
       status: 'target-selected',
@@ -396,7 +415,8 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     if (!this.environment || (this.id !== 'android' && this.id !== 'ios')) return false;
     return (
       isLocalAppiumEndpoint(this.environment.serverUrl ?? 'http://127.0.0.1:4723/') &&
-      !(this.id === 'ios' && this.environment.device?.kind === 'simulator')
+      this.environment.device?.kind !== 'simulator' &&
+      this.environment.device?.kind !== 'emulator'
     );
   }
 
@@ -409,6 +429,7 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   }
 
   private assertCloseCertain() {
+    assertMobileCreationAllowed(this.isMigratedLocalPhysicalRoute());
     if (this.closeUncertain) throw new PhoneCloseUncertainError();
   }
 
@@ -451,16 +472,19 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         resolved = await this.resolveIosReadiness(signal, undefined, allowWdaInstallation);
       signal?.throwIfAborted();
       const definition = this.definition;
-      await this.runtime.configureResolved({
-        ...resolved,
-        app: this.app,
-        capabilities: {
-          ...resolved.capabilities,
-          platformName: definition.platformName,
-          'appium:automationName': definition.automationName,
-          ...(safeAndroid ? { 'appium:skipUnlock': true } : {}),
+      await this.runtime.configureResolved(
+        {
+          ...resolved,
+          app: this.app,
+          capabilities: {
+            ...resolved.capabilities,
+            platformName: definition.platformName,
+            'appium:automationName': definition.automationName,
+            ...(safeAndroid ? { 'appium:skipUnlock': true } : {}),
+          },
         },
-      });
+        this.isMigratedLocalPhysicalRoute(),
+      );
       this.environment = resolved.environment;
       this.notices = resolved.notices ?? [];
       this.issue = undefined;
@@ -600,7 +624,7 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         !this.runtime.isRunning &&
         !signal?.aborted &&
         !(error instanceof WorkerTerminatedError) &&
-        !(error instanceof NativeInitializationCancelledError) &&
+        !(error instanceof NativeSessionCreationUncertainError) &&
         !(error instanceof AggregateError) &&
         this.app &&
         Object.keys(this.app).length > 0 &&
@@ -636,7 +660,7 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     };
   }
   async close() {
-    if (this.closeUncertain) throw new PhoneCloseUncertainError();
+    this.assertCloseCertain();
     try {
       await this.runtime.close();
     } catch (error) {

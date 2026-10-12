@@ -12,6 +12,23 @@ export type DeviceIdentity = {
   displayName?: string;
 };
 
+/**
+ * The single migrated route class for this safety slice.
+ *
+ * Provider identity comes from local discovery and target pinning. In
+ * particular, an Android/iOS platform name, endpoint hostname, or configured
+ * device kind alone is not proof that a request uses this route.
+ */
+export function isLocalPhysicalMobileTarget(
+  identity: DeviceIdentity | undefined,
+): identity is DeviceIdentity & { kind: 'device' } {
+  if (!identity || identity.kind !== 'device') return false;
+  return identity.platform === 'android'
+    ? identity.providerInstanceId === 'local-adb' && identity.transportScope === 'local-adb'
+    : identity.providerInstanceId === 'local-core-device' &&
+        identity.transportScope === 'core-device';
+}
+
 export type TargetSelectionInput = {
   discoveryId: string;
   candidateNumber: number;
@@ -57,6 +74,21 @@ export class PhoneCloseUncertainError extends Error {
       'PHONE_CLOSE_UNCERTAIN: the previous phone Session release did not complete reliably; this target is blocked and no new phone operation was started.',
     );
     this.name = 'PhoneCloseUncertainError';
+  }
+}
+
+/**
+ * A phone Session creation request may have reached Appium, but no trustworthy
+ * Session handle or complete explicit failure was received.
+ */
+export class PhoneSessionCreationUncertainError extends Error {
+  readonly code = 'phone-session-creation-uncertain';
+
+  constructor() {
+    super(
+      'PHONE_SESSION_CREATION_UNCERTAIN: phone Session creation could not be confirmed; a Session resource may exist, so phone recovery requires process restart and no further phone operation was started.',
+    );
+    this.name = 'PhoneSessionCreationUncertainError';
   }
 }
 

@@ -1,4 +1,5 @@
 import { fork } from 'node:child_process';
+import { channel } from 'node:diagnostics_channel';
 import { fileURLToPath } from 'node:url';
 import { isRecord, maxCodeBytes, parseObservations, parseWorkerError } from './protocol.ts';
 import type { JavaScriptSession } from './runtime.ts';
@@ -7,6 +8,9 @@ import { ExplorationExecutionError, WorkerTerminatedError } from './runtime.ts';
 const maxWorkerStderrBytes = 16 * 1024;
 const gracefulCloseTimeoutMs = 500;
 const forcedCloseTimeoutMs = 2_000;
+// Process-local observability only. No payload, Worker options, or identifiers
+// are published; tests use this to prove whether the creation boundary ran.
+const workerCreationChannel = channel('maat.exploration-worker.creation');
 
 export async function createExplorationWorker(
   module: URL,
@@ -33,6 +37,7 @@ export async function createExplorationWorker(
       ),
     },
   );
+  workerCreationChannel.publish(undefined);
   let id = 0;
   let pending:
     | { id: number; resolve(value: unknown): void; reject(error: Error): void }

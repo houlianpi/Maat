@@ -20,7 +20,10 @@ export {
 } from './platforms/web/config.ts';
 export { nativeDeviceKinds } from './platforms/appium/schema.ts';
 export type { NativeDeviceSelector } from './platforms/appium/schema.ts';
-export { PhoneCloseUncertainError } from './mobile/contracts/device.ts';
+export {
+  PhoneCloseUncertainError,
+  PhoneSessionCreationUncertainError,
+} from './mobile/contracts/device.ts';
 export { SetupAssistant, type SetupAssistantOptions } from './setup-assistant/setup-assistant.ts';
 export { aggregateSetup } from './setup-assistant/model.ts';
 export { SetupPreferenceStore, sameFingerprint } from './setup-assistant/storage.ts';

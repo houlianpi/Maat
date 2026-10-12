@@ -482,6 +482,36 @@ test('check_device_ready discloses target selection and requires an explicit rea
   }
 });
 
+test('check_device_ready maps creation uncertainty to creation-unconfirmed recovery', async () => {
+  const maat = createMaat();
+  await maat.platforms.select('android');
+  const tool = createSetupTools(maat).find((item) => item.name === 'check_device_ready')!;
+  const uncertain = Object.assign(
+    new Error('safe creation uncertainty; a Session resource may exist'),
+    { code: 'phone-session-creation-uncertain' },
+  );
+  maat.setup.ready = async () => {
+    throw uncertain;
+  };
+  try {
+    await assert.rejects(
+      tool.execute('uncertain', {}, undefined, undefined, context),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal(error.cause, uncertain);
+        assert.match(error.message, /PHONE_READINESS_RECOVERY_REQUIRED/);
+        assert.match(error.message, /readiness: creation-unconfirmed/);
+        assert.match(error.message, /Session resource may exist/);
+        assert.match(error.message, /Do not call check_device_ready, exe_js, configure, release/);
+        assert.doesNotMatch(error.message, /timeout|retry ready|read-only exe_js/i);
+        return true;
+      },
+    );
+  } finally {
+    await maat.close();
+  }
+});
+
 test('iOS readiness errors preserve original diagnostics, fail once and guide English/Chinese without initialization gate', async () => {
   const maat = createMaat();
   await maat.platforms.select('ios');

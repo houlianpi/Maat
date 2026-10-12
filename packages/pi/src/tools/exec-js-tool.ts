@@ -16,7 +16,25 @@ type ModelExecutionFailure = {
   summary: string;
 };
 
+function hasCode(error: unknown, code: string, depth = 0): boolean {
+  if (depth > 4 || !error || typeof error !== 'object') return false;
+  if ('code' in error && error.code === code) return true;
+  if (error instanceof AggregateError)
+    return error.errors.some((item) => hasCode(item, code, depth + 1));
+  return error instanceof Error && hasCode(error.cause, code, depth + 1);
+}
+
 function executionFailure(error: unknown): ModelExecutionFailure {
+  if (hasCode(error, 'phone-session-creation-uncertain'))
+    return {
+      category: 'phone-session-creation-uncertain',
+      code: 'phone-session-creation-uncertain',
+      phase: 'session-create',
+      actionState: 'not-started',
+      sessionState: 'unknown',
+      summary:
+        'Phone Session creation was not confirmed. The user JavaScript never entered the Worker, but a Session resource may exist.',
+    };
   if (error && typeof error === 'object' && 'code' in error) {
     if (error.code === 'mobile-busy')
       return {
@@ -68,11 +86,13 @@ function executionFailure(error: unknown): ModelExecutionFailure {
 function modelExecutionError(error: unknown): string {
   const failure = executionFailure(error);
   const recovery =
-    failure.category === 'mobile-busy'
-      ? 'No UI action ran. Wait for the current mobile operation to settle, then make a new explicit request.'
-      : failure.actionState === 'not-started'
-        ? 'No UI action ran. Correct the JavaScript using only globals from the active adapter codeContext, then retry.'
-        : 'Earlier statements may already have changed the UI. Do not replay this code. First run a read-only exe_js observation of the current UI, then generate a new action from that state.';
+    failure.category === 'phone-session-creation-uncertain'
+      ? 'Do not call ready, execute, configure, recreate, or DELETE an unknown Session, and do not use read-only exe_js. Restart the Maat process only after the user has safely handled the external Appium state.'
+      : failure.category === 'mobile-busy'
+        ? 'No UI action ran. Wait for the current mobile operation to settle, then make a new explicit request.'
+        : failure.actionState === 'not-started'
+          ? 'No UI action ran. Correct the JavaScript using only globals from the active adapter codeContext, then retry.'
+          : 'Earlier statements may already have changed the UI. Do not replay this code. First run a read-only exe_js observation of the current UI, then generate a new action from that state.';
   const hint =
     failure.category === 'reference-error' && /\bsetTimeout\b/.test(failure.summary)
       ? ' Appium wait hint: use await driver.pause(milliseconds).'

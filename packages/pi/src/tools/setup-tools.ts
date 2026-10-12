@@ -9,6 +9,14 @@ import type { MobilePreparation } from '../mobile-preparation.ts';
 
 const exec = promisify(execFile);
 
+function hasCode(error: unknown, code: string, depth = 0): boolean {
+  if (depth > 4 || !error || typeof error !== 'object') return false;
+  if ('code' in error && error.code === code) return true;
+  if (error instanceof AggregateError)
+    return error.errors.some((item) => hasCode(item, code, depth + 1));
+  return error instanceof Error && hasCode(error.cause, code, depth + 1);
+}
+
 export function createSetupTools(
   maat: MaatApi,
   preparation?: MobilePreparation,
@@ -83,6 +91,20 @@ export function createSetupTools(
             signal,
           });
         } catch (error) {
+          const creationUncertain = hasCode(error, 'phone-session-creation-uncertain');
+          if (creationUncertain)
+            throw new Error(
+              [
+                'PHONE_READINESS_RECOVERY_REQUIRED',
+                'category: phone-session-creation-uncertain',
+                'code: phone-session-creation-uncertain',
+                'phase: session-create',
+                'readiness: creation-unconfirmed',
+                'summary: Phone Session creation was not confirmed; a Session resource may exist, but no phone UI observation or user action ran.',
+                'recovery: Do not call check_device_ready, exe_js, configure, release, recreate, or DELETE an unknown Session in this process. Restart the Maat process only after the user has safely handled the external Appium state.',
+              ].join('\n'),
+              { cause: error },
+            );
           const message = error instanceof Error ? error.message : String(error);
           const guidance = phoneReadinessGuidance(message, locale);
           if (guidance) throw new Error(`${message}\n${guidance}`, { cause: error });

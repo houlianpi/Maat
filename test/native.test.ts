@@ -5,9 +5,11 @@ import { createServer as createNetServer, connect, type Socket } from 'node:net'
 import { mkdtemp, rm, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { channel } from 'node:diagnostics_channel';
+import { spawn } from 'node:child_process';
 import {
   startNativeSession,
-  NativeInitializationCancelledError,
+  NativeSessionCreationUncertainError,
 } from '../packages/core/src/platforms/appium/runtime/session.ts';
 import {
   capabilities,
@@ -40,6 +42,8 @@ import type {
   SetupReadiness,
   SetupReadinessSuccess,
 } from '../packages/core/src/setup-assistant/types.ts';
+let workerCreations = 0;
+channel('maat.exploration-worker.creation').subscribe(() => workerCreations++);
 
 function successfulReadiness(result: SetupReadiness): SetupReadinessSuccess {
   assert.equal(result.ready, true);
@@ -131,6 +135,7 @@ async function mockAppium(
     readinessAdb?: ReadinessAdbOptions;
     statusFailure?: boolean;
     sessionFailure?: string;
+    sessionResponse?: 'invalid-json' | 'missing-id' | 'socket-loss';
   } = {},
 ) {
   const serverId = ++mockServerId;
@@ -151,6 +156,20 @@ async function mockAppium(
       creations++;
       sessionCapabilities.push(body.capabilities.alwaysMatch);
       options.onSessionRequest?.();
+      if (options.sessionResponse === 'socket-loss') {
+        req.socket.destroy();
+        return;
+      }
+      if (options.sessionResponse === 'invalid-json') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end('{"value":');
+        return;
+      }
+      if (options.sessionResponse === 'missing-id') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ value: { capabilities: body.capabilities.alwaysMatch } }));
+        return;
+      }
       if (options.sessionFailure) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(
@@ -973,6 +992,7 @@ test('native bootstrap cancels the actual slow POST without retry and reports un
       timer = setTimeout(() => controller.abort(reason), 100);
     },
   });
+  const workersBefore = workerCreations;
   const started = Date.now();
   try {
     await assert.rejects(
@@ -985,11 +1005,14 @@ test('native bootstrap cancels the actual slow POST without retry and reports un
         { signal: controller.signal },
       ),
       (error: unknown) => {
-        assert.ok(error instanceof NativeInitializationCancelledError);
-        assert.match(error.message, /POST \/session may have completed remotely/);
-        assert.match(error.message, /cleanup cannot be confirmed/);
+        assert.ok(error instanceof NativeSessionCreationUncertainError);
+        assert.match(error.message, /POST \/session may have dispatched/);
         assert.equal(error.abortReason, reason);
-        assert.ok(error.cause instanceof Error);
+        assert.equal(error.facts.dispatchPossible, true);
+        assert.equal(error.facts.responseReceived, false);
+        assert.equal(error.facts.trustedSessionId, false);
+        assert.equal(error.facts.causeCategory, 'abort');
+        assert.ok(error.internalCause instanceof Error);
         return true;
       },
     );
@@ -998,6 +1021,7 @@ test('native bootstrap cancels the actual slow POST without retry and reports un
     assert.equal(mock.created(), 1);
     assert.equal(mock.cancelledResponses(), 1);
     assert.equal(mock.deleted(), 0); // Never delete a guessed/foreign Session ID.
+    assert.equal(workerCreations - workersBefore, 0);
     assert.equal(
       mock.requests.some((request) => request.endsWith('/source')),
       false,
@@ -1010,6 +1034,7 @@ test('native bootstrap cancels the actual slow POST without retry and reports un
 
 test('native bootstrap deadline bounds slow HTTP even without a caller AbortSignal', async () => {
   const mock = await mockAppium({ sessionDelayMs: 250 });
+  const workersBefore = workerCreations;
   const started = Date.now();
   try {
     await assert.rejects(
@@ -1021,10 +1046,128 @@ test('native bootstrap deadline bounds slow HTTP even without a caller AbortSign
         5_000,
         { initializationTimeoutMs: 100 },
       ),
-      /cleanup cannot be confirmed/,
+      (error: unknown) => {
+        assert.ok(error instanceof NativeSessionCreationUncertainError);
+        assert.equal(error.facts.causeCategory, 'timeout');
+        return true;
+      },
     );
     assert.ok(Date.now() - started < 2_000);
     assert.equal(mock.created(), 1);
+    assert.equal(mock.deleted(), 0);
+    assert.equal(workerCreations - workersBefore, 0);
+  } finally {
+    mock.server.close();
+  }
+});
+
+test('native bootstrap classifies response loss, invalid JSON and missing Session ID without DELETE', async () => {
+  for (const response of ['socket-loss', 'invalid-json', 'missing-id'] as const) {
+    const mock = await mockAppium({ sessionResponse: response });
+    const workersBefore = workerCreations;
+    try {
+      await assert.rejects(
+        startNativeSession({
+          environment: { platform: 'android', serverUrl: mock.url, capabilities: {} },
+          capabilities: {},
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof NativeSessionCreationUncertainError);
+          assert.equal(error.facts.dispatchPossible, true);
+          assert.equal(error.facts.trustedSessionId, false);
+          assert.equal(error.facts.responseReceived, response !== 'socket-loss');
+          assert.equal(
+            error.facts.causeCategory,
+            response === 'missing-id'
+              ? 'missing-session-id'
+              : response === 'invalid-json'
+                ? 'invalid-response'
+                : 'transport',
+          );
+          return true;
+        },
+      );
+      assert.equal(mock.created(), 1);
+      assert.equal(mock.deleted(), 0);
+      assert.equal(workerCreations - workersBefore, 0);
+    } finally {
+      mock.server.close();
+    }
+  }
+});
+
+test('pre-aborted bootstrap does not prepare POST; explicit session-not-created remains retryable', async () => {
+  const preAborted = await mockAppium();
+  const controller = new AbortController();
+  controller.abort(new Error('cancel before bootstrap'));
+  try {
+    await assert.rejects(
+      startNativeSession(
+        {
+          environment: { platform: 'android', serverUrl: preAborted.url, capabilities: {} },
+          capabilities: {},
+        },
+        5_000,
+        { signal: controller.signal },
+      ),
+      /cancel before bootstrap/,
+    );
+    assert.equal(preAborted.created(), 0);
+  } finally {
+    preAborted.server.close();
+  }
+
+  const explicit = await mockAppium({ sessionFailure: 'complete rejected capabilities' });
+  try {
+    for (let attempt = 0; attempt < 2; attempt++)
+      await assert.rejects(
+        startNativeSession({
+          environment: { platform: 'ios', serverUrl: explicit.url, capabilities: {} },
+          capabilities: {},
+        }),
+        (error: unknown) => {
+          assert.ok(!(error instanceof NativeSessionCreationUncertainError));
+          assert.match(String(error), /complete rejected capabilities/);
+          return true;
+        },
+      );
+    assert.equal(explicit.created(), 2);
+    assert.equal(explicit.deleted(), 0);
+  } finally {
+    explicit.server.close();
+  }
+});
+
+test('Abort between entry validation and transport acceptance does not latch possible dispatch', async () => {
+  const mock = await mockAppium();
+  const controller = new AbortController();
+  const workersBefore = workerCreations;
+  try {
+    const first = startNativeSession(
+      {
+        environment: { platform: 'android', serverUrl: mock.url, capabilities: {} },
+        capabilities: {},
+      },
+      5_000,
+      { signal: controller.signal },
+    );
+    queueMicrotask(() => controller.abort(new Error('cancel before transport acceptance')));
+    await assert.rejects(first, /cancel before transport acceptance|abort/i);
+    assert.equal(mock.created(), 0);
+    assert.equal(mock.deleted(), 0);
+    assert.equal(workerCreations - workersBefore, 0);
+
+    const retry = await startNativeSession(
+      {
+        environment: { platform: 'android', serverUrl: mock.url, capabilities: {} },
+        capabilities: {},
+      },
+      5_000,
+    );
+    assert.equal(mock.created(), 1);
+    assert.equal(workerCreations - workersBefore, 1);
+    await retry.close();
+    assert.equal(mock.deleted(), 1);
   } finally {
     mock.server.close();
   }
@@ -1039,6 +1182,7 @@ test('a Session result obtained before cancellation is deleted after Worker init
       timer = setTimeout(() => controller.abort(reason), 50);
     },
   });
+  const workersBefore = workerCreations;
   try {
     await assert.rejects(
       startNativeSession(
@@ -1058,6 +1202,7 @@ test('a Session result obtained before cancellation is deleted after Worker init
     );
     assert.equal(mock.created(), 1);
     assert.equal(mock.deleted(), 1);
+    assert.equal(workerCreations - workersBefore, 1);
     assert.equal(
       mock.requests.some((request) => request.endsWith('/source')),
       false,
@@ -1346,13 +1491,52 @@ test('uncertain user release blocks ready, execute and configure without a secon
 
 test(
   'Android ready 15-second observation budget reaches the first POST and leaves status idle on cancellation',
-  { timeout: 25_000 },
+  { timeout: 30_000 },
   async () => {
+    if (process.env.MAAT_CREATION_BARRIER_TEST_CHILD !== '1') {
+      const { NODE_TEST_CONTEXT: _testContext, ...childEnvironment } = process.env;
+      const child = spawn(
+        process.execPath,
+        [
+          '--experimental-strip-types',
+          '--test',
+          '--test-name-pattern=Android ready 15-second observation budget',
+          new URL(import.meta.url).pathname,
+        ],
+        {
+          env: { ...childEnvironment, MAAT_CREATION_BARRIER_TEST_CHILD: '1' },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      let output = '';
+      child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString()));
+      child.stderr.on('data', (chunk: Buffer) => (output += chunk.toString()));
+      const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+        (resolve, reject) => {
+          child.once('error', reject);
+          child.once('exit', (code, signal) => resolve({ code, signal }));
+        },
+      );
+      assert.equal(
+        result.code,
+        0,
+        `isolated creation-barrier contract failed (${result.signal ?? 'no signal'}):\n${output.slice(-8_000)}`,
+      );
+      assert.match(
+        output,
+        /MAAT_CREATION_BARRIER_CHILD_ACTIVE/,
+        `isolated creation-barrier contract did not execute:\n${output.slice(-8_000)}`,
+      );
+      return;
+    }
+    process.stdout.write('MAAT_CREATION_BARRIER_CHILD_ACTIVE\n');
     const root = await mkdtemp(path.join(tmpdir(), 'maat-ready-bootstrap-'));
     const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
     process.env.MAAT_SESSION_HINTS_DIR = root;
     const mock = await mockAppium({ sessionDelayMs: 15_200, readinessAdb: {} });
     const api = androidReadinessApi(root, mock.adb!.connect);
+    const adapter = api.registry.current as AppiumPlatformAdapter;
+    const workersBefore = workerCreations;
     try {
       await api.platforms.configureSession({
         serverUrl: mock.url,
@@ -1362,9 +1546,8 @@ test(
       const started = Date.now();
       await assert.rejects(api.setup.ready(), (error: unknown) => {
         assert.ok(error instanceof Error);
-        assert.match(error.message, /readiness timed out/);
-        assert.ok(error.cause instanceof Error);
-        assert.match(error.cause.message, /cleanup cannot be confirmed/);
+        assert.equal((error as Error & { code?: string }).code, 'phone-session-creation-uncertain');
+        assert.doesNotMatch(error.message, /127\.0\.0\.1|MOCK_LOCAL_DEVICE|owned-/);
         return true;
       });
       assert.ok(Date.now() - started < 20_000);
@@ -1372,12 +1555,129 @@ test(
       assert.equal(mock.created(), 1);
       assert.equal(mock.sessionCapabilities[0]?.['appium:skipUnlock'], true);
       assert.equal(mock.deleted(), 0);
+      assert.equal(workerCreations - workersBefore, 0);
       assert.equal(
         mock.requests.some((request) => request.endsWith('/source')),
         false,
       );
+      const creationBlocked = (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal((error as Error & { code?: string }).code, 'phone-session-creation-uncertain');
+        assert.doesNotMatch(
+          error.message,
+          /127\.0\.0\.1|MOCK_LOCAL_DEVICE|owned-|com\.example|sessionDelay/i,
+        );
+        return true;
+      };
+      await assert.rejects(api.setup.ready(), creationBlocked);
+      await assert.rejects(
+        api.exploration.executeJavaScript("console.log('must not enter Worker');"),
+        creationBlocked,
+      );
+      await assert.rejects(
+        api.platforms.configureSession({ clearAppTarget: true }),
+        creationBlocked,
+      );
+      await assert.rejects(api.mobile.releaseCurrentSession(), creationBlocked);
+      await assert.rejects(adapter.selectReadinessTarget(), creationBlocked);
+
+      class OtherPhysicalAdapter extends AppiumPlatformAdapter {
+        protected override async discoverSelectionDevices() {
+          return [{ id: 'OTHER_LOCAL_PHONE', name: 'other', kind: 'device' as const }];
+        }
+      }
+      const otherAdapter = new OtherPhysicalAdapter({
+        id: 'android',
+        label: 'other Android',
+        platformName: 'Android',
+        automationName: 'UiAutomator2',
+      });
+      const other = new MaatApi(new PlatformRegistry([otherAdapter], 'android'), root);
+      // Configuration and no-daemon discovery may classify the route. The
+      // barrier fires immediately after the exact local physical target pin,
+      // before any Appium Session side effect.
+      await other.platforms.configureSession({
+        serverUrl: mock.url,
+        device: { kind: 'device', name: 'other' },
+      });
+      await assert.rejects(otherAdapter.selectReadinessTarget(), creationBlocked);
+      await assert.rejects(other.setup.ready(), creationBlocked);
+
+      for (const definition of [
+        {
+          id: 'android' as const,
+          label: 'remote Android',
+          platformName: 'Android',
+          automationName: 'UiAutomator2',
+          setup: {
+            serverUrl: 'https://remote-android.invalid/wd/hub',
+            device: { kind: 'device' as const, name: 'remote' },
+          },
+        },
+        {
+          id: 'ios' as const,
+          label: 'remote iOS',
+          platformName: 'iOS',
+          automationName: 'XCUITest',
+          setup: {
+            serverUrl: 'https://remote-ios.invalid/wd/hub',
+            device: { kind: 'device' as const, name: 'remote' },
+          },
+        },
+        {
+          id: 'android' as const,
+          label: 'Android emulator',
+          platformName: 'Android',
+          automationName: 'UiAutomator2',
+          setup: {
+            serverUrl: mock.url,
+            device: { kind: 'emulator' as const, name: 'legacy emulator' },
+          },
+        },
+        {
+          id: 'ios' as const,
+          label: 'iOS simulator',
+          platformName: 'iOS',
+          automationName: 'XCUITest',
+          setup: {
+            serverUrl: mock.url,
+            device: { kind: 'simulator' as const, name: 'legacy simulator' },
+          },
+        },
+      ]) {
+        const legacyAdapter = new AppiumPlatformAdapter(definition);
+        const legacy = new MaatApi(new PlatformRegistry([legacyAdapter], definition.id), root);
+        await legacy.platforms.configureSession(definition.setup);
+        assert.equal(await legacyAdapter.selectReadinessTarget(), undefined);
+        assert.equal(legacyAdapter.isMigratedLocalPhysicalRoute(), false);
+        await legacy.mobile.releaseCurrentSession();
+        await legacy.close();
+      }
+
+      const web = operationApi(operationAdapter('web'));
+      const macos = operationApi(operationAdapter('macos'));
+      assert.deepEqual(await web.exploration.executeJavaScript('independent web'), []);
+      assert.deepEqual(await macos.exploration.executeJavaScript('independent macOS'), []);
+      await web.close();
+      await macos.close();
+
+      const retained = (
+        adapter as unknown as {
+          target?: { endpoint: string; identity: { routingId: string } };
+        }
+      ).target;
+      assert.equal(retained?.endpoint, new URL(mock.url).href);
+      assert.equal(retained?.identity.routingId, 'MOCK_LOCAL_DEVICE');
+      assert.equal(adapter.runtime.hasUncertainCreation, true);
+      assert.equal(mock.created(), 1);
+      assert.equal(mock.deleted(), 0);
+      assert.equal(workerCreations - workersBefore, 0);
     } finally {
-      await api.close();
+      await assert.rejects(
+        api.close(),
+        (error: unknown) =>
+          (error as Error & { code?: string }).code === 'phone-session-creation-uncertain',
+      );
       if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
       else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
       mock.server.close();

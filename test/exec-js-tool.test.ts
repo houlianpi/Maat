@@ -229,6 +229,47 @@ test('exe_js classifies a mobile slot conflict as not-started without exposing r
   );
 });
 
+test('exe_js maps wrapped creation uncertainty without exposing transport facts or suggesting observation', async () => {
+  const uncertain = Object.assign(
+    new Error(
+      'PHONE_SESSION_CREATION_UNCERTAIN: phone Session creation could not be confirmed; a Session resource may exist.',
+    ),
+    { code: 'phone-session-creation-uncertain' },
+  );
+  const wrapped = new Error('unsafe wrapper mentions http://127.0.0.1:4723 secret-device', {
+    cause: uncertain,
+  });
+  const tool = createExecJsTool({
+    close: async () => {},
+    execute: async () => {
+      throw wrapped;
+    },
+  });
+  await assert.rejects(
+    tool.execute(
+      'uncertain',
+      { code: "await driver.$('secret').click()" },
+      undefined,
+      undefined,
+      {} as Parameters<typeof tool.execute>[4],
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /category: phone-session-creation-uncertain/);
+      assert.match(error.message, /code: phone-session-creation-uncertain/);
+      assert.match(error.message, /phase: session-create/);
+      assert.match(error.message, /actionState: not-started/);
+      assert.match(error.message, /Session resource may exist/);
+      assert.match(error.message, /Do not call ready, execute, configure, recreate/);
+      assert.doesNotMatch(
+        error.message,
+        /127\.0\.0\.1|secret-device|driver\.\$|read-only exe_js observation/i,
+      );
+      return true;
+    },
+  );
+});
+
 test('supplemental diagnosis retains the primary error and cancellation signal', async () => {
   const primary = new Error('ECONNREFUSED: original execution failure');
   const signal = new AbortController().signal;

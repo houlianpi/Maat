@@ -14,6 +14,20 @@ import { isRecord, parseObservations } from '../core/exploration/protocol.ts';
 import { androidLockGuardCode, iosLockGuardCode } from '../platforms/appium/runtime/session.ts';
 import { isMobilePlatform, runMobileOperation } from '../mobile/devices/coordinator.ts';
 
+type MigratedRouteAdapter = {
+  isMigratedLocalPhysicalRoute(): boolean;
+};
+
+function isMigratedLocalPhysicalRoute(adapter: unknown): boolean {
+  return (
+    typeof adapter === 'object' &&
+    adapter !== null &&
+    'isMigratedLocalPhysicalRoute' in adapter &&
+    typeof adapter.isMigratedLocalPhysicalRoute === 'function' &&
+    adapter.isMigratedLocalPhysicalRoute()
+  );
+}
+
 function readinessErrorSummary(error: unknown, depth = 0): string {
   if (error instanceof AggregateError && depth < 3) {
     return error.errors
@@ -50,6 +64,14 @@ function iosWdaSecurityRejection(error: unknown, depth = 0): boolean {
     ) ||
       iosWdaSecurityRejection(error.cause, depth + 1))
   );
+}
+
+function hasErrorCode(error: unknown, code: string, depth = 0): boolean {
+  if (depth > 4 || !error || typeof error !== 'object') return false;
+  if ('code' in error && error.code === code) return true;
+  if (error instanceof AggregateError)
+    return error.errors.some((item) => hasErrorCode(item, code, depth + 1));
+  return error instanceof Error && hasErrorCode(error.cause, code, depth + 1);
 }
 
 /** Stable, host-neutral product API. Agent hosts translate this API into their own tools and UI. */
@@ -95,7 +117,10 @@ export class MaatApi {
         throw new Error(`${adapter.label} does not accept Session hints.`);
       }
       if (isMobilePlatform(adapter.id))
-        return runMobileOperation(() => adapter.configureSession!(setup));
+        return runMobileOperation(
+          () => adapter.configureSession!(setup),
+          () => isMigratedLocalPhysicalRoute(adapter),
+        );
       await adapter.configureSession(setup);
     },
     inspectSetup: async (request: SetupInspection) => {
@@ -112,14 +137,18 @@ export class MaatApi {
     releaseCurrentSession: (): Promise<{
       released: true;
       platform: 'android' | 'ios';
-    }> =>
-      runMobileOperation(async () => {
-        const adapter = this.registry.current;
-        if (!isMobilePlatform(adapter.id))
-          throw new Error('releaseCurrentSession requires the Android or iOS platform.');
-        await adapter.close();
-        return { released: true, platform: adapter.id };
-      }),
+    }> => {
+      const adapter = this.registry.current;
+      return runMobileOperation(
+        async () => {
+          if (!isMobilePlatform(adapter.id))
+            throw new Error('releaseCurrentSession requires the Android or iOS platform.');
+          await adapter.close();
+          return { released: true, platform: adapter.id };
+        },
+        () => isMigratedLocalPhysicalRoute(adapter),
+      );
+    },
   };
 
   readonly setup = {
@@ -272,6 +301,7 @@ export class MaatApi {
         );
         signal.throwIfAborted();
       } catch (error) {
+        if (hasErrorCode(error, 'phone-session-creation-uncertain')) throw error;
         // Preserve the execution error (including any cleanup failure) on cancellation.
         if (input.signal?.aborted)
           throw new Error(`${label} setup readiness cancelled: ${readinessErrorSummary(error)}`, {
@@ -353,7 +383,7 @@ export class MaatApi {
           (observation) => observation === proof || observation.type === 'image',
         ),
       };
-      });
+      }, () => isMigratedLocalPhysicalRoute(adapter));
     },
     action: (actionId?: SetupAction['id']) => this.setupAssistant.action(actionId),
     skip: (capabilityId: SetupCapabilityId) => this.setupAssistant.skip(capabilityId),
@@ -367,15 +397,22 @@ export class MaatApi {
     executeJavaScript: (code: string, signal?: AbortSignal) => {
       const adapter = this.registry.current;
       return isMobilePlatform(adapter.id)
-        ? runMobileOperation(() => adapter.execute(code, signal))
+        ? runMobileOperation(
+            () => adapter.execute(code, signal),
+            () => isMigratedLocalPhysicalRoute(adapter),
+          )
         : adapter.execute(code, signal);
     },
     context: () => this.registry.current.codeContext,
   };
 
   close(): Promise<void> {
-    return this.registry.list().some((adapter) => isMobilePlatform(adapter.id))
-      ? runMobileOperation(() => this.registry.close())
+    const adapters = this.registry.list();
+    return adapters.some((adapter) => isMobilePlatform(adapter.id))
+      ? runMobileOperation(
+          () => this.registry.close(),
+          () => adapters.some(isMigratedLocalPhysicalRoute),
+        )
       : this.registry.close();
   }
 }

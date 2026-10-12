@@ -1,7 +1,9 @@
-import { startNativeSession } from './session.ts';
+import { NativeSessionCreationUncertainError, startNativeSession } from './session.ts';
 import { capabilities, type ResolvedNativeSession } from '../schema.ts';
 import type { JavaScriptSession } from '../../../core/exploration/runtime.ts';
 import { errorWithCleanupFailure } from '../../../core/exploration/runtime.ts';
+import { PhoneSessionCreationUncertainError } from '../../../mobile/contracts/device.ts';
+import { installMobileCreationBarrier } from '../../../mobile/devices/coordinator.ts';
 
 export class NativeManager implements JavaScriptSession {
   private readonly executionTimeoutMs: number;
@@ -15,6 +17,14 @@ export class NativeManager implements JavaScriptSession {
   }>;
   private sessionGeneration = 0;
   private resolved?: ResolvedNativeSession;
+  private creationSafetyEnabled = false;
+  private creationUncertain?: Readonly<{
+    state: 'creation-uncertain';
+    resolved: ResolvedNativeSession;
+    generation: number;
+    causeCategory: string;
+    cause: unknown;
+  }>;
   private busy = false;
   get currentApp() {
     return this.resolved?.app;
@@ -29,14 +39,18 @@ export class NativeManager implements JavaScriptSession {
   get hasUncertainOwnedSession() {
     return this.uncertainOwnership !== undefined;
   }
+  get hasUncertainCreation() {
+    return this.creationUncertain !== undefined;
+  }
   get currentSessionGeneration(): number | undefined {
     return this.isRunning ? this.sessionGeneration : undefined;
   }
-  async configureResolved(resolved: ResolvedNativeSession) {
+  async configureResolved(resolved: ResolvedNativeSession, creationSafetyEnabled = false) {
     capabilities(resolved);
-    this.assertOwnershipCertain();
+    this.assertLifecycleCertain();
     await this.close();
     this.resolved = resolved;
+    this.creationSafetyEnabled = creationSafetyEnabled;
   }
   async execute(code: string, signal?: AbortSignal) {
     return this.executeSession(code, signal);
@@ -45,7 +59,7 @@ export class NativeManager implements JavaScriptSession {
     return this.executeSession(code, signal, generation);
   }
   private async executeSession(code: string, signal?: AbortSignal, generation?: number) {
-    this.assertOwnershipCertain();
+    this.assertLifecycleCertain();
     if (this.busy) throw new Error('Native execution already in progress.');
     signal?.throwIfAborted();
     if (!this.resolved) throw new Error('Select and configure a native project first.');
@@ -64,6 +78,17 @@ export class NativeManager implements JavaScriptSession {
       signal?.throwIfAborted();
       return await this.session!.execute(code, signal);
     } catch (error) {
+      if (error instanceof NativeSessionCreationUncertainError && this.creationSafetyEnabled) {
+        this.creationUncertain ??= Object.freeze({
+          state: 'creation-uncertain' as const,
+          resolved: this.resolved,
+          generation: this.sessionGeneration + 1,
+          causeCategory: error.facts.causeCategory,
+          cause: error.internalCause,
+        });
+        installMobileCreationBarrier(error.facts.causeCategory);
+        throw new PhoneSessionCreationUncertainError();
+      }
       if (signal?.aborted || this.session?.isClosed) {
         try {
           await this.invalidateSession();
@@ -76,7 +101,8 @@ export class NativeManager implements JavaScriptSession {
       this.busy = false;
     }
   }
-  private assertOwnershipCertain() {
+  private assertLifecycleCertain() {
+    if (this.creationUncertain) throw new PhoneSessionCreationUncertainError();
     if (this.uncertainOwnership)
       throw new Error('Native Session ownership is uncertain after cleanup failure.');
   }
@@ -86,6 +112,7 @@ export class NativeManager implements JavaScriptSession {
     await current?.close();
   }
   async close() {
+    if (this.creationUncertain) throw new PhoneSessionCreationUncertainError();
     if (this.uncertainOwnership) {
       await this.uncertainOwnership.closeResult;
       return;

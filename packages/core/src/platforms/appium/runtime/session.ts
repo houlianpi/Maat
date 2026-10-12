@@ -4,13 +4,28 @@ import { createExplorationWorker } from '../../../core/exploration/worker-client
 import type { JavaScriptSession } from '../../../core/exploration/runtime.ts';
 import { errorWithCleanupFailure } from '../../../core/exploration/runtime.ts';
 
-export class NativeInitializationCancelledError extends Error {
+export type NativeSessionCreationFacts = Readonly<{
+  dispatchPossible: boolean;
+  responseReceived: boolean;
+  responseValidated: boolean;
+  explicitFailureReceived: boolean;
+  trustedSessionId: boolean;
+  causeCategory: 'abort' | 'timeout' | 'transport' | 'invalid-response' | 'missing-session-id';
+}>;
+
+/** Internal transport evidence. Managers retain it and expose only the stable safe public error. */
+export class NativeSessionCreationUncertainError extends Error {
+  readonly facts: NativeSessionCreationFacts;
+  readonly internalCause: unknown;
   readonly abortReason: unknown;
-  constructor(cause: unknown, abortReason: unknown) {
+
+  constructor(cause: unknown, facts: NativeSessionCreationFacts, abortReason?: unknown) {
     super(
-      'Native Session initialization cancelled before a Session ID was received. POST /session may have completed remotely; cleanup cannot be confirmed without its ID. No action was replayed.',
-      { cause },
+      'Native Session creation is uncertain: POST /session may have dispatched and no trusted Session handle or complete explicit failure response was received.',
     );
+    this.name = 'NativeSessionCreationUncertainError';
+    this.facts = facts;
+    this.internalCause = cause;
     this.abortReason = abortReason;
   }
 }
@@ -70,7 +85,25 @@ export async function startNativeSession(
   let driver: Awaited<ReturnType<typeof remote>> | undefined;
   let worker: JavaScriptSession | undefined;
   let initializing = true;
-  let sessionRequested = false;
+  let dispatchPossible = false;
+  let responseReceived = false;
+  let responseValidated = false;
+  let explicitFailureReceived = false;
+  let trustedSessionId = false;
+  const completeExplicitFailure = (response: unknown): boolean => {
+    if (!response || typeof response !== 'object') return false;
+    const record = response as { statusCode?: unknown; body?: unknown };
+    if (typeof record.statusCode !== 'number' || record.statusCode < 400) return false;
+    if (!record.body || typeof record.body !== 'object') return false;
+    const value = (record.body as { value?: unknown }).value;
+    if (!value || typeof value !== 'object') return false;
+    const failure = value as { error?: unknown; message?: unknown };
+    return (
+      failure.error === 'session not created' &&
+      typeof failure.message === 'string' &&
+      failure.message.trim().length > 0
+    );
+  };
   try {
     initializationSignal.throwIfAborted();
     driver = await remote({
@@ -82,20 +115,38 @@ export async function startNativeSession(
       // The SDK applies this RequestInit signal to the actual Undici request.
       // Do not keep an expired bootstrap signal on subsequent cleanup/commands.
       transformRequest: (request) => {
-        if (initializing && request.method === 'POST') sessionRequested = true;
+        const effectiveSignal = initializing
+          ? AbortSignal.any([initializationSignal, ...(request.signal ? [request.signal] : [])])
+          : request.signal;
+        // If cancellation won before transport acceptance, dispatch is
+        // disproven. Once this hook accepts the request, later cancellation
+        // cannot prove whether bytes reached Appium, so remain conservative.
+        if (initializing && request.method === 'POST') {
+          effectiveSignal?.throwIfAborted();
+          dispatchPossible = true;
+        }
         return {
           ...request,
-          ...(initializing
-            ? {
-                signal: AbortSignal.any([
-                  initializationSignal,
-                  ...(request.signal ? [request.signal] : []),
-                ]),
-              }
-            : {}),
+          ...(initializing ? { signal: effectiveSignal } : {}),
         };
       },
+      transformResponse: (response, request) => {
+        if (initializing && request.method === 'POST') {
+          responseReceived = true;
+          responseValidated =
+            Boolean(response) &&
+            typeof response === 'object' &&
+            typeof (response as { statusCode?: unknown }).statusCode === 'number' &&
+            Boolean((response as { body?: unknown }).body) &&
+            typeof (response as { body?: unknown }).body === 'object' &&
+            Object.hasOwn((response as { body: object }).body, 'value');
+          explicitFailureReceived = completeExplicitFailure(response);
+        }
+        return response;
+      },
     });
+    trustedSessionId = typeof driver.sessionId === 'string' && driver.sessionId.trim().length > 0;
+    if (!trustedSessionId) throw new Error('Native Session response did not include a Session ID.');
     initializationSignal.throwIfAborted();
     const runtimeModule = import.meta.url.endsWith('.ts')
       ? '../exploration-runtime.ts'
@@ -120,8 +171,39 @@ export async function startNativeSession(
   } catch (error) {
     initializing = false;
     let failure: unknown = error;
-    if (!driver && sessionRequested && initializationSignal.aborted) {
-      failure = new NativeInitializationCancelledError(error, initializationSignal.reason);
+    if (!trustedSessionId && dispatchPossible && !explicitFailureReceived) {
+      const message = error instanceof Error ? error.message : String(error);
+      const invalidResponse = /Could not parse response body/i.test(message);
+      if (invalidResponse) responseReceived = true;
+      const initializationTimedOut =
+        !options.signal?.aborted && (initializationSignal.aborted || Date.now() >= deadline);
+      const causeCategory =
+        initializationSignal.aborted || initializationTimedOut
+          ? options.signal?.aborted
+            ? 'abort'
+            : 'timeout'
+          : invalidResponse
+            ? 'invalid-response'
+            : responseReceived
+              ? /session id/i.test(message)
+                ? 'missing-session-id'
+                : 'invalid-response'
+              : 'transport';
+      failure = new NativeSessionCreationUncertainError(
+        error,
+        {
+          dispatchPossible,
+          responseReceived,
+          responseValidated,
+          explicitFailureReceived,
+          trustedSessionId,
+          causeCategory,
+        },
+        initializationSignal.reason,
+      );
+      // A WDIO object without a trusted nonempty Session ID is not an ownership handle.
+      // Never let generic cleanup issue DELETE for such an object.
+      driver = undefined;
     }
     if (worker) {
       try {
