@@ -34,6 +34,7 @@ test('Pi Extension registers execution/setup tools without legacy workflow tools
     'release_device_session',
     'check_platform_setup',
     'check_device_ready',
+    'prepare_mobile',
     'open_setup_step',
     'retry_setup_step',
     'continue_without_capability',

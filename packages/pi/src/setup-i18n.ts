@@ -3,6 +3,24 @@ import type { SetupMessageKey } from '@houlianpi/maat-core';
 
 export type SetupLocale = 'en' | 'zh-CN';
 
+/** Known readiness errors only; never infer current lock state from preparation facts. */
+export function phoneReadinessGuidance(message: string, locale: SetupLocale): string | undefined {
+  const zh = locale === 'zh-CN';
+  if (/\bIOS_WDA_SECURITY_REJECTED\b/.test(message))
+    return zh
+      ? 'IOS_WDA_SECURITY_REJECTED：iOS 拒绝 WDA，可能涉及签名、权限或开发者描述文件信任。请本人检查“设置 > 通用 > VPN与设备管理”的开发者 App 信任状态；若已信任或没有入口，核查 WDA 签名及描述文件有效期。不要循环重试或重装；更改签名、重新部署须另获明确授权，不索取 Apple 凭据。'
+      : 'IOS_WDA_SECURITY_REJECTED: iOS rejected WDA; signing, entitlements or developer-profile trust may be involved. Check developer App trust in Settings > General > VPN & Device Management yourself; if already trusted or no entry exists, inspect WDA signing and profile expiry. Do not loop retries or reinstall. Signing changes and redeployment require separate explicit authorization; never request Apple credentials.';
+  if (/\bIOS_DEVICE_LOCK_STATE_UNKNOWN\b/.test(message))
+    return zh
+      ? 'IOS_DEVICE_LOCK_STATE_UNKNOWN：无法证明当前 iPhone 已点亮并解锁，默认阻止冷 Session 初始化。请本人确认手机状态；说明 WDA 初始化可能点亮屏幕或触发系统提示后，仅在明确授权本次初始化时使用 allowWdaInitialization=true。授权不是当前解锁证明，不重放之前的动作。'
+      : 'IOS_DEVICE_LOCK_STATE_UNKNOWN: the current awake/unlocked iPhone state is unproven; cold Session initialization is blocked by default. Confirm the phone state yourself. Only after explaining possible screen wake/system prompts and obtaining explicit authorization for this attempt may allowWdaInitialization=true be used. Authorization is not current-unlock proof; do not replay previous actions.';
+  const code = /\b(?:ANDROID|IOS)_DEVICE_LOCKED\b/.exec(message)?.[0];
+  if (code)
+    return zh
+      ? `${code}：手机已锁定或熄屏。请本人点亮并解锁手机，完成后重新检查；不要重启服务或重复之前的操作。`
+      : `${code}: the phone is locked or its screen is off. Wake and unlock it yourself, then recheck; do not restart the service or repeat previous actions.`;
+}
+
 const messages: Record<SetupLocale, Record<SetupMessageKey, string>> = {
   en: {
     'setup.title.checking': 'Checking the macOS execution environment',
@@ -39,6 +57,22 @@ const messages: Record<SetupLocale, Record<SetupMessageKey, string>> = {
     'capability.androidDevice.offline': 'The Android phone is offline',
     'capability.androidDevice.select': 'Choose which Android phone to use',
     'capability.androidDevice.unknown': 'Android device state could not be checked',
+    'capability.xcode.ready': 'Xcode is available',
+    'capability.xcode.required':
+      'Local iPhone preparation requires a working full Xcode installation',
+    'capability.xcode.unknown': 'Xcode could not be checked',
+    'capability.xcuitest.ready': 'The iOS automation driver is installed',
+    'capability.xcuitest.install': 'The iOS automation driver is missing',
+    'capability.xcuitest.unknown': 'The iOS automation driver could not be checked',
+    'capability.iosDevice.ready': 'The selected iPhone is connected and paired',
+    'capability.iosDevice.missing': 'No matching physical iPhone is connected',
+    'capability.iosDevice.offline': 'The selected iPhone is offline',
+    'capability.iosDevice.trust': 'Trust this computer on the iPhone',
+    'capability.iosDevice.select': 'Choose which physical iPhone to use',
+    'capability.iosDevice.unknown': 'iPhone connection state could not be checked',
+    'capability.iosDeveloperMode.ready': 'iPhone Developer Mode is enabled',
+    'capability.iosDeveloperMode.required': 'Enable Developer Mode on the iPhone',
+    'capability.iosDeveloperMode.unknown': 'iPhone Developer Mode could not be checked',
     'capability.mac2.ready': 'The macOS automation component is installed',
     'capability.mac2.install': 'The macOS automation component must be installed',
     'capability.automation.ready': 'Automation Mode is ready',
@@ -75,6 +109,13 @@ const messages: Record<SetupLocale, Record<SetupMessageKey, string>> = {
     'action.connectAndroidDevice': 'Connect the intended phone and check again',
     'action.authorizeAndroidDevice': 'Allow USB debugging on the phone, then continue',
     'action.selectAndroidDevice': 'Select the phone for this task',
+    'action.configureXcode': 'Check Xcode installation, selection and first-launch requirements',
+    'action.installXcuitest': 'Prepare the iOS automation driver',
+    'action.connectIosDevice': 'Connect and unlock the intended iPhone, then recheck',
+    'action.trustIosDevice': 'Trust this computer on the iPhone, then continue',
+    'action.selectIosDevice': 'Select the iPhone for this task',
+    'action.enableIosDeveloperMode':
+      'Enable Developer Mode yourself and confirm any required restart',
   },
   'zh-CN': {
     'setup.title.checking': '正在检查 macOS 操作环境',
@@ -110,6 +151,21 @@ const messages: Record<SetupLocale, Record<SetupMessageKey, string>> = {
     'capability.androidDevice.offline': 'Android 手机连接已断开',
     'capability.androidDevice.select': '请选择本次使用的 Android 手机',
     'capability.androidDevice.unknown': '未能检查 Android 手机状态',
+    'capability.xcode.ready': 'Xcode 可用',
+    'capability.xcode.required': '本地 iPhone 准备需要完整且可用的 Xcode',
+    'capability.xcode.unknown': '未能检查 Xcode',
+    'capability.xcuitest.ready': 'iOS 自动化驱动已安装',
+    'capability.xcuitest.install': '还缺少 iOS 自动化驱动',
+    'capability.xcuitest.unknown': '未能检查 iOS 自动化驱动',
+    'capability.iosDevice.ready': '目标 iPhone 已连接并配对',
+    'capability.iosDevice.missing': '尚未发现匹配的 iPhone 真机',
+    'capability.iosDevice.offline': '目标 iPhone 连接已断开',
+    'capability.iosDevice.trust': '请在 iPhone 上信任此电脑',
+    'capability.iosDevice.select': '请选择本次使用的 iPhone 真机',
+    'capability.iosDevice.unknown': '未能检查 iPhone 连接状态',
+    'capability.iosDeveloperMode.ready': 'iPhone 开发者模式已开启',
+    'capability.iosDeveloperMode.required': '请在 iPhone 上开启开发者模式',
+    'capability.iosDeveloperMode.unknown': '未能检查 iPhone 开发者模式',
     'capability.mac2.ready': 'macOS 自动化组件已安装',
     'capability.mac2.install': '需要安装 macOS 自动化组件',
     'capability.automation.ready': 'Automation Mode 已就绪',
@@ -145,6 +201,12 @@ const messages: Record<SetupLocale, Record<SetupMessageKey, string>> = {
     'action.connectAndroidDevice': '连接目标手机后重新检查',
     'action.authorizeAndroidDevice': '在手机上允许 USB 调试，完成后继续',
     'action.selectAndroidDevice': '选择本次操作的手机',
+    'action.configureXcode': '检查 Xcode 安装、当前选择与首次启动条件',
+    'action.installXcuitest': '准备 iOS 自动化驱动',
+    'action.connectIosDevice': '连接并解锁目标 iPhone 后重新检查',
+    'action.trustIosDevice': '在 iPhone 上信任此电脑，完成后继续',
+    'action.selectIosDevice': '选择本次操作的 iPhone',
+    'action.enableIosDeveloperMode': '请本人开启开发者模式，并确认可能需要的重启',
   },
 };
 

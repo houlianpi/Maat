@@ -16,19 +16,25 @@ export class NativeInitializationCancelledError extends Error {
 }
 
 /** Read-only guard in the same killable Worker dispatch, not per-action lock atomicity. */
-export const androidLockGuardCode = [
-  'await (async () => {',
-  '  let locked;',
-  '  try { locked = await driver.isLocked(); }',
-  '  catch (error) {',
-  '    let reason = "lock query failed";',
-  '    try { reason = (error && typeof error.message === "string" ? error.message : String(error)).slice(0, 1_000).replace(/[\\r\\n]+/g, " "); } catch {}',
-  '    throw new Error("ANDROID_DEVICE_LOCK_STATE_UNKNOWN: could not check whether phone is locked or screen off; check the connection and unlock/wake yourself then recheck. Original failure: " + reason, {cause: error});',
-  '  }',
-  '  if (locked === true) throw new Error("ANDROID_DEVICE_LOCKED: phone locked or screen off; unlock/wake yourself then recheck.");',
-  '  if (locked !== false) throw new Error("ANDROID_DEVICE_LOCK_STATE_UNKNOWN: lock query did not return a boolean; check the connection and unlock/wake yourself then recheck.");',
-  '})();',
-].join('\n');
+function phoneLockGuardCode(platform: 'ANDROID' | 'IOS') {
+  const state = platform === 'ANDROID' ? 'locked or screen off' : 'locked';
+  return [
+    'await (async () => {',
+    '  let locked;',
+    '  try { locked = await driver.isLocked(); }',
+    '  catch (error) {',
+    '    let reason = "lock query failed";',
+    '    try { reason = (error && typeof error.message === "string" ? error.message : String(error)).slice(0, 1_000).replace(/[\\r\\n]+/g, " "); } catch {}',
+    `    throw new Error("${platform}_DEVICE_LOCK_STATE_UNKNOWN: could not check whether phone is ${state}; check the connection and unlock/wake yourself then recheck. Original failure: " + reason, {cause: error});`,
+    '  }',
+    `  if (locked === true) throw new Error("${platform}_DEVICE_LOCKED: phone ${state}; unlock/wake yourself then recheck.");`,
+    `  if (locked !== false) throw new Error("${platform}_DEVICE_LOCK_STATE_UNKNOWN: lock query did not return a boolean; check the connection and unlock/wake yourself then recheck.");`,
+    '})();',
+  ].join('\n');
+}
+
+export const androidLockGuardCode = phoneLockGuardCode('ANDROID');
+export const iosLockGuardCode = phoneLockGuardCode('IOS');
 
 export async function startNativeSession(
   target: ResolvedNativeSession,
@@ -51,6 +57,12 @@ export async function startNativeSession(
   };
   const appId = target.app?.['appium:appPackage'] ?? target.app?.['appium:bundleId'];
   const supportsAppLifecycle = target.environment.platform === 'ios';
+  const lockGuard =
+    target.environment.platform === 'android'
+      ? androidLockGuardCode
+      : target.environment.platform === 'ios' && target.environment.device?.kind === 'device'
+        ? iosLockGuardCode
+        : undefined;
   if (target.environment.serverUrl) connection(target.environment.serverUrl);
   if (!target.environment.serverUrl)
     throw new Error('Resolved Appium Session requires a serverUrl.');
@@ -138,9 +150,7 @@ export async function startNativeSession(
     },
     execute: (code, signal) =>
       ownedWorker.execute(
-        target.environment.platform === 'android' && !code.startsWith(`${androidLockGuardCode}\n`)
-          ? `${androidLockGuardCode}\n${code}`
-          : code,
+        lockGuard && !code.startsWith(`${lockGuard}\n`) ? `${lockGuard}\n${code}` : code,
         signal,
       ),
     close() {

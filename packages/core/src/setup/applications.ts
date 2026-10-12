@@ -6,6 +6,7 @@ import path from 'node:path';
 import type { NativeEnvironment } from '../platforms/appium/schema.ts';
 import { resolveDevice } from './devices.ts';
 import { assertAdbServerCompatible, resolveAndroidTools } from './android-tools.ts';
+import { isRecord } from '../core/exploration/protocol.ts';
 const exec = promisify(execFile);
 
 export async function discoverApplications(
@@ -43,7 +44,7 @@ export async function discoverApplications(
       .map((line) => ({ name: line.slice(8).trim(), id: line.slice(8).trim() }));
   } else if (target.environment.platform === 'ios') {
     if (target.environment.device?.kind === 'simulator') {
-      const { stdout } = await exec(
+      const { stdout } = await dependencies.command(
         'xcrun',
         ['simctl', 'listapps', String(target.capabilities['appium:udid'])],
         { timeout: 20_000 },
@@ -54,13 +55,14 @@ export async function discoverApplications(
       const dir = await mkdtemp(path.join(tmpdir(), 'maat-app-list-'));
       try {
         const file = path.join(dir, 'apps.json');
-        await exec(
+        await dependencies.command(
           'xcrun',
           [
             'devicectl',
             'device',
             'info',
             'apps',
+            '--include-default-apps',
             '--device',
             String(target.capabilities['appium:udid']),
             '--json-output',
@@ -68,11 +70,22 @@ export async function discoverApplications(
           ],
           { timeout: 20_000 },
         );
-        const result = JSON.parse(await readFile(file, 'utf8'));
-        apps = (result.result?.apps ?? []).map((a: { name: string; bundleIdentifier: string }) => ({
-          name: a.name,
-          id: a.bundleIdentifier,
-        }));
+        const result: unknown = JSON.parse(await readFile(file, 'utf8'));
+        if (!isRecord(result) || !isRecord(result.result) || !Array.isArray(result.result.apps))
+          throw new Error(
+            'IOS_APP_DISCOVERY_FAILED: CoreDevice returned an invalid installed-app list.',
+          );
+        apps = result.result.apps.map((app: unknown) => {
+          if (
+            !isRecord(app) ||
+            typeof app.name !== 'string' ||
+            typeof app.bundleIdentifier !== 'string' ||
+            !app.name.trim() ||
+            !app.bundleIdentifier.trim()
+          )
+            throw new Error('IOS_APP_DISCOVERY_FAILED: CoreDevice returned invalid App metadata.');
+          return { name: app.name, id: app.bundleIdentifier };
+        });
       } finally {
         await rm(dir, { recursive: true, force: true });
       }

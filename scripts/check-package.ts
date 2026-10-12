@@ -110,6 +110,18 @@ try {
       try {
         if (typeof core.resolveAndroidTools !== 'function' || typeof core.prepareAndroidTools !== 'function')
           throw new Error('Installed Core Android tool APIs are missing');
+        if (typeof core.detectIosSetup !== 'function')
+          throw new Error('Installed Core iOS setup API is missing');
+        if (typeof core.inspectIosWda !== 'function' || typeof core.prepareIosWda !== 'function')
+          throw new Error('Installed Core signing-aware preparation APIs are missing');
+        const ios = await core.detectIosSetup({}, {
+          hostPlatform: 'linux',
+          command: async () => { throw new Error('Unsupported host must not run setup commands'); },
+          fetchStatus: async () => { throw new Error('Unsupported host must not probe Appium'); },
+          devices: async () => { throw new Error('Unsupported host must not discover devices'); },
+        });
+        if (ios.canContinue || ios.capabilities[0]?.errorCode !== 'IOS_HOST_UNSUPPORTED')
+          throw new Error('Installed iOS setup did not report the unsupported host');
         for (const name of ['saveCase', 'runMaatTests', 'CaseDraftManager'])
           if (name in core) throw new Error('Removed Core export remains: ' + name);
         for (const name of ['cases', 'drafts', 'tests', 'evidence'])
@@ -194,7 +206,7 @@ try {
         on(event, handler) { handlers.set(event, handler); return () => {}; },
       };
       extension(pi);
-      for (const name of ['check_platform_setup', 'check_device_ready', 'open_setup_step', 'retry_setup_step', 'continue_without_capability'])
+      for (const name of ['check_platform_setup', 'check_device_ready', 'prepare_mobile', 'open_setup_step', 'retry_setup_step', 'continue_without_capability'])
         if (!tools.includes(name)) throw new Error('Installed extension missing tool: ' + name);
       for (const name of ['begin_case', 'save_case', 'list_evidence', 'set_work_mode'])
         if (tools.includes(name)) throw new Error('Installed extension contains removed tool: ' + name);

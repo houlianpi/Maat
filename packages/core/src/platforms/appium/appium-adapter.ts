@@ -8,13 +8,18 @@ import {
   type NativeAppTarget,
   type NativeEnvironment,
   type NativePlatform,
+  type ResolvedNativeSession,
 } from './schema.ts';
 import { NativeManager } from './runtime/manager.ts';
 import { NativeInitializationCancelledError } from './runtime/session.ts';
 import { WorkerTerminatedError } from '../../core/exploration/runtime.ts';
 import { isRecord } from '../../core/exploration/protocol.ts';
 import type { PlatformAdapter } from '../../core/platforms/contracts.ts';
-import { resolveAppiumSession, resolveAndroidReadinessSession } from './session-resolver.ts';
+import {
+  resolveAppiumSession,
+  resolveAndroidReadinessSession,
+  resolveIosReadinessSession,
+} from './session-resolver.ts';
 import { discoverDevices } from '../../setup/devices.ts';
 import { discoverApplications } from '../../setup/applications.ts';
 import type { SessionSetup, SetupInspection } from '../../core/platforms/contracts.ts';
@@ -46,9 +51,17 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       guidelines: [
         'Each exe_js call is isolated. Variables and functions created by earlier calls do not persist.',
         'Use WebdriverIO APIs through driver.$() and driver.$$(); there are no global $ or $$.',
+        ...(this.id === 'android' || this.id === 'ios'
+          ? [
+              'Generate Appium JavaScript for exe_js; do not use host shell commands, direct WDA requests or temporary phone clients for UI interaction.',
+              'Controls first: query current visible, unambiguous elements with driver.$()/driver.$$() and use their supported APIs; prefer an identified scroll container.',
+              'Only use visual absolute-coordinate actions when the JS interface cannot reliably obtain the tree or the requested target exposes no usable control. A bad selector, truncated extraction or parsing error is not proof of missing controls.',
+              'Explain coordinate fallback, use a current screenshot and map image pixels to Appium viewport units. Return to control locators when usable.',
+            ]
+          : []),
         ...(this.id === 'android'
           ? [
-              'Keep scroll code in the current exe_js call, use a bounded center-screen drag, and observe the UI after each gesture.',
+              'When a coordinate scroll fallback is necessary, keep its bounded gesture code in the current exe_js call and observe afterward; do not use the example as a default instead of an available container.',
             ]
           : []),
         ...(this.id === 'macos'
@@ -148,14 +161,21 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     return apps.map((app) => ({ ...app, capabilities: { [appCapability]: app.id } }));
   }
 
-  private async prepare(signal?: AbortSignal): Promise<void> {
+  private async prepare(
+    signal?: AbortSignal,
+    readiness = false,
+    allowWdaInitialization = false,
+  ): Promise<void> {
     signal?.throwIfAborted();
     if (!this.environment) await this.initialize();
     try {
       const safeAndroid = this.id === 'android';
-      const resolved = safeAndroid
-        ? await this.resolveReadiness(signal)
-        : await resolveAppiumSession(this.environment!, undefined, signal);
+      const safeIos = this.id === 'ios' && readiness;
+      const resolved = safeIos
+        ? await this.resolveIosReadiness(signal, undefined, allowWdaInitialization)
+        : safeAndroid
+          ? await this.resolveReadiness(signal)
+          : await resolveAppiumSession(this.environment!, undefined, signal);
       signal?.throwIfAborted();
       const definition = this.definition;
       await this.runtime.configureResolved({
@@ -181,8 +201,27 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     return resolveAndroidReadinessSession(this.environment!, signal);
   }
 
-  async executeReadiness(code: string, signal?: AbortSignal) {
-    if (this.id !== 'android') throw new Error('Only Android supports setup readiness.');
+  protected resolveIosReadiness(
+    signal?: AbortSignal,
+    currentTarget?: ResolvedNativeSession,
+    allowWdaInitialization = false,
+  ) {
+    return resolveIosReadinessSession(
+      this.environment!,
+      signal,
+      undefined,
+      currentTarget,
+      allowWdaInitialization,
+    );
+  }
+
+  async executeReadiness(
+    code: string,
+    signal?: AbortSignal,
+    readinessOptions: { allowWdaInitialization?: boolean } = {},
+  ) {
+    if (this.id !== 'android' && this.id !== 'ios')
+      throw new Error('Only Android and iOS support setup readiness.');
     signal?.throwIfAborted();
     if (!this.environment) await this.initialize();
     const options = this.environment!.capabilities['appium:options'];
@@ -196,9 +235,23 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         this.runtime.currentApp &&
         Object.keys(this.runtime.currentApp).length > 0)
     )
-      throw new Error('Android setup readiness requires a base Session without an App target.');
-    await this.prepareAndroidExecution(signal);
-    return this.executePrepared(code, signal);
+      throw new Error(
+        `${this.label} setup readiness requires a base Session without an App target.`,
+      );
+    if (this.id === 'android') await this.prepareAndroidExecution(signal);
+    else if (!this.runtime.isRunning)
+      await this.prepare(signal, true, readinessOptions.allowWdaInitialization);
+    else {
+      const generation = this.runtime.currentSessionGeneration;
+      const target = this.runtime.currentTarget;
+      if (!target || generation === undefined)
+        throw new Error(
+          'IOS_READINESS_UNSUPPORTED: the running Session has no provable device routing.',
+        );
+      await this.resolveIosReadiness(signal, target);
+      return this.executePrepared(code, signal, false, generation);
+    }
+    return this.executePrepared(code, signal, false);
   }
 
   private async prepareAndroidExecution(signal?: AbortSignal) {
@@ -233,12 +286,21 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     return this.executePrepared(code, signal);
   }
 
-  private async executePrepared(code: string, signal?: AbortSignal) {
+  private async executePrepared(
+    code: string,
+    signal?: AbortSignal,
+    allowAppFallback = true,
+    sessionGeneration?: number,
+  ) {
     let observations;
     try {
-      observations = await this.runtime.execute(code, signal);
+      observations =
+        sessionGeneration === undefined
+          ? await this.runtime.execute(code, signal)
+          : await this.runtime.executeExisting(code, sessionGeneration, signal);
     } catch (error) {
       if (
+        allowAppFallback &&
         this.id !== 'android' &&
         !this.runtime.isRunning &&
         !signal?.aborted &&

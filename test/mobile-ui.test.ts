@@ -56,6 +56,7 @@ function harness(enabled = true) {
   let language = 'Continue with the phone';
   let widget: Component | undefined;
   let messageRenderer: Parameters<ExtensionAPI['registerMessageRenderer']>[1] | undefined;
+  const renderers = new Map<string, NonNullable<typeof messageRenderer>>();
   const pi = {
     getFlag(name: string) {
       assert.equal(name, 'maat-mobile-ui');
@@ -66,8 +67,9 @@ function harness(enabled = true) {
       assert.equal(options.description, 'Compact Maat tool cards and concise status');
       assert.equal(options.default, false);
     },
-    registerMessageRenderer(_name: string, renderer: typeof messageRenderer) {
+    registerMessageRenderer(name: string, renderer: typeof messageRenderer) {
       messageRenderer = renderer;
+      renderers.set(name, renderer!);
     },
     on(name: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) {
       handlers.set(name, handler);
@@ -118,6 +120,7 @@ function harness(enabled = true) {
     get renderer() {
       return messageRenderer!;
     },
+    renderers,
     dispose: () => maat.close(),
   };
 }
@@ -159,6 +162,94 @@ test('compact UI remains opt-in and never decorates execution or model content',
     undefined,
   );
   await h.dispose();
+});
+
+test('iOS compact status distinguishes device actions, cold uncertainty and WDA security without readiness claims', async () => {
+  const h = harness();
+  await h.maat.platforms.select('ios');
+  h.language('请继续');
+  h.emit('session_start');
+  try {
+    for (const [messageKey, id, expected] of [
+      ['capability.iosDevice.missing', 'iosDevice', '请连接 iPhone'],
+      ['capability.iosDevice.select', 'iosDevice', '请选择 iPhone'],
+      ['capability.iosDevice.trust', 'iosDevice', '请在 iPhone 信任此电脑'],
+      ['capability.iosDeveloperMode.required', 'iosDeveloperMode', '请本人开启开发者模式'],
+    ] as const) {
+      h.decorate.prepared(
+        aggregateSetup({
+          platform: 'ios',
+          capabilities: [{ id, messageKey, required: true, status: 'action-required' }],
+        }),
+        h.ctx,
+      );
+      h.start('exe_js');
+      assert.equal(h.widget, `iOS · ${expected}`);
+      h.end('exe_js');
+    }
+    const readyIos = aggregateSetup({
+      platform: 'ios',
+      capabilities: [
+        {
+          id: 'iosDevice',
+          required: true,
+          status: 'ready',
+          messageKey: 'capability.iosDevice.ready',
+        },
+      ],
+    });
+    h.decorate.prepared(readyIos, h.ctx);
+    assert.equal(h.widget, 'iOS · 待连接');
+    for (const [code, expected] of [
+      ['IOS_DEVICE_LOCKED', '请解锁手机'],
+      ['IOS_DEVICE_LOCK_STATE_UNKNOWN', '冷连接待明确授权'],
+      ['IOS_WDA_SECURITY_REJECTED', '请检查 WDA 信任或签名'],
+    ] as const) {
+      h.end('check_device_ready', textResult(`${code}: blocked`), true);
+      h.end('get_setup_diagnostics', textResult('', readyIos));
+      h.start('exe_js');
+      assert.equal(h.widget, `iOS · ${expected}`);
+      h.end('exe_js');
+      h.end('check_device_ready', textResult('', { ready: true, platform: 'ios' }));
+      assert.equal(h.widget, 'iOS · 就绪');
+    }
+    const envelope = textResult(
+      'MAAT_EXECUTION_FAILED\nsummary: Error: IOS_DEVICE_LOCK_STATE_UNKNOWN: blocked\nactionState: uncertain',
+    );
+    const error = render(h.makeTool('exe_js'), envelope, { ...renderContext(), isError: true });
+    assert.match(error, /明确授权本次 WDA/);
+    assert.match(error, /勿重放/);
+    h.end('exe_js', envelope, true);
+    assert.equal(h.widget, 'iOS · 冷连接待明确授权');
+    h.end('release_device_session', textResult('', { released: true, platform: 'ios' }));
+    assert.equal(h.widget, 'iOS · 待连接');
+    for (const name of ['maat-android-setup', 'maat-ios-setup']) {
+      assert.ok(h.renderers.has(name));
+      const message = {
+        role: 'custom' as const,
+        customType: name,
+        content: 'full iOS model facts',
+        display: true,
+        details: { summary: ['Preparation passed · channel unconfirmed'] },
+        timestamp: 0,
+      };
+      assert.match(
+        h.renderers.get(name)!(message, { expanded: false, outputPad: 0 }, theme)!
+          .render(180)
+          .join('\n'),
+        /channel unconfirmed/,
+      );
+      assert.match(
+        h.renderers.get(name)!(message, { expanded: true, outputPad: 0 }, theme)!
+          .render(180)
+          .join('\n'),
+        /full iOS model facts/,
+      );
+    }
+    assert.equal(h.maat.platforms.status().session, 'idle');
+  } finally {
+    await h.dispose();
+  }
 });
 
 test('all Maat tools retain compact meaningful summaries, full expansion and neutral success', async () => {

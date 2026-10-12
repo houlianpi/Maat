@@ -20,7 +20,7 @@ Platform discovery, connection and preparation tools also use compact cards,
 including before Android is selected. Platform lists show platform names rather
 than runtime JSON; device/application lists show counts and a few names, including
 explicit empty results. Preparation checks retain blockers and the actual next step.
-`/maat-setup` Android messages use Pi's public message renderer: compact user summary,
+`/maat-setup` Android and iOS messages use Pi's public message renderer: compact user summary,
 full instructions/facts still in model context and expanded view.
 
 Call headers identify the tool and show its phase only while pending/executing.
@@ -57,6 +57,70 @@ There is no reliable public business-completion/authorization signal here: reque
 for user intervention remain in the conversation, except explicit host error codes
 such as `ANDROID_DEVICE_LOCKED`. No task/action inference or automatic recovery is added.
 
+iPhone status also distinguishes connection, device selection, computer trust,
+Developer Mode, `IOS_DEVICE_LOCKED`, unknown cold state
+(`IOS_DEVICE_LOCK_STATE_UNKNOWN`) and WDA trust/signing rejection
+(`IOS_WDA_SECURITY_REJECTED`). Preparation never clears an unresolved channel risk.
+
+## iOS setup and Mobile Use
+
+Android and iOS share the natural-task or `/maat-setup [android|ios]` entry.
+`prepare_mobile` supplies concrete tracked local work: `status` is read-only,
+`start-appium` reuses healthy user Appium or starts one owned foreground child,
+and `build-ios-wda` reuses valid builds or performs explicitly authorized signing
+preparation through Core. Poll the returned taskId with `status`; `waitSeconds`
+is 0–20 and never replays work. States/errors/categories are model-visible.
+Startup has a 60-second overall deadline; WDA work 180 seconds. Appium `ready`
+means only serviceResponding, not deviceReady or business success.
+No shell/untracked daemon, endpoint fallback, port-process killing or second terminal.
+Extension/TUI shutdown closes Sessions before bounded owned-child cleanup;
+user services remain untouched. Raw stderr, PID and private signing/build hints
+never enter content. Embedders using `createMaatPiTools` can pass their owned
+`MobilePreparation` and must call `closeMobileRuntime` for the same lifecycle.
+Reuse requires the Appium ready message and supported build version, not arbitrary
+WebDriver `ready:true`. Owned listener logs must match the selected host/port.
+POSIX uses an owned process group with retained child handle/stdio, not an
+unreferenced daemon: TERM/KILL still targets the group after root exit. Windows
+cleanup that cannot prove the owned tree stopped is a visible cleanup error.
+Cancellation retains the actual build/start promise and waits an independent
+three-second cleanup grace; late errors/unsettled work preserve the primary failure.
+
+For WDA, actual profile and independent certificate dates determine reuse for
+paid/free signing alike. No assumed seven days or Team change. Valid reuse needs
+no signing authorization; missing/expired builds require explicit scope. The task
+builds only and applies internal capabilities after adapter/device identity checks.
+Later XCTest deployment/initialization needs authorized scope. No new planner:
+the original conversation continues, combining only necessary first-control/
+signing/possible-wake explanation, without exposing internal flags to users.
+
+`/maat-setup ios` selects iOS; subsequent `retry_setup_step` and
+`get_setup_diagnostics` remain iOS. Doctor is read-only and checks preparation,
+not signing or control success. Reuse local user-managed Appium and WDA verified
+against the selected physical iPhone, never a simulator just because 8100 responds.
+Use the iOS Skill section, not project source, SDK tools or Android gesture/input/Back APIs.
+
+`check_device_ready` accepts `screenshot?` and `allowWdaInitialization?`.
+The latter is iOS-only and transient, default unset: only explicit user authorization
+after explaining WDA initialization's possible screen wake/system prompts permits
+true for that attempt. CoreDevice first-unlock facts are not current-unlock proof;
+unknown cold state blocks by default. Live unlocked WDA and real UI are still
+required within the 180-second budget. Signing/redeployment needs separate
+authorization; Apple credentials must not be requested.
+
+Security rejection can mean signing, entitlements or profile trust. Check developer
+App trust once; if absent or already trusted inspect signing/profile expiry, not
+blind retry/reinstall. The local physical-device doctor passed; authorized signing
+renewal/deployment and XCTest `test-without-building` initialization returned actual
+iPhone UI and the system Calculator result `3×3×8 = 72`. Direct preinstalled launch
+remained rejected. This scripted device check is not autonomous Pi/LLM first use;
+simulator images do not count as physical-iPhone results.
+Tracked Appium startup now has controlled child/HTTP tests; autonomous real-phone
+first-use acceptance is still separate and is not proved by those tests.
+
+`release_device_session` supports Android and iPhone. Keep the Session while waiting
+for a user action if more phone work remains. Release only when this conversation
+no longer needs phone interaction, not at model-turn end; preserve external services.
+
 ## Android setup and Mobile Use
 
 Use a base Android Session and launch Apps separately through `exe_js`, rather
@@ -83,8 +147,8 @@ the user can continue with a later message.
 `check_platform_setup` and `get_setup_diagnostics` diagnose preparation; `check_device_ready`
 checks the actual phone channel and returns observations.
 
-The host Agent handles authorized installation, configuration and startup with
-its existing tools. Maat does not start or stop external services. Shell and file
+The host Agent handles authorized missing dependencies with its existing tools;
+`prepare_mobile` owns only its own Appium startup/build work, never user services. Shell and file
 tools remain available under host permissions; there is no Maat work mode.
 
 The old Case/recording/report tools were removed. `exe_js` accepts only `code`

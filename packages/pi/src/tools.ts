@@ -4,10 +4,15 @@ import { createPlatformTools } from './tools/platform-tools.ts';
 import { createSetupTools } from './tools/setup-tools.ts';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { setupAgentContext, setupPanel } from './setup-ui.ts';
-import { resolveSetupLocale } from './setup-i18n.ts';
+import { phoneReadinessGuidance, resolveSetupLocale } from './setup-i18n.ts';
+import { MobilePreparation } from './mobile-preparation.ts';
+import { createMobilePreparationTool } from './tools/mobile-preparation-tool.ts';
 
 /** Pi-specific projection of the host-neutral Maat API. */
-export function createMaatPiTools(maat: MaatApi): ToolDefinition<any, any, any>[] {
+export function createMaatPiTools(
+  maat: MaatApi,
+  preparation?: MobilePreparation,
+): ToolDefinition<any, any, any>[] {
   return [
     createExecJsTool(
       {
@@ -21,22 +26,27 @@ export function createMaatPiTools(maat: MaatApi): ToolDefinition<any, any, any>[
       },
       async (error, ctx, signal) => {
         const platform = maat.platforms.current().id;
-        if (platform !== 'macos' && platform !== 'android') return;
-        const message = String(error);
+        if (platform !== 'macos' && platform !== 'android' && platform !== 'ios') return;
+        const message = error instanceof Error ? error.message : String(error);
+        const locale = resolveSetupLocale(undefined, ctx);
+        if (platform === 'ios' || platform === 'android') {
+          const guidance = phoneReadinessGuidance(message, locale);
+          if (guidance) return guidance;
+        }
         const isScreenshot = message.includes('MACOS_SCREEN_CAPTURE_PERMISSION_REQUIRED');
         const isSetupFailure =
           isScreenshot ||
-          /ECONNREFUSED|connection refused|No Appium server responded|Appium.*(?:unavailable|not reachable)|Mac2.*(?:missing|not installed)|Could not find.*driver/i.test(
+          /ECONNREFUSED|connection refused|No Appium server responded|Appium.*(?:unavailable|not reachable)|Mac2.*(?:missing|not installed)|Could not find.*driver|XCUITEST_DRIVER_MISSING|XCODE_REQUIRED|IOS_DEVICE_(?:MISSING|OFFLINE|UNPAIRED|SELECTION_REQUIRED)|IOS_SETUP_/i.test(
             message,
           );
         if (!isSetupFailure) return;
-        if (platform === 'android') {
+        if (platform === 'android' || platform === 'ios') {
           const snapshot = await maat.setup.check({ platform, signal });
-          const locale = resolveSetupLocale(undefined, ctx);
+          const label = platform === 'ios' ? 'iOS' : 'Android';
           return [
             locale === 'zh-CN'
-              ? 'Android 连接准备尚未完成。按 maat-setup Skill 使用已授权的宿主工具处理，不要重放之前的手机动作。'
-              : 'Android preparation is incomplete. Follow the maat-setup Skill using authorized host tools; do not replay previous phone actions.',
+              ? `${label} 连接准备尚未完成。按 maat-setup Skill 的 ${platform} 流程使用已授权的宿主工具处理，不读项目源码修复环境，不要重放之前的手机动作。`
+              : `${label} preparation is incomplete. Follow the ${platform} workflow in the maat-setup Skill using authorized host tools, not project source inspection; do not replay previous phone actions.`,
             ...setupPanel(snapshot, locale),
             setupAgentContext(snapshot, locale),
             `Execution error: ${message}`,
@@ -47,7 +57,6 @@ export function createMaatPiTools(maat: MaatApi): ToolDefinition<any, any, any>[
           pendingAction: isScreenshot ? 'screenshot' : 'session',
         });
         const snapshot = await maat.setup.check({ platform: 'macos', signal });
-        const locale = resolveSetupLocale(undefined, ctx);
         const explanation =
           locale === 'zh-CN'
             ? isScreenshot
@@ -61,5 +70,6 @@ export function createMaatPiTools(maat: MaatApi): ToolDefinition<any, any, any>[
     ),
     ...createPlatformTools(maat),
     ...createSetupTools(maat),
+    ...(preparation ? [createMobilePreparationTool(preparation)] : []),
   ];
 }

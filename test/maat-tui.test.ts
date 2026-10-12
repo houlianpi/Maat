@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFile } from 'node:fs/promises';
 
 import { maatStatusLines } from '../packages/pi/src/status.ts';
 import {
@@ -45,7 +46,26 @@ test('Maat status lines show the selected platform and observation boundary', ()
     session: 'idle',
     detail: 'chrome · headless',
   });
+
   assert.match(lines[0]!, /Platform Web · chrome · headless · idle/);
   assert.match(lines[1]!, /observations are not business validation/);
   assert.doesNotMatch(lines.join('\n'), /Case|Evidence/);
+});
+
+test('standalone creates preparation tools per replacement runtime and cleans the captured owner', async () => {
+  const source = await readFile(
+    new URL('../packages/maat/src/hosts/tui/main.ts', import.meta.url),
+    'utf8',
+  );
+  const factory = source.slice(source.indexOf('const createRuntime:'));
+  assert.match(factory, /const preparation = new MobilePreparation\(maat\)/);
+  assert.match(factory, /const customTools = createMaatPiTools\(maat, preparation\)/);
+  const shutdown = factory.slice(
+    factory.indexOf("pi.on('session_shutdown'"),
+    factory.indexOf('const runtime ='),
+  );
+  assert.match(shutdown, /closeMobileRuntime\(maat, preparation\)/);
+  assert.doesNotMatch(shutdown, /activePreparation/);
+  const finalCleanup = source.slice(source.indexOf('await tui.run()'));
+  assert.match(finalCleanup, /closeMobileRuntime\(maat, activePreparation\)/);
 });

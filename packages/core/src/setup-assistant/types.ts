@@ -22,6 +22,10 @@ export type SetupCapabilityId =
   | 'adbServer'
   | 'uiautomator2Driver'
   | 'androidDevice'
+  | 'xcode'
+  | 'xcuitestDriver'
+  | 'iosDevice'
+  | 'iosDeveloperMode'
   | 'appiumServer'
   | 'mac2Driver'
   | 'automationMode'
@@ -33,6 +37,16 @@ export type SetupCapabilityId =
 
 export type SetupErrorCode =
   | 'ANDROID_SETUP_CHECK_FAILED'
+  | 'IOS_SETUP_CHECK_FAILED'
+  | 'IOS_SETUP_REMOTE_UNSUPPORTED'
+  | 'IOS_HOST_UNSUPPORTED'
+  | 'XCODE_REQUIRED'
+  | 'XCUITEST_DRIVER_MISSING'
+  | 'IOS_DEVICE_MISSING'
+  | 'IOS_DEVICE_OFFLINE'
+  | 'IOS_DEVICE_UNPAIRED'
+  | 'IOS_DEVICE_SELECTION_REQUIRED'
+  | 'IOS_DEVELOPER_MODE_REQUIRED'
   | 'ADB_MISSING'
   | 'ADB_SERVER_NOT_RUNNING'
   | 'APPIUM_CLI_MISSING'
@@ -85,6 +99,21 @@ export type SetupMessageKey =
   | 'capability.androidDevice.offline'
   | 'capability.androidDevice.select'
   | 'capability.androidDevice.unknown'
+  | 'capability.xcode.ready'
+  | 'capability.xcode.required'
+  | 'capability.xcode.unknown'
+  | 'capability.xcuitest.ready'
+  | 'capability.xcuitest.install'
+  | 'capability.xcuitest.unknown'
+  | 'capability.iosDevice.ready'
+  | 'capability.iosDevice.missing'
+  | 'capability.iosDevice.offline'
+  | 'capability.iosDevice.trust'
+  | 'capability.iosDevice.select'
+  | 'capability.iosDevice.unknown'
+  | 'capability.iosDeveloperMode.ready'
+  | 'capability.iosDeveloperMode.required'
+  | 'capability.iosDeveloperMode.unknown'
   | 'capability.mac2.ready'
   | 'capability.mac2.install'
   | 'capability.automation.ready'
@@ -112,6 +141,12 @@ export type SetupMessageKey =
   | 'action.connectAndroidDevice'
   | 'action.authorizeAndroidDevice'
   | 'action.selectAndroidDevice'
+  | 'action.configureXcode'
+  | 'action.installXcuitest'
+  | 'action.connectIosDevice'
+  | 'action.trustIosDevice'
+  | 'action.selectIosDevice'
+  | 'action.enableIosDeveloperMode'
   | 'action.installMac2'
   | 'action.automationMode'
   | 'action.openAccessibility'
@@ -131,6 +166,12 @@ export type SetupAction = {
     | 'connect-android-device'
     | 'authorize-android-device'
     | 'select-android-device'
+    | 'configure-xcode'
+    | 'install-xcuitest'
+    | 'connect-ios-device'
+    | 'trust-ios-device'
+    | 'select-ios-device'
+    | 'enable-ios-developer-mode'
     | 'open-screen-recording'
     | 'open-accessibility'
     | 'open-full-disk-access'
@@ -207,8 +248,10 @@ export type AndroidSetupCheckInput = {
   signal?: AbortSignal;
 };
 
+export type IosSetupCheckInput = Pick<AndroidSetupCheckInput, 'serverUrl' | 'device' | 'signal'>;
+
 export type SetupReadiness = {
-  platform: 'android';
+  platform: 'android' | 'ios';
   ready: true;
   proof: {
     /** driver.isLocked() returned false before and after this observation, not a lasting guarantee. */

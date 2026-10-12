@@ -93,7 +93,7 @@ export function preparationSummary(snapshot: SetupSnapshot, locale: SetupLocale)
       snapshot.recommendedAction
         ? setupMessage(locale, snapshot.recommendedAction.labelKey)
         : snapshot.canContinue
-          ? snapshot.platform === 'android'
+          ? snapshot.platform === 'android' || snapshot.platform === 'ios'
             ? 'check_device_ready'
             : 'exe_js'
           : zh
@@ -127,9 +127,9 @@ export function failureFacts(result: unknown): FailureFacts {
   };
   const code =
     field('code') ??
-    (text.startsWith('ANDROID_DEVICE_LOCKED:') || text.startsWith('ANDROID_DEVICE_LOCKED：')
-      ? 'ANDROID_DEVICE_LOCKED'
-      : undefined);
+    /\b(?:ANDROID_DEVICE_LOCKED|IOS_DEVICE_LOCKED|IOS_DEVICE_LOCK_STATE_UNKNOWN|IOS_WDA_SECURITY_REJECTED)\b/.exec(
+      envelope ? (field('summary') ?? '') : (text.split('\n')[0] ?? ''),
+    )?.[0];
   return {
     reason:
       field('summary') ??
@@ -156,16 +156,28 @@ export function failureSummary(result: unknown, locale: SetupLocale): string[] {
       ? zh
         ? '未执行 UI 动作'
         : 'No UI action ran'
-      : zh
-        ? '执行不确定 · 先只读观察，勿重放'
-        : 'Execution uncertain · observe read-only; do not replay',
-    facts.code === 'ANDROID_DEVICE_LOCKED'
+      : facts.code === 'IOS_DEVICE_LOCK_STATE_UNKNOWN'
+        ? zh
+          ? '执行不确定 · 勿重放；冷连接仍被阻止'
+          : 'Execution uncertain · do not replay; cold connection remains blocked'
+        : zh
+          ? '执行不确定 · 先只读观察，勿重放'
+          : 'Execution uncertain · observe read-only; do not replay',
+    facts.code === 'ANDROID_DEVICE_LOCKED' || facts.code === 'IOS_DEVICE_LOCKED'
       ? zh
         ? '下一步：请本人点亮并解锁，再重新检查'
         : 'Next: wake and unlock the phone yourself, then recheck'
-      : zh
-        ? '下一步：检查连接并只读观察，不自动重试动作'
-        : 'Next: check the connection and observe read-only; no automatic action retry',
+      : facts.code === 'IOS_DEVICE_LOCK_STATE_UNKNOWN'
+        ? zh
+          ? '下一步：本人确认手机状态，明确授权本次 WDA 初始化；不自动绕过冷保护'
+          : 'Next: confirm phone state and explicitly authorize this WDA initialization; no automatic cold-guard bypass'
+        : facts.code === 'IOS_WDA_SECURITY_REJECTED'
+          ? zh
+            ? '下一步：检查开发者 App 信任；已信任或无入口则核查签名/有效期，勿循环重试'
+            : 'Next: check developer App trust; if trusted or absent, inspect signing/profile expiry; no retry loop'
+          : zh
+            ? '下一步：检查连接并只读观察，不自动重试动作'
+            : 'Next: check the connection and observe read-only; no automatic action retry',
   ];
 }
 

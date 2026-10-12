@@ -18,6 +18,8 @@ import {
   createMaatExtension,
   createMaatPiTools,
   createMaatSetupExtension,
+  MobilePreparation,
+  closeMobileRuntime,
 } from '@houlianpi/maat-pi';
 
 import { createMaatResourceOptions, createMaatSettings } from './runtime-config.ts';
@@ -30,7 +32,7 @@ await mkdir(sessionDir, { recursive: true });
 process.env.PI_SKIP_VERSION_CHECK = '1';
 
 const maat = createMaat({ workspaceRoot: cwd });
-const customTools = createMaatPiTools(maat);
+let activePreparation: MobilePreparation | undefined;
 const piSettings = SettingsManager.create(cwd, getAgentDir()).getGlobalSettings();
 const maatSettings = SettingsManager.create(cwd, maatDir, {
   projectTrusted: false,
@@ -65,6 +67,11 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
   sessionManager,
   sessionStartEvent,
 }) => {
+  // Pi replaces this runtime on /new, /resume and /fork. Each owns new tasks;
+  // never hand a replacement conversation the previous closed task owner.
+  const preparation = new MobilePreparation(maat);
+  activePreparation = preparation;
+  const customTools = createMaatPiTools(maat, preparation);
   const services = await createAgentSessionServices({
     cwd: runtimeCwd,
     agentDir: maatDir,
@@ -78,7 +85,7 @@ const createRuntime: CreateAgentSessionRuntimeFactory = async ({
         hidden: true,
         factory: (pi) => {
           pi.on('session_shutdown', async () => {
-            await maat.close();
+            await closeMobileRuntime(maat, preparation);
           });
         },
       },
@@ -120,7 +127,7 @@ try {
   await tui.run();
 } finally {
   try {
-    await maat.close();
+    if (activePreparation) await closeMobileRuntime(maat, activePreparation);
   } finally {
     await runtime.dispose();
   }

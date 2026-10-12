@@ -10,7 +10,7 @@ import type {
 import { sameFingerprint } from '../setup-assistant/storage.ts';
 import type { NativeAppTarget, NativeEnvironment } from '../platforms/appium/schema.ts';
 import { isRecord, parseObservations } from '../core/exploration/protocol.ts';
-import { androidLockGuardCode } from '../platforms/appium/runtime/session.ts';
+import { androidLockGuardCode, iosLockGuardCode } from '../platforms/appium/runtime/session.ts';
 
 function readinessErrorSummary(error: unknown, depth = 0): string {
   if (error instanceof AggregateError && depth < 3) {
@@ -29,8 +29,25 @@ function readinessErrorSummary(error: unknown, depth = 0): string {
       /\b(password|secret|token|authorization|api[-_]?key|udid|serial)\s*[:=]\s*\S+/gi,
       '$1=[redacted]',
     )
+    .replace(
+      /\b(?:[A-Fa-f0-9]{8}-[A-Fa-f0-9]{16}|[A-Fa-f0-9]{8}(?:-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}|[A-Fa-f0-9]{40})\b/g,
+      '[device-id]',
+    )
     .split('\n')[0]!
     .slice(0, 1_000);
+}
+
+function iosWdaSecurityRejection(error: unknown, depth = 0): boolean {
+  if (depth > 3) return false;
+  if (error instanceof AggregateError)
+    return error.errors.slice(0, 3).some((failure) => iosWdaSecurityRejection(failure, depth + 1));
+  return (
+    error instanceof Error &&
+    (/invalid code signature|inadequate entitlements|profile has not been explicitly trusted/i.test(
+      error.message,
+    ) ||
+      iosWdaSecurityRejection(error.cause, depth + 1))
+  );
 }
 
 /** Stable, host-neutral product API. Agent hosts translate this API into their own tools and UI. */
@@ -94,16 +111,17 @@ export class MaatApi {
       const adapter = this.registry.get(platform) as
         | { sessionHints?: Readonly<NativeEnvironment>; initialize(): Promise<void> }
         | undefined;
-      if (platform === 'android') {
+      if (platform === 'android' || platform === 'ios') {
         input.signal?.throwIfAborted();
         await adapter?.initialize();
         input.signal?.throwIfAborted();
       }
-      const hints = platform === 'android' ? adapter?.sessionHints : undefined;
+      const hints =
+        platform === 'android' || platform === 'ios' ? adapter?.sessionHints : undefined;
       const snapshot = await this.setupAssistant.check({
         ...input,
         platform,
-        ...(platform === 'android'
+        ...(platform === 'android' || platform === 'ios'
           ? {
               serverUrl: input.serverUrl ?? hints?.serverUrl,
               device: input.device ?? hints?.device,
@@ -127,26 +145,36 @@ export class MaatApi {
       return snapshot;
     },
     ready: async (
-      input: { screenshot?: boolean; signal?: AbortSignal } = {},
+      input: { screenshot?: boolean; signal?: AbortSignal; allowWdaInitialization?: boolean } = {},
     ): Promise<SetupReadiness> => {
       const adapter = this.registry.current;
-      if (adapter.id !== 'android')
+      if (adapter.id !== 'android' && adapter.id !== 'ios')
         throw new Error(
-          `Setup readiness is unsupported for ${adapter.id}; only Android is supported.`,
+          `Setup readiness is unsupported for ${adapter.id}; only Android and iOS are supported.`,
         );
       if (input.screenshot !== undefined && typeof input.screenshot !== 'boolean')
         throw new Error('Setup readiness screenshot must be a boolean.');
+      if (
+        input.allowWdaInitialization !== undefined &&
+        typeof input.allowWdaInitialization !== 'boolean'
+      )
+        throw new Error('WDA initialization authorization must be a boolean.');
+      if (input.allowWdaInitialization && adapter.id !== 'ios')
+        throw new Error(
+          'WDA initialization authorization applies only to iOS; Android unlock protection is unchanged.',
+        );
       const signal = AbortSignal.any([
         ...(input.signal ? [input.signal] : []),
-        AbortSignal.timeout(15_000),
+        AbortSignal.timeout(adapter.id === 'ios' ? 180_000 : 15_000),
       ]);
       input.signal?.throwIfAborted();
-      const snapshot = await this.setup.check({ platform: 'android', signal });
+      const label = adapter.label;
+      const snapshot = await this.setup.check({ platform: adapter.id, signal });
       signal.throwIfAborted();
       if (!snapshot.canContinue)
-        throw new Error('Android setup readiness is blocked by doctor preparation checks.');
+        throw new Error(`${label} setup readiness is blocked by doctor preparation checks.`);
       if (this.registry.current !== adapter)
-        throw new Error('The selected platform changed during Android setup readiness.');
+        throw new Error(`The selected platform changed during ${label} setup readiness.`);
       // App-target Sessions can trigger the Adapter's existing automatic App fallback.
       // Do not enter that recovery path from a readiness observation.
       const native = adapter as {
@@ -161,7 +189,7 @@ export class MaatApi {
           Object.keys(native.runtime.currentApp).length > 0)
       )
         throw new Error(
-          'Android setup readiness requires a base Session without a legacy App target. Call configureSession({clearAppTarget:true}), then retry ready; or use explicit exploration for that App.',
+          `${label} setup readiness requires a base Session without a legacy App target. Call configureSession({clearAppTarget:true}), then retry ready; or use explicit exploration for that App.`,
         );
       const hints = native.sessionHints;
       if (
@@ -170,39 +198,49 @@ export class MaatApi {
         hints?.capabilities['appium:deviceName']
       )
         throw new Error(
-          'Android setup readiness requires a stable device selector for local deviceName routing.',
+          `${label} setup readiness requires a stable device selector for local deviceName routing.`,
         );
       if (!adapter.executeReadiness)
         throw new Error(
-          'ANDROID_READINESS_UNLOCK_UNSAFE: this adapter cannot observe readiness without automatic unlock.',
+          `${adapter.id === 'ios' ? 'IOS' : 'ANDROID'}_READINESS_UNLOCK_UNSAFE: this adapter cannot observe readiness without automatic unlock.`,
         );
+      const lockGuard = adapter.id === 'ios' ? iosLockGuardCode : androidLockGuardCode;
       const code = [
-        androidLockGuardCode,
+        lockGuard,
         'const source = await driver.getPageSource();',
-        'if (typeof source !== "string" || !source.trim()) throw new Error("Android readiness: page source is empty.");',
+        `if (typeof source !== "string" || !source.trim()) throw new Error("${label} readiness: page source is empty.");`,
         'const viewport = await driver.getWindowSize();',
-        'if (!viewport || !Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) || viewport.width <= 0 || viewport.height <= 0) throw new Error("Android readiness: viewport is invalid.");',
+        `if (!viewport || !Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) || viewport.width <= 0 || viewport.height <= 0) throw new Error("${label} readiness: viewport is invalid.");`,
         ...(input.screenshot ? ['await evidence.screenshot();'] : []),
         // Catch a lock/screen-off transition while source/image were being read, without retry.
-        androidLockGuardCode,
+        lockGuard,
         'console.log(JSON.stringify({maatSetupReadiness: 1, phoneUnlocked: true, sessionUsable: true, sourceReadable: true, viewportReadable: true, source, viewport: {width: viewport.width, height: viewport.height}}));',
       ].join('\n');
       let observations;
       try {
-        observations = parseObservations(await adapter.executeReadiness(code, signal));
+        observations = parseObservations(
+          await adapter.executeReadiness(code, signal, {
+            allowWdaInitialization: input.allowWdaInitialization,
+          }),
+        );
         signal.throwIfAborted();
       } catch (error) {
         // Preserve the execution error (including any cleanup failure) on cancellation.
         if (input.signal?.aborted)
-          throw new Error(`Android setup readiness cancelled: ${readinessErrorSummary(error)}`, {
+          throw new Error(`${label} setup readiness cancelled: ${readinessErrorSummary(error)}`, {
             cause: error,
           });
         if (signal.aborted)
-          throw new Error(`Android setup readiness timed out: ${readinessErrorSummary(error)}`, {
+          throw new Error(`${label} setup readiness timed out: ${readinessErrorSummary(error)}`, {
             cause: error,
           });
+        if (adapter.id === 'ios' && iosWdaSecurityRejection(error))
+          throw new Error(
+            `IOS_WDA_SECURITY_REJECTED: iOS refused WDA because its signature, entitlements or developer-profile trust are not accepted. Ask the user to check developer App trust; if already trusted, inspect signing. Do not blindly retry, reinstall or change signing. Original failure: ${readinessErrorSummary(error)}`,
+            { cause: error },
+          );
         throw new Error(
-          `Android setup readiness observation failed: ${readinessErrorSummary(error)}`,
+          `${label} setup readiness observation failed: ${readinessErrorSummary(error)}`,
           { cause: error },
         );
       }
@@ -241,13 +279,13 @@ export class MaatApi {
       });
       if (!proof)
         throw new Error(
-          'Android setup readiness did not return phoneUnlocked:true, nonempty source and valid viewport observation.',
+          `${label} setup readiness did not return phoneUnlocked:true, nonempty source and valid viewport observation.`,
         );
       const screenshotReadable = observations.some((observation) => observation.type === 'image');
       if (input.screenshot && !screenshotReadable)
-        throw new Error('Android setup readiness did not return a screenshot observation.');
+        throw new Error(`${label} setup readiness did not return a screenshot observation.`);
       return {
-        platform: 'android',
+        platform: adapter.id,
         ready: true,
         proof: {
           phoneUnlocked: true,

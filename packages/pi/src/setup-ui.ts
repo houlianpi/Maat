@@ -89,6 +89,7 @@ export function setupAgentContext(snapshot: SetupSnapshot, locale: SetupLocale =
     'start-appium': `node ${quoted} appium`,
     'install-appium': 'npm install --global appium@3.7.0',
     'install-uiautomator2': 'appium driver install uiautomator2@8.7.0',
+    'install-xcuitest': 'appium driver install xcuitest@12.13.2',
   };
   const facts = snapshot.technicalDetails ?? {};
   const inheritedWarnings = Array.isArray(facts.androidToolsWarnings)
@@ -111,7 +112,12 @@ export function setupAgentContext(snapshot: SetupSnapshot, locale: SetupLocale =
   const command = action
     ? snapshot.platform === 'android'
       ? commands[action.id]
-      : action.command
+      : snapshot.platform === 'ios'
+        ? (action.command ??
+          (action.id === 'install-appium' || action.id === 'install-xcuitest'
+            ? commands[action.id]
+            : undefined))
+        : action.command
     : undefined;
   return `Maat setup facts:\n${JSON.stringify({
     platform: snapshot.platform,
@@ -133,6 +139,20 @@ export function setupAgentContext(snapshot: SetupSnapshot, locale: SetupLocale =
           setupSkill: MAAT_SETUP_SKILL_PATH,
         }
       : {}),
+    ...(snapshot.platform === 'ios'
+      ? {
+          appiumCli: facts.appiumCli,
+          xcodeVersion: facts.xcodeVersion,
+          wda: facts.wda,
+          setupSkill: MAAT_SETUP_SKILL_PATH,
+          preparationGuidance:
+            'Use the iOS section of the setup Skill, not project source or Android SDK tools. Reuse Xcode, XCUITest, existing Appium and WDA verified against the selected physical iPhone; an open WDA port or simulator is not device proof. Do not ask for Apple credentials or silently change signing, Developer Mode, trust or device selection. WDA signing/deployment is not verified by doctor.',
+          coldReadiness:
+            'IOS_DEVICE_LOCK_STATE_UNKNOWN blocks cold Session initialization by default. CoreDevice passcodeRequired:false and unlockedSinceBoot:true do not prove current unlock/screen state. Only explicit user authorization for this attempt after explaining WDA effects permits check_device_ready({allowWdaInitialization:true}); it is transient, not unlock proof or signing authorization. Live WDA unlock and real UI observations are still required. IOS_WDA_SECURITY_REJECTED may involve signing, entitlements or profile trust; if developer App trust is absent or already granted, inspect signing/profile expiry, not a retry loop.',
+          serviceStartup:
+            'Use the host-supported tracked background mechanism for the selected endpoint. Preserve existing services. If unavailable, report the host limitation; do not count manual terminal startup as autonomous setup success.',
+        }
+      : {}),
     nextStep: action
       ? {
           id: action.id,
@@ -141,12 +161,15 @@ export function setupAgentContext(snapshot: SetupSnapshot, locale: SetupLocale =
         }
       : snapshot.canContinue
         ? {
-            tool: snapshot.platform === 'android' ? 'check_device_ready' : 'exe_js',
+            tool:
+              snapshot.platform === 'android' || snapshot.platform === 'ios'
+                ? 'check_device_ready'
+                : 'exe_js',
             instruction: 'Read the current UI before continuing.',
           }
         : {
             instruction:
-              'Use the setup Skill to diagnose the failed check; do not ask the user to locate SDK paths or inspect project source.',
+              'Use the platform section of the setup Skill to diagnose the failed check; do not inspect project source or ask the user to locate tool paths.',
           },
     ...(snapshot.platform === 'android'
       ? {
@@ -160,7 +183,7 @@ export function setupAgentContext(snapshot: SetupSnapshot, locale: SetupLocale =
 }
 
 export function setupPanel(snapshot: SetupSnapshot, locale: SetupLocale = 'en'): string[] {
-  if (snapshot.platform === 'android') {
+  if (snapshot.platform === 'android' || snapshot.platform === 'ios') {
     const chinese = locale === 'zh-CN';
     const summary =
       snapshot.state === 'checking'
@@ -188,9 +211,10 @@ export function setupPanel(snapshot: SetupSnapshot, locale: SetupLocale = 'en'):
           ? '检查环境，确认具体缺项'
           : 'Check the environment for the specific missing condition';
     return [
-      'Maat · Android',
+      `Maat · ${snapshot.platform === 'ios' ? 'iOS' : 'Android'}`,
       summary,
-      ...(Array.isArray(snapshot.technicalDetails?.androidToolsWarnings) &&
+      ...(snapshot.platform === 'android' &&
+      Array.isArray(snapshot.technicalDetails?.androidToolsWarnings) &&
       snapshot.technicalDetails.androidToolsWarnings.length > 0
         ? [
             chinese
@@ -262,6 +286,10 @@ const capabilityLabels: Record<SetupLocale, Record<SetupCapabilityId, string>> =
     androidSdk: 'Android tools',
     uiautomator2Driver: 'Android automation driver',
     androidDevice: 'Android phone',
+    xcode: 'Xcode',
+    xcuitestDriver: 'iOS automation driver',
+    iosDevice: 'iPhone',
+    iosDeveloperMode: 'iPhone Developer Mode',
     mac2Driver: 'Mac2 Driver',
     automationMode: 'Automation Mode',
     accessibility: 'Read the UI',
@@ -278,6 +306,10 @@ const capabilityLabels: Record<SetupLocale, Record<SetupCapabilityId, string>> =
     androidSdk: 'Android 工具',
     uiautomator2Driver: 'Android 自动化驱动',
     androidDevice: 'Android 手机',
+    xcode: 'Xcode',
+    xcuitestDriver: 'iOS 自动化驱动',
+    iosDevice: 'iPhone',
+    iosDeveloperMode: 'iPhone 开发者模式',
     mac2Driver: 'Mac2 Driver',
     automationMode: 'Automation Mode',
     accessibility: '读取界面',
@@ -333,7 +365,7 @@ function detailLines(value: unknown, prefix = ''): string[] {
 }
 
 export function setupDoctor(snapshot: SetupSnapshot, locale: SetupLocale = 'en'): string {
-  if (snapshot.platform === 'android')
+  if (snapshot.platform === 'android' || snapshot.platform === 'ios')
     return [
       ...setupPanel(snapshot, locale),
       '',

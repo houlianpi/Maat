@@ -6,13 +6,15 @@ import { MAAT_SYSTEM_PROMPT } from './system-prompt.ts';
 import { maatStatusLines } from './status.ts';
 import { registerMaatSetupCommands } from './setup-extension.ts';
 import { createMobileUi } from './mobile-ui.ts';
+import { closeMobileRuntime, MobilePreparation } from './mobile-preparation.ts';
 
 /** Pi package entry point. Each loaded extension instance owns one Maat lifecycle. */
 export default function maatPiExtension(pi: ExtensionAPI): void {
   const maat = createMaat({ workspaceRoot: process.cwd() });
+  const preparation = new MobilePreparation(maat);
 
   const mobileTool = createMobileUi(pi, maat);
-  const tools = createMaatPiTools(maat);
+  const tools = createMaatPiTools(maat, preparation);
   for (const tool of tools) pi.registerTool(tool);
 
   const renderStatus = (ctx: ExtensionContext) => {
@@ -34,7 +36,7 @@ export default function maatPiExtension(pi: ExtensionAPI): void {
     renderStatus(ctx);
   });
   pi.on('tool_execution_end', async (_event, ctx) => renderStatus(ctx));
-  pi.on('session_shutdown', async () => maat.close());
+  pi.on('session_shutdown', async () => closeMobileRuntime(maat, preparation));
   pi.on('before_agent_start', (event, ctx) => {
     mobileTool.update(ctx);
     return { systemPrompt: `${event.systemPrompt}\n\n${MAAT_SYSTEM_PROMPT}` };

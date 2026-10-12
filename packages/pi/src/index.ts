@@ -1,5 +1,11 @@
 export { default as maatPiExtension } from './extension.ts';
 export { createMaatPiTools } from './tools.ts';
+export {
+  MobilePreparation,
+  closeMobileRuntime,
+  type MobilePreparationInput,
+  type MobilePreparationResult,
+} from './mobile-preparation.ts';
 export { createExecJsTool } from './tools/exec-js-tool.ts';
 export { createSetupTools } from './tools/setup-tools.ts';
 export { setupDoctor, setupPanel } from './setup-ui.ts';

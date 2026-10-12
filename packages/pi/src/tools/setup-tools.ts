@@ -4,7 +4,7 @@ import { Type } from '@earendil-works/pi-ai';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { type MaatApi, type SetupAction } from '@houlianpi/maat-core';
 import { setupAgentContext, setupDoctor, setupPanel } from '../setup-ui.ts';
-import { resolveSetupLocale, setupMessage } from '../setup-i18n.ts';
+import { phoneReadinessGuidance, resolveSetupLocale, setupMessage } from '../setup-i18n.ts';
 
 const exec = promisify(execFile);
 
@@ -38,22 +38,32 @@ export function createSetupTools(maat: MaatApi): ToolDefinition<any, any, any>[]
       name: 'check_device_ready',
       label: 'Check Device Ready',
       description:
-        'Verify the selected local Android control channel and return its current UI observation. A new Session requires an awake/unlocked local phone and may deploy missing automation helpers. This is not a dependency-only doctor or business validation; cold remote setup is unsupported.',
-      parameters: Type.Object({ screenshot: Type.Optional(Type.Boolean()) }),
+        'Verify the selected local Android or physical iPhone control channel and return its current UI observation. A new Session requires an awake/unlocked local phone and may deploy automation helpers; iOS may build/sign/deploy WDA. This is not a dependency-only doctor or business validation; remote readiness is unsupported.',
+      parameters: Type.Object({
+        screenshot: Type.Optional(Type.Boolean()),
+        allowWdaInitialization: Type.Optional(
+          Type.Boolean({
+            description:
+              'iOS only, this attempt only. Set true only after explicit user authorization for WDA initialization and its possible screen wake/system prompts. Not unlock proof or permission to change signing.',
+          }),
+        ),
+      }),
       executionMode: 'sequential',
       execute: async (_id, params, signal, _update, ctx) => {
         const locale = resolveSetupLocale(undefined, ctx);
         let result: Awaited<ReturnType<typeof maat.setup.ready>>;
         try {
-          result = await maat.setup.ready({ screenshot: params.screenshot, signal });
+          result = await maat.setup.ready({
+            screenshot: params.screenshot,
+            allowWdaInitialization: params.allowWdaInitialization,
+            signal,
+          });
         } catch (error) {
-          if (error instanceof Error && error.message.includes('ANDROID_DEVICE_LOCKED'))
-            throw new Error(
-              locale === 'zh-CN'
-                ? 'ANDROID_DEVICE_LOCKED：手机已锁定或熄屏。请本人点亮并解锁手机，完成后重新检查；不要重启服务或重复之前的操作。'
-                : 'ANDROID_DEVICE_LOCKED: the phone is locked or its screen is off. Wake and unlock it yourself, then recheck; do not restart the service or repeat previous actions.',
-              { cause: error },
-            );
+          const guidance = phoneReadinessGuidance(
+            error instanceof Error ? error.message : String(error),
+            locale,
+          );
+          if (guidance) throw new Error(guidance, { cause: error });
           throw error;
         }
         const { observations, ...readiness } = result;
@@ -63,8 +73,8 @@ export function createSetupTools(maat: MaatApi): ToolDefinition<any, any, any>[]
               type: 'text',
               text:
                 locale === 'zh-CN'
-                  ? '结论：可以开始手机任务。Android 操作通道已确认，请复用下面的当前界面观察继续；这不代表业务任务已完成。'
-                  : 'Conclusion: phone tasks can start. The Android control channel is ready; reuse the current observation below. This does not prove the business task completed.',
+                  ? `结论：可以开始手机任务。${result.platform === 'ios' ? 'iOS' : 'Android'} 操作通道已确认，请复用下面的当前界面观察继续；这不代表业务任务已完成。`
+                  : `Conclusion: phone tasks can start. The ${result.platform === 'ios' ? 'iOS' : 'Android'} control channel is ready; reuse the current observation below. This does not prove the business task completed.`,
             },
             ...observations,
           ],
@@ -77,19 +87,20 @@ export function createSetupTools(maat: MaatApi): ToolDefinition<any, any, any>[]
       name: 'open_setup_step',
       label: 'Open Setup Step',
       description:
-        'Return Android preparation instructions for the host Agent, or open the recommended macOS Settings page. Does not install, launch services or change permissions.',
+        'Return Android/iPhone preparation instructions for the host Agent, or open the recommended macOS Settings page. Does not install, launch services or change permissions.',
       parameters: Type.Object({ actionId: Type.Optional(Type.String()) }),
       executionMode: 'sequential',
       execute: async (_id, params, _signal, _update, ctx) => {
         const locale = resolveSetupLocale(undefined, ctx);
-        if (maat.platforms.current().id === 'android') {
+        const platform = maat.platforms.current().id;
+        if (platform === 'android' || platform === 'ios') {
           const snapshot = maat.setup.current();
           const action = params.actionId
             ? snapshot.capabilities.find((item) => item.action?.id === params.actionId)?.action
             : snapshot.recommendedAction;
-          if (snapshot.platform !== 'android' || !action)
+          if (snapshot.platform !== platform || !action)
             throw new Error(
-              'Check Android setup first; no matching preparation step is available.',
+              `Check ${platform} setup first; no matching preparation step is available.`,
             );
           return {
             content: [
@@ -144,7 +155,7 @@ export function createSetupTools(maat: MaatApi): ToolDefinition<any, any, any>[]
       executionMode: 'sequential',
       execute: async (_id, _params, signal, _update, ctx) => {
         const locale = resolveSetupLocale(undefined, ctx);
-        const platform = maat.platforms.current().id === 'android' ? 'android' : 'macos';
+        const platform = maat.platforms.current().id;
         const snapshot = await maat.setup.check({ platform, signal });
         const resume = platform === 'macos' ? maat.setup.resume() : undefined;
         return {
@@ -187,7 +198,7 @@ export function createSetupTools(maat: MaatApi): ToolDefinition<any, any, any>[]
       parameters: Type.Object({}),
       execute: async (_id, _params, signal, _update, ctx) => {
         const locale = resolveSetupLocale(undefined, ctx);
-        const platform = maat.platforms.current().id === 'android' ? 'android' : 'macos';
+        const platform = maat.platforms.current().id;
         const snapshot = await maat.setup.check({ platform, signal });
         return {
           content: [

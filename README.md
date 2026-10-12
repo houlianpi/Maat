@@ -60,7 +60,7 @@ maat agent --browser chromium --headless "Read the page and describe what is vis
 1. Select a platform and the intended device. Never guess between several phones.
 2. Check preparation with `check_platform_setup`. Reuse installed tools, healthy
    services and in-progress startup work; only address actual missing conditions.
-3. For Android, `check_device_ready` creates or reuses a Session and returns the
+3. For Android or a local physical iPhone, `check_device_ready` creates or reuses a Session and returns the
    current UI source and viewport. Request `screenshot=true` for visual inspection.
    Session creation may deploy automation helpers or trigger system prompts.
 4. Use `exe_js` for UI execution. Its only input is `code`; observations are not
@@ -78,8 +78,9 @@ there is no Maat work mode.
 
 Maat discovers existing Android tools and its managed local cache dynamically.
 The setup Skill's bundled `android-tools.mjs` prepares missing ADB/AAPT2 under
-authorization and starts the existing Appium installation with the same tool
-environment. Users do not need SDK exports or a Pi restart. Official
+authorization. Pi's `prepare_mobile(start-appium)` starts/tracks the existing
+Appium installation with the same resolved tool environment. Users do not need
+another terminal, SDK exports or a Pi restart. Official
 platform-tools downloads require actual license acceptance; existing tools are reused.
 No full SDK, Android Studio or JDK is installed by this helper. This does not
 guarantee every Appium signing/install workflow is Java-free. The engine is unchanged.
@@ -96,22 +97,60 @@ two-attempt budget, delivering real phone observation and a low-risk result.
 Necessary user authorization and license acceptance remain explicit; repeated
 technical permission questions and manual service preparation do not count as
 autonomous setup success. Unit tests do not substitute for this acceptance.
-The current Pi setup path has not passed this acceptance: when no supported,
-tracked background execution mechanism is available, the foreground Appium
-launcher cannot by itself complete autonomous startup. Manual terminal startup
-is a diagnostic fallback, not a successful first-use result.
+Pi now owns concrete foreground-child Appium tasks with controlled process/HTTP
+tests. Use `prepare_mobile(status,taskId)` to track work with waits of 0–20 seconds;
+startup has a 60-second overall deadline. `ready` means serviceResponding only.
+This closes the missing tracked-startup mechanism, but autonomous real-phone
+first-use acceptance remains unverified; manual pre-start is not acceptance.
+An actual Pi/LLM unlock-recovery run has now demonstrated tracked startup,
+valid-build reuse and the real Calculator result in 93.478 seconds including
+cleanup. This limited recovery check does not overturn the original failed
+first-use attempt or establish a fresh-machine installation pass.
+
+### iOS preparation and acceptance boundary
+
+Use `/maat-setup ios` on the local Mac with the intended physical iPhone selected.
+Read-only doctor checks Xcode, Appium CLI, XCUITest, connection/pairing, Developer
+Mode and Appium. Passing preparation is not WDA signing validation or readiness.
+iOS readiness has a 180-second budget (Android: 15 seconds). Unknown current
+cold lock state stops with `IOS_DEVICE_LOCK_STATE_UNKNOWN` by default:
+CoreDevice `passcodeRequired:false`/`unlockedSinceBoot:true` is not current
+screen/unlock proof. Only explicit authorization after explaining WDA's possible
+screen wake/system prompts permits `allowWdaInitialization:true` for that one
+`check_device_ready` call; live WDA unlock and actual UI observations are still required.
+Signing changes/redeployment require separate authorization. Never request Apple
+credentials or use Android SDK, UiAutomator2 gestures/input or Android Back on iOS.
+
+The local Mac/physical-iPhone doctor has passed. Pi integration is separately
+regression-tested. After authorized profile renewal/deployment, the verified WDA
+build started through XCTest `test-without-building`; real readiness returned
+source, viewport and screenshot, and the system Calculator displayed `72` for
+`3×3×8`. This was a scripted physical-device check, not autonomous Pi/LLM first use.
+The subsequent model-driven recovery independently cleared the old result,
+read `0`, recalculated and observed `72`; see [the verified scope](docs/native-testing.md#model-driven-unlock-recovery).
+Direct preinstalled launch remained rejected even after renewal. A WDA responding
+on local 8100 was a different simulator, not iPhone evidence. `IOS_WDA_SECURITY_REJECTED` can
+involve signing, entitlements or profile trust: inspect developer App trust once;
+if trusted or absent, inspect signing/profile expiry instead of retry loops.
+`prepare_mobile(build-ios-wda)` inspects/reuses valid builds without rebuilding;
+expired/missing builds require signing authorization and preserve the existing
+Team/bundle. Actual profile/certificate dates apply equally to paid/free signing,
+not an assumed seven days. Build hints stay internal; deployment/initialization
+needs authorized scope. Do not stop external services. Manual Appium pre-start
+does not prove five-minute first use.
 
 ## Tools and runtime
 
-| Tools                                                                | Purpose                                                    |
-| -------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `list_platforms`, `select_platform`                                  | Discover and select an execution adapter                   |
-| `list_devices`, `find_applications`, `configure_session`             | Inspect devices/apps and supply connection hints           |
-| `check_platform_setup`, `get_setup_diagnostics`                      | Preparation diagnosis                                      |
-| `open_setup_step`, `retry_setup_step`, `continue_without_capability` | Preparation instructions and permission recheck            |
-| `check_device_ready`                                                 | Verify the current Android channel and return observations |
-| `configure_browser`, `get_browser_config`                            | Web browser configuration                                  |
-| `exe_js`                                                             | Execute code in the active persistent UI Session           |
+| Tools                                                                | Purpose                                                        |
+| -------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `list_platforms`, `select_platform`                                  | Discover and select an execution adapter                       |
+| `list_devices`, `find_applications`, `configure_session`             | Inspect devices/apps and supply connection hints               |
+| `check_platform_setup`, `get_setup_diagnostics`                      | Preparation diagnosis                                          |
+| `prepare_mobile`                                                     | Track local Appium startup / iOS WDA reuse or authorized build |
+| `open_setup_step`, `retry_setup_step`, `continue_without_capability` | Preparation instructions and permission recheck                |
+| `check_device_ready`                                                 | Verify the Android/iPhone channel and return observations      |
+| `configure_browser`, `get_browser_config`                            | Web browser configuration                                      |
+| `exe_js`                                                             | Execute code in the active persistent UI Session               |
 
 Web exposes Playwright `page/context/browser`; native adapters expose WebdriverIO
 `driver/browser`. Consult `list_platforms` for the current globals. Use `console.log`
@@ -119,8 +158,9 @@ for text and `display` for PNG/JPEG/WebP image bytes or image data URLs. The nat
 `evidence.screenshot()` helper returns a screenshot observation; it is not a formal
 Evidence store or report.
 
-Appium Sessions use local hints outside source control. The host manages service
-startup; Maat closes only its owned Sessions. Existing native close behavior may
+Appium Sessions use local hints outside source control. Pi/standalone TUI tracks
+only its own service children and closes owned Sessions before owned processes;
+healthy user Appium remains untouched. Existing native close behavior may
 terminate the configured target App and is not changed by this cleanup.
 See [native setup](docs/native-testing.md) and [Setup Assistant](docs/setup-assistant.md).
 

@@ -34,6 +34,10 @@ export {
 } from './setup-assistant/android-detector.ts';
 export type * from './setup-assistant/types.ts';
 export {
+  detectIosSetup,
+  type IosSetupDetectorDependencies,
+} from './setup-assistant/ios-detector.ts';
+export {
   resolveAndroidTools,
   prepareAndroidTools,
   assertAdbServerCompatible,
@@ -44,3 +48,9 @@ export type {
   PrepareAndroidToolsOptions,
 } from './setup/android-tools.ts';
 export { resolveAppiumCommand, type ResolvedAppiumCommand } from './setup/appium-command.ts';
+export {
+  inspectIosWda,
+  prepareIosWda,
+  type IosWdaInspection,
+  type IosWdaInput,
+} from './setup/ios-wda.ts';

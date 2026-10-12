@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { detectMacosSetup, type MacosSetupDetectorDependencies } from './macos-detector.ts';
 import { detectAndroidSetup, type AndroidSetupDetectorDependencies } from './android-detector.ts';
+import { detectIosSetup, type IosSetupDetectorDependencies } from './ios-detector.ts';
 import { aggregateSetup } from './model.ts';
 import { sameFingerprint, SetupPreferenceStore } from './storage.ts';
 import type {
@@ -19,6 +20,8 @@ export type SetupAssistantOptions = {
   detectorDependencies?: MacosSetupDetectorDependencies;
   androidDetector?: typeof detectAndroidSetup;
   androidDetectorDependencies?: AndroidSetupDetectorDependencies;
+  iosDetector?: typeof detectIosSetup;
+  iosDetectorDependencies?: IosSetupDetectorDependencies;
 };
 
 function unknownSnapshot(platform = 'macos'): SetupSnapshot {
@@ -33,6 +36,8 @@ export class SetupAssistant {
   private readonly detectorDependencies?: MacosSetupDetectorDependencies;
   private readonly androidDetector: typeof detectAndroidSetup;
   private readonly androidDetectorDependencies?: AndroidSetupDetectorDependencies;
+  private readonly iosDetector: typeof detectIosSetup;
+  private readonly iosDetectorDependencies?: IosSetupDetectorDependencies;
   private interruption?: SetupInterruption;
   private actionFingerprint?: SetupSnapshot['fingerprint'];
   private lastActionId?: SetupAction['id'];
@@ -45,6 +50,8 @@ export class SetupAssistant {
     this.detectorDependencies = options.detectorDependencies;
     this.androidDetector = options.androidDetector ?? detectAndroidSetup;
     this.androidDetectorDependencies = options.androidDetectorDependencies;
+    this.iosDetector = options.iosDetector ?? detectIosSetup;
+    this.iosDetectorDependencies = options.iosDetectorDependencies;
   }
 
   current(): SetupSnapshot {
@@ -106,11 +113,18 @@ export class SetupAssistant {
   }
 
   async check(input: AndroidSetupCheckInput & { platform?: string } = {}): Promise<SetupSnapshot> {
-    if (input.platform === 'android') {
+    if (input.platform === 'android' || input.platform === 'ios') {
       const previous = this.snapshot;
-      this.snapshot = aggregateSetup({ platform: 'android', capabilities: [], state: 'checking' });
+      this.snapshot = aggregateSetup({
+        platform: input.platform,
+        capabilities: [],
+        state: 'checking',
+      });
       try {
-        this.snapshot = await this.androidDetector(input, this.androidDetectorDependencies);
+        this.snapshot =
+          input.platform === 'ios'
+            ? await this.iosDetector(input, this.iosDetectorDependencies)
+            : await this.androidDetector(input, this.androidDetectorDependencies);
         input.signal?.throwIfAborted();
         this.waitingForRecheck = false;
         this.lastActionId = undefined;

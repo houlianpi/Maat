@@ -1,22 +1,13 @@
-import { execFile } from 'node:child_process';
 import { connect } from 'node:net';
-import { promisify } from 'node:util';
 import { connection, nativeDeviceKinds } from '../platforms/appium/schema.ts';
 import { resolveAndroidTools, type ResolvedAndroidTools } from '../setup/android-tools.ts';
 import { matchDevices, type Device } from '../setup/devices.ts';
-import { resolveAppiumCommand } from '../setup/appium-command.ts';
 import { aggregateSetup } from './model.ts';
+import { defaultCommand, defaultFetchStatus, type SetupCommandResult } from './probes.ts';
 import type { AndroidSetupCheckInput, SetupCapability, SetupSnapshot } from './types.ts';
 
-const exec = promisify(execFile);
-export type AndroidSetupCommandResult = {
-  stdout: string;
-  stderr: string;
-  exitCode: number | null;
-  failure?: 'not-found' | 'timeout' | 'failed';
-  /** Path-free process error classification; never the raw command/stderr. */
-  errorCode?: string;
-};
+export { defaultCommand } from './probes.ts';
+export type AndroidSetupCommandResult = SetupCommandResult;
 
 export type AndroidSetupDetectorDependencies = {
   command(file: string, args: string[], signal?: AbortSignal): Promise<AndroidSetupCommandResult>;
@@ -33,82 +24,6 @@ export type AndroidSetupDetectorDependencies = {
     reason?: string;
   }>;
 };
-
-// Source-internal seams allow offline verification of the default consumer wiring.
-export async function defaultCommand(
-  file: string,
-  args: string[],
-  signal?: AbortSignal,
-  resolveTools = resolveAndroidTools,
-  command: (
-    file: string,
-    args: string[],
-    options: { timeout: number; maxBuffer: number; signal?: AbortSignal },
-  ) => Promise<{ stdout: string; stderr: string }> = exec,
-  resolveAppium = resolveAppiumCommand,
-): Promise<AndroidSetupCommandResult> {
-  try {
-    if (file === 'adb') {
-      const tools = await resolveTools({ signal });
-      if (!tools.adbPath)
-        return { stdout: '', stderr: '', exitCode: null, failure: 'not-found' as const };
-      file = tools.adbPath;
-    }
-    if (file === 'appium') {
-      const resolved = await resolveAppium({ signal });
-      file = resolved.file;
-      args = [...resolved.args, ...args];
-    }
-    const result = await command(file, args, { timeout: 5_000, maxBuffer: 512 * 1024, signal });
-    return { ...result, exitCode: 0 };
-  } catch (error) {
-    signal?.throwIfAborted();
-    const failure = error as Omit<NodeJS.ErrnoException, 'code'> & {
-      code?: string | number;
-      killed?: boolean;
-      stdout?: string;
-      stderr?: string;
-    };
-    return {
-      stdout: failure.stdout ?? '',
-      stderr: failure.stderr ?? '',
-      exitCode: typeof failure.code === 'number' ? failure.code : null,
-      ...(typeof failure.code === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(failure.code)
-        ? { errorCode: failure.code }
-        : {}),
-      failure:
-        failure.code === 'ENOENT' || failure.code === 'APPIUM_CLI_MISSING'
-          ? ('not-found' as const)
-          : failure.killed
-            ? ('timeout' as const)
-            : ('failed' as const),
-    };
-  }
-}
-
-async function defaultFetchStatus(url: string, signal?: AbortSignal): Promise<boolean> {
-  const endpoint = new URL(url);
-  endpoint.pathname = `${endpoint.pathname.replace(/\/$/, '')}/status`;
-  try {
-    const response = await fetch(endpoint, {
-      signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(3_000)]),
-    });
-    if (!response.ok) return false;
-    const body: unknown = await response.json();
-    return (
-      typeof body === 'object' &&
-      body !== null &&
-      'value' in body &&
-      typeof body.value === 'object' &&
-      body.value !== null &&
-      'ready' in body.value &&
-      body.value.ready === true
-    );
-  } catch {
-    signal?.throwIfAborted();
-    return false;
-  }
-}
 
 // The ADB CLI's `devices` command can start a daemon. Speak the read-only host protocol instead.
 async function defaultAdbDevices(signal?: AbortSignal): Promise<string | undefined> {

@@ -17,7 +17,7 @@ function setupTarget(args: string, maat: MaatApi) {
   );
   const language = tokens.filter((token) => token !== requested).join(' ');
   if (language && !/^(zh|zh-cn|中文|en|en-us|english)$/i.test(language))
-    throw new Error('Use /maat-setup [android|macos] [zh-CN|en].');
+    throw new Error('Use /maat-setup [android|ios|macos] [zh-CN|en].');
   const current = maat.platforms.current().id;
   return { platform: requested ?? (current === 'web' ? 'android' : current), language };
 }
@@ -28,13 +28,13 @@ export function registerMaatSetupCommands(
   onPrepared?: (snapshot: SetupSnapshot, ctx: ExtensionContext) => void,
 ): void {
   pi.registerCommand('maat-setup', {
-    description: 'Prepare Android through the host Agent, or guide macOS setup',
+    description: 'Prepare Android or iPhone through the host Agent, or guide macOS setup',
     handler: async (args, ctx) => {
       await ctx.waitForIdle();
       ctx.signal?.throwIfAborted();
       const { platform, language } = setupTarget(args, maat);
       const locale = resolveSetupLocale(language, ctx);
-      if (platform !== 'android' && platform !== 'macos') {
+      if (platform !== 'android' && platform !== 'ios' && platform !== 'macos') {
         ctx.ui.notify(
           locale === 'zh-CN'
             ? `当前 ${platform} 平台没有准备向导。Android 手机请使用 /maat-setup android；不会替你切换已有设备。`
@@ -43,17 +43,18 @@ export function registerMaatSetupCommands(
         );
         return;
       }
-      if (platform === 'android') {
-        if (maat.platforms.current().id !== 'android') await maat.platforms.select('android');
-        const snapshot = await maat.setup.check({ platform: 'android', signal: ctx.signal });
+      if (platform === 'android' || platform === 'ios') {
+        if (maat.platforms.current().id !== platform) await maat.platforms.select(platform);
+        const snapshot = await maat.setup.check({ platform, signal: ctx.signal });
+        const label = platform === 'ios' ? 'iPhone' : 'Android 手机';
         onPrepared?.(snapshot, ctx);
         pi.sendMessage(
           {
-            customType: 'maat-android-setup',
+            customType: `maat-${platform}-setup`,
             content: [
               locale === 'zh-CN'
-                ? `用户请求准备当前 Android 手机。请用宿主文件工具读取 Maat 内部准备工作流 ${MAAT_SETUP_SKILL_PATH}，在授权范围内使用宿主工具处理必要准备；需要本人操作时明确等待，完成后调用 check_device_ready 并继续原任务。`
-                : `The user requested preparation of the current Android phone. Read Maat's internal setup workflow at ${MAAT_SETUP_SKILL_PATH} with the host file tool, use authorized host tools for necessary preparation, wait for user-only actions, then call check_device_ready and continue the original task.`,
+                ? `用户请求准备当前 ${label}。请用宿主文件工具读取 Maat 内部准备工作流 ${MAAT_SETUP_SKILL_PATH} 的 ${platform} 流程，在授权范围内使用宿主工具处理必要准备；需要本人操作时明确等待，完成后调用 check_device_ready 并继续原任务。`
+                : `The user requested preparation of the current ${platform} phone. Read the ${platform} workflow in Maat's internal setup Skill at ${MAAT_SETUP_SKILL_PATH} with the host file tool, use authorized host tools for necessary preparation, wait for user-only actions, then call check_device_ready and continue the original task.`,
               ...setupPanel(snapshot, locale),
               setupAgentContext(snapshot, locale),
             ].join('\n'),

@@ -31,8 +31,12 @@ export interface PlatformAdapter {
   configureSession?(setup: SessionSetup): Promise<void>;
   inspectSetup?(request: SetupInspection): Promise<unknown>;
   execute(code: string, signal?: AbortSignal): Promise<JavaScriptObservation[]>;
-  /** Android ready only: observe without automatically unlocking a new Session. */
-  executeReadiness?(code: string, signal?: AbortSignal): Promise<JavaScriptObservation[]>;
+  /** Phone readiness: initialization authorization is transient, never an unlocked proof. */
+  executeReadiness?(
+    code: string,
+    signal?: AbortSignal,
+    options?: { allowWdaInitialization?: boolean },
+  ): Promise<JavaScriptObservation[]>;
   status(): PlatformStatus;
   close(): Promise<void>;
 }

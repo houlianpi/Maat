@@ -9,6 +9,8 @@ import { aggregateSetup } from '../packages/core/src/setup-assistant/model.ts';
 import { createPlatformTools } from '../packages/pi/src/tools/platform-tools.ts';
 import { createSetupTools } from '../packages/pi/src/tools/setup-tools.ts';
 import { registerMaatSetupCommands } from '../packages/pi/src/setup-extension.ts';
+import { createMaatPiTools } from '../packages/pi/src/tools.ts';
+import { resultText } from '../packages/pi/src/mobile-summary.ts';
 
 function partialSnapshot() {
   return aggregateSetup({
@@ -170,7 +172,7 @@ test('Android setup is the first-use command default and the only user command',
   }
 });
 
-test('setup respects an explicitly selected unsupported platform instead of checking macOS', async () => {
+test('iOS setup command and later retry/diagnostics remain iOS and read-only', async () => {
   const maat = createMaat();
   const commands = new Map<string, { handler: (args: string, ctx: ExtensionContext) => unknown }>();
   const pi = {
@@ -182,24 +184,174 @@ test('setup respects an explicitly selected unsupported platform instead of chec
     },
   } as unknown as ExtensionAPI;
   const notifications: string[] = [];
+  const messages: Array<{ customType: string; content: string }> = [];
+  pi.sendMessage = (message) => {
+    messages.push(message as (typeof messages)[number]);
+  };
   const ctx = {
     ...context,
     ui: { notify: (message: string) => notifications.push(message) },
   } as unknown as ExtensionContext;
-  maat.setup.check = async () => {
-    throw new Error('No macOS diagnostics should run.');
+  const checks: string[] = [];
+  maat.setup.check = async (input) => {
+    checks.push(input?.platform ?? '');
+    return aggregateSetup({ platform: 'ios', capabilities: [], state: 'unknown' });
+  };
+  maat.setup.ready = async () => {
+    throw new Error('Doctor must not create a Session.');
+  };
+  maat.setup.action = async () => {
+    throw new Error('iOS must not open macOS settings.');
   };
   try {
-    await maat.platforms.select('ios');
     registerMaatSetupCommands(pi, maat);
-    await commands.get('maat-setup')?.handler('', ctx);
+    await commands.get('maat-setup')?.handler('ios zh-CN', ctx);
     assert.equal(maat.platforms.current().id, 'ios');
-    assert.match(notifications.join('\n'), /ios/);
-    assert.doesNotMatch(notifications.join('\n'), /Maat · macOS/);
+    await commands.get('maat-setup')?.handler('', ctx);
+    for (const name of ['retry_setup_step', 'get_setup_diagnostics']) {
+      const tool = createSetupTools(maat).find((item) => item.name === name)!;
+      const result = await tool.execute(name, {}, undefined, undefined, ctx);
+      assert.match(resultText(result), /"platform":"ios"/);
+      assert.doesNotMatch(resultText(result), /android-tools\.mjs|Maat · macOS/);
+    }
+    assert.deepEqual(checks, ['ios', 'ios', 'ios', 'ios']);
+    assert.equal(messages[0]!.customType, 'maat-ios-setup');
+    assert.match(messages[0]!.content, /iPhone|ios/);
+    assert.equal(notifications.length, 0);
+    assert.equal(maat.platforms.status().session, 'idle');
     await assert.rejects(
       Promise.resolve(commands.get('maat-setup')?.handler('not-a-platform', ctx)),
       /Use \/maat-setup/,
     );
+  } finally {
+    await maat.close();
+  }
+});
+
+test('iOS readiness forwards transient WDA authorization and returns model-visible proof', async () => {
+  const maat = createMaat();
+  await maat.platforms.select('ios');
+  const calls: unknown[] = [];
+  maat.setup.ready = async (input) => {
+    calls.push(input);
+    return {
+      ready: true,
+      platform: 'ios',
+      proof: {
+        phoneUnlocked: true,
+        sessionUsable: true,
+        sourceReadable: true,
+        viewportReadable: true,
+        screenshotReadable: false,
+      },
+      observations: [
+        {
+          type: 'text',
+          text: '{"phoneUnlocked":true,"source":"<App/>","viewport":{"width":390,"height":844}}',
+        },
+      ],
+    };
+  };
+  const tool = createSetupTools(maat).find((item) => item.name === 'check_device_ready')!;
+  const signal = new AbortController().signal;
+  try {
+    const result = await tool.execute(
+      'ready',
+      { screenshot: false, allowWdaInitialization: true },
+      signal,
+      undefined,
+      context,
+    );
+    assert.deepEqual(calls[0], { screenshot: false, allowWdaInitialization: true, signal });
+    assert.match(resultText(result), /iOS|phoneUnlocked|source|viewport/);
+    assert.equal(result.details.platform, 'ios');
+    await tool.execute('next', {}, undefined, undefined, context);
+    assert.deepEqual(calls[1], {
+      screenshot: undefined,
+      allowWdaInitialization: undefined,
+      signal: undefined,
+    });
+    assert.equal(maat.platforms.status().session, 'idle');
+  } finally {
+    await maat.close();
+  }
+});
+
+test('iOS readiness errors preserve causes and distinguish lock uncertainty from WDA security rejection', async () => {
+  const maat = createMaat();
+  await maat.platforms.select('ios');
+  const tool = createSetupTools(maat).find((item) => item.name === 'check_device_ready')!;
+  try {
+    for (const [code, expected] of [
+      ['IOS_DEVICE_LOCKED', /本人点亮并解锁/],
+      ['IOS_DEVICE_LOCK_STATE_UNKNOWN', /无法证明|allowWdaInitialization/],
+      ['IOS_WDA_SECURITY_REJECTED', /若已信任或没有入口|有效期/],
+    ] as const) {
+      const original = new Error(code);
+      maat.setup.ready = async () => {
+        throw original;
+      };
+      await assert.rejects(tool.execute('ready', {}, undefined, undefined, context), (error) => {
+        assert.ok(error instanceof Error);
+        assert.equal(error.cause, original);
+        assert.match(error.message, expected);
+        assert.doesNotMatch(error.message, /Android|SDK|一定未信任/);
+        return true;
+      });
+    }
+  } finally {
+    await maat.close();
+  }
+});
+
+test('iOS execution setup failure diagnoses only iOS without changing the original action failure', async () => {
+  const maat = createMaat();
+  await maat.platforms.select('ios');
+  const original = new Error('ECONNREFUSED');
+  maat.exploration.executeJavaScript = async () => {
+    throw original;
+  };
+  const checks: string[] = [];
+  maat.setup.check = async (input) => {
+    checks.push(input?.platform ?? '');
+    return aggregateSetup({ platform: 'ios', capabilities: [], state: 'unknown' });
+  };
+  maat.setup.interrupt = () => {
+    throw new Error('No macOS interruption');
+  };
+  try {
+    const tool = createMaatPiTools(maat).find((item) => item.name === 'exe_js')!;
+    await assert.rejects(
+      tool.execute('exec', { code: 'action()' }, undefined, undefined, context),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.equal(error.cause, original);
+        assert.match(error.message, /MAAT_EXECUTION_FAILED|ECONNREFUSED|iOS/);
+        assert.match(error.message, /Do not replay/);
+        assert.doesNotMatch(error.message, /android-tools\.mjs|Maat · macOS/);
+        return true;
+      },
+    );
+    assert.deepEqual(checks, ['ios']);
+  } finally {
+    await maat.close();
+  }
+});
+
+test('release_device_session supports iOS without releasing at model-turn boundaries', async () => {
+  const maat = createMaat();
+  await maat.platforms.select('ios');
+  let closed = 0;
+  maat.platforms.current().close = async () => {
+    closed += 1;
+  };
+  try {
+    const tool = createPlatformTools(maat).find((item) => item.name === 'release_device_session')!;
+    assert.equal(closed, 0);
+    assert.match(tool.description!, /Do not release while waiting|model-turn end/);
+    const result = await tool.execute('release', {}, undefined, undefined, context);
+    assert.equal(closed, 1);
+    assert.deepEqual(result.details, { released: true, platform: 'ios' });
   } finally {
     await maat.close();
   }

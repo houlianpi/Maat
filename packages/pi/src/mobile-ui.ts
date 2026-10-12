@@ -24,7 +24,7 @@ export function createMobileUi(pi: ExtensionAPI, maat: MaatApi) {
   let platformId = maat.platforms.current().id;
   let snapshot: SetupSnapshot | undefined;
   let confirmed = false;
-  let risk: 'locked' | 'connection' | undefined;
+  let risk: 'locked' | 'lock-unknown' | 'wda-security' | 'connection' | undefined;
   const activeCalls = new Map<string, string>();
   const enabled = () => pi.getFlag('maat-mobile-ui') === true;
   const relevant = (name: string) => name === 'exe_js' || name === 'check_device_ready';
@@ -47,11 +47,28 @@ export function createMobileUi(pi: ExtensionAPI, maat: MaatApi) {
         item.required &&
         item.status !== 'ready' &&
         item.status !== 'skipped' &&
-        item.id === 'androidDevice',
+        (item.id === 'androidDevice' || item.id === 'iosDevice'),
     );
     // Explicit user-only actions and unresolved execution risk outrank activity.
     if (risk === 'locked') return zh ? '请解锁手机' : 'Unlock the phone';
+    if (risk === 'lock-unknown')
+      return zh ? '冷连接待明确授权' : 'Cold connection needs explicit authorization';
+    if (risk === 'wda-security') return zh ? '请检查 WDA 信任或签名' : 'Check WDA trust or signing';
     if (risk) return zh ? '请检查连接' : 'Check the connection';
+    if (deviceAction?.messageKey === 'capability.iosDevice.trust')
+      return zh ? '请在 iPhone 信任此电脑' : 'Trust this computer on the iPhone';
+    if (deviceAction?.messageKey === 'capability.iosDevice.select')
+      return zh ? '请选择 iPhone' : 'Select the iPhone';
+    if (deviceAction?.messageKey === 'capability.iosDevice.missing')
+      return zh ? '请连接 iPhone' : 'Connect the iPhone';
+    if (
+      snapshot?.capabilities.some(
+        (item) =>
+          item.id === 'iosDeveloperMode' &&
+          item.messageKey === 'capability.iosDeveloperMode.required',
+      )
+    )
+      return zh ? '请本人开启开发者模式' : 'Enable Developer Mode yourself';
     if (deviceAction?.messageKey === 'capability.androidDevice.unauthorized')
       return zh ? '请允许 USB 调试' : 'Allow USB debugging on the phone';
     if (deviceAction?.messageKey === 'capability.androidDevice.select')
@@ -115,17 +132,19 @@ export function createMobileUi(pi: ExtensionAPI, maat: MaatApi) {
     update(ctx);
   };
 
-  pi.registerMessageRenderer<{ summary: string[] }>('maat-android-setup', (message, options) => {
-    if (!enabled()) return undefined;
-    return new Text(
-      options.expanded
-        ? resultText({ content: [{ type: 'text', text: message.content }] })
-        : (message.details?.summary.join('\n') ??
-          (locale === 'zh-CN' ? '手机准备' : 'Phone preparation')),
-      0,
-      0,
-    );
-  });
+  for (const messageType of ['maat-android-setup', 'maat-ios-setup']) {
+    pi.registerMessageRenderer<{ summary: string[] }>(messageType, (message, options) => {
+      if (!enabled()) return undefined;
+      return new Text(
+        options.expanded
+          ? resultText({ content: [{ type: 'text', text: message.content }] })
+          : (message.details?.summary.join('\n') ??
+            (locale === 'zh-CN' ? '手机准备' : 'Phone preparation')),
+        0,
+        0,
+      );
+    });
+  }
   pi.on('session_start', (_event, ctx) => reset(ctx));
   pi.on('session_tree', (_event, ctx) => reset(ctx));
   pi.on('session_shutdown', () => reset());
@@ -167,7 +186,14 @@ export function createMobileUi(pi: ExtensionAPI, maat: MaatApi) {
     if (relevant(event.toolName)) {
       if (event.isError) {
         const failure = failureFacts(event.result);
-        risk = failure.code === 'ANDROID_DEVICE_LOCKED' ? 'locked' : 'connection';
+        risk =
+          failure.code === 'ANDROID_DEVICE_LOCKED' || failure.code === 'IOS_DEVICE_LOCKED'
+            ? 'locked'
+            : failure.code === 'IOS_DEVICE_LOCK_STATE_UNKNOWN'
+              ? 'lock-unknown'
+              : failure.code === 'IOS_WDA_SECURITY_REJECTED'
+                ? 'wda-security'
+                : 'connection';
         confirmed = false;
       } else if (event.toolName === 'check_device_ready' && facts.ready === true) {
         // Only an actual recent channel check resolves the connection warning.

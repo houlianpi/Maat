@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServer } from 'node:http';
 import { createServer as createNetServer, connect, type Socket } from 'node:net';
-import { mkdtemp, rm, readdir } from 'node:fs/promises';
+import { mkdtemp, rm, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -13,6 +13,7 @@ import {
   capabilities,
   connection,
   splitCapabilities,
+  type ResolvedNativeSession,
 } from '../packages/core/src/platforms/appium/schema.ts';
 import {
   matchDevices,
@@ -22,6 +23,7 @@ import {
 import { MaatApi } from '../packages/core/src/api/maat-api.ts';
 import { AppiumPlatformAdapter } from '../packages/core/src/platforms/appium/appium-adapter.ts';
 import { resolveAndroidReadinessSession } from '../packages/core/src/platforms/appium/session-resolver.ts';
+import { resolveIosReadinessSession } from '../packages/core/src/platforms/appium/session-resolver.ts';
 import { createDefaultPlatformRegistry } from '../packages/core/src/platforms/default-registry.ts';
 import { takeAppiumScreenshot } from '../packages/core/src/platforms/appium/screenshot.ts';
 import { NativeManager } from '../packages/core/src/platforms/appium/runtime/manager.ts';
@@ -108,6 +110,7 @@ async function mockAppium(
     isLocked?: () => unknown;
     readinessAdb?: ReadinessAdbOptions;
     statusFailure?: boolean;
+    sessionFailure?: string;
   } = {},
 ) {
   const serverId = ++mockServerId;
@@ -128,6 +131,15 @@ async function mockAppium(
       creations++;
       sessionCapabilities.push(body.capabilities.alwaysMatch);
       options.onSessionRequest?.();
+      if (options.sessionFailure) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            value: { error: 'session not created', message: options.sessionFailure },
+          }),
+        );
+        return;
+      }
       res.on('close', () => {
         if (!res.writableFinished) cancelledResponses++;
       });
@@ -1474,6 +1486,417 @@ test('native API reuses its Session after execution failure and retains the exte
     mock.server.close();
     await rm(base, { recursive: true, force: true });
     await rm(hints, { recursive: true, force: true });
+  }
+});
+
+function iosReadinessApi(
+  root: string,
+  coldCheck: (authorized?: boolean) => Promise<void> = async () => {},
+  devicesCheck: () => Promise<void> = async () => {},
+) {
+  class IosReadinessAdapter extends AppiumPlatformAdapter {
+    protected override resolveIosReadiness(
+      signal?: AbortSignal,
+      currentTarget?: ResolvedNativeSession,
+      allowWdaInitialization = false,
+    ) {
+      return resolveIosReadinessSession(
+        this.sessionHints!,
+        signal,
+        {
+          serverReady: async () => true,
+          devices: async () => {
+            await devicesCheck();
+            return [
+              {
+                id: 'MOCK_IPHONE',
+                name: 'mock iPhone',
+                kind: 'device',
+                connected: true,
+                paired: true,
+                developerMode: 'enabled',
+              },
+            ];
+          },
+          assertUnlocked: (_udid, _signal, authorized) => coldCheck(authorized),
+        },
+        currentTarget,
+        allowWdaInitialization,
+      );
+    }
+  }
+  return new MaatApi(
+    new PlatformRegistry(
+      [
+        new IosReadinessAdapter({
+          id: 'ios',
+          label: 'iOS',
+          platformName: 'iOS',
+          automationName: 'XCUITest',
+        }),
+      ],
+      'ios',
+    ),
+    root,
+    {
+      iosDetector: async () =>
+        aggregateSetup({
+          platform: 'ios',
+          capabilities: [
+            {
+              id: 'appiumServer',
+              required: true,
+              status: 'ready',
+              messageKey: 'capability.appium.ready',
+            },
+          ],
+        }),
+    },
+  );
+}
+
+test('mock iOS readiness uses the real Worker, observations and healthy Session reuse', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ios-ready-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const mock = await mockAppium();
+  let preflights = 0;
+  const api = iosReadinessApi(root, async () => {
+    preflights++;
+  });
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock iPhone' },
+    });
+    const result = await api.setup.ready({ screenshot: true });
+    assert.equal(result.platform, 'ios');
+    assert.equal(result.proof.phoneUnlocked, true);
+    assert.equal(result.proof.screenshotReadable, true);
+    assert.ok(result.observations.some((item) => item.type === 'image'));
+    assert.ok(
+      result.observations.some(
+        (item) => item.type === 'text' && /Application name/.test(item.text),
+      ),
+    );
+    assert.equal(preflights, 1);
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.sessionCapabilities[0]?.['appium:udid'], 'MOCK_IPHONE');
+    assert.equal(mock.sessionCapabilities[0]?.['appium:automationName'], 'XCUITest');
+    assert.equal(mock.sessionCapabilities[0]?.['appium:noReset'], true);
+    assert.equal((await api.setup.ready()).platform, 'ios');
+    assert.equal(preflights, 1);
+    assert.equal(mock.created(), 1);
+  } finally {
+    await api.close();
+    assert.equal(mock.deleted(), 1);
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('warm iOS readiness rejects mismatched nested identity, external WDA and simulator routing without UI reads', async () => {
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  for (const options of [
+    { capabilities: { 'appium:options': { udid: 'OTHER_PHONE' } }, kind: 'device' as const },
+    {
+      capabilities: { 'appium:webDriverAgentUrl': 'http://localhost:8100' },
+      kind: 'device' as const,
+    },
+    { capabilities: {}, kind: 'simulator' as const },
+  ]) {
+    const root = await mkdtemp(path.join(tmpdir(), 'maat-ios-warm-routing-'));
+    process.env.MAAT_SESSION_HINTS_DIR = root;
+    const mock = await mockAppium();
+    const api = iosReadinessApi(root, async () => {
+      throw new Error('Warm validation must not run the cold check');
+    });
+    try {
+      await api.platforms.configureSession({
+        serverUrl: mock.url,
+        device: { kind: 'device', name: 'mock iPhone' },
+      });
+      const adapter = api.registry.current;
+      assert.ok(adapter instanceof AppiumPlatformAdapter);
+      assert.ok(adapter.sessionHints);
+      await adapter.runtime.configureResolved({
+        environment: {
+          ...adapter.sessionHints,
+          device: { kind: options.kind, name: 'mock iPhone' },
+        },
+        capabilities: {
+          'appium:udid': 'MOCK_IPHONE',
+          'appium:deviceName': 'mock iPhone',
+          ...options.capabilities,
+        },
+      });
+      await adapter.runtime.execute("console.log('ordinary preexisting Session');");
+      assert.equal(mock.created(), 1);
+      await assert.rejects(api.setup.ready({ screenshot: true }), /IOS_READINESS_UNSUPPORTED/);
+      assert.equal(mock.created(), 1);
+      assert.equal(
+        mock.requests.filter((request) => /\/source|\/screenshot/.test(request)).length,
+        0,
+      );
+      assert.equal(mock.deleted(), 0);
+    } finally {
+      await api.close();
+      mock.server.close();
+      await rm(root, { recursive: true, force: true });
+      if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+      else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    }
+  }
+});
+
+test('warm iOS readiness never reinitializes a Session closed during identity checking', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ios-warm-close-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const mock = await mockAppium();
+  let pause = false;
+  let entered!: () => void;
+  let release!: () => void;
+  const checking = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const resumed = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const api = iosReadinessApi(root, undefined, async () => {
+    if (!pause) return;
+    entered();
+    await resumed;
+  });
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock iPhone' },
+    });
+    await api.setup.ready();
+    assert.equal(mock.created(), 1);
+    const reads = mock.requests.filter((request) => /\/source|\/screenshot/.test(request)).length;
+    pause = true;
+    const pending = api.setup.ready();
+    await checking;
+    await api.registry.current.close();
+    release();
+    await assert.rejects(pending, /NATIVE_SESSION_CHANGED/);
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.deleted(), 1);
+    assert.equal(
+      mock.requests.filter((request) => /\/source|\/screenshot/.test(request)).length,
+      reads,
+    );
+  } finally {
+    release();
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('iOS WDA initialization authorization is explicit, transient and never replaces live unlock proof', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ios-initialization-consent-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const mock = await mockAppium();
+  const api = iosReadinessApi(root, async (authorized) => {
+    if (!authorized)
+      throw new Error('IOS_DEVICE_LOCK_STATE_UNKNOWN: initialization not authorized.');
+  });
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock iPhone' },
+    });
+    await assert.rejects(api.setup.ready(), /IOS_DEVICE_LOCK_STATE_UNKNOWN/);
+    assert.equal(mock.created(), 0);
+    assert.equal(
+      (await api.setup.ready({ allowWdaInitialization: true })).proof.phoneUnlocked,
+      true,
+    );
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.sessionCapabilities[0]?.allowWdaInitialization, undefined);
+    assert.doesNotMatch(
+      await readFile(path.join(root, 'ios.json'), 'utf8'),
+      /allowWdaInitialization/,
+    );
+    await api.registry.current.close();
+    await assert.rejects(api.setup.ready(), /IOS_DEVICE_LOCK_STATE_UNKNOWN/);
+    assert.equal(mock.created(), 1);
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+  const lockedRoot = await mkdtemp(path.join(tmpdir(), 'maat-ios-consent-locked-'));
+  process.env.MAAT_SESSION_HINTS_DIR = lockedRoot;
+  const lockedMock = await mockAppium({ isLocked: () => true });
+  const lockedApi = iosReadinessApi(lockedRoot);
+  try {
+    await lockedApi.platforms.configureSession({
+      serverUrl: lockedMock.url,
+      device: { kind: 'device', name: 'mock iPhone' },
+    });
+    await assert.rejects(
+      lockedApi.setup.ready({ allowWdaInitialization: true }),
+      /IOS_DEVICE_LOCKED/,
+    );
+    assert.equal(lockedMock.requests.filter((request) => request.endsWith('/source')).length, 0);
+  } finally {
+    await lockedApi.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    lockedMock.server.close();
+    await rm(lockedRoot, { recursive: true, force: true });
+  }
+});
+
+test('iOS WDA security rejection retains uncertainty, next step and redacted failure without replay', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ios-signature-rejection-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const privateUdid = '00008140-0011223344556677';
+  const mock = await mockAppium({
+    sessionFailure: `Unable to launch WebDriverAgent for --device "${privateUdid}": invalid code signature, inadequate entitlements or its profile has not been explicitly trusted by the user.`,
+  });
+  const api = iosReadinessApi(root);
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock iPhone' },
+    });
+    await assert.rejects(api.setup.ready({ allowWdaInitialization: true }), (error) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /IOS_WDA_SECURITY_REJECTED/);
+      assert.match(error.message, /signature, entitlements or developer-profile trust/);
+      assert.match(error.message, /if already trusted, inspect signing/);
+      assert.doesNotMatch(error.message, new RegExp(privateUdid));
+      return true;
+    });
+    assert.equal(mock.created(), 1);
+    assert.equal(
+      mock.requests.filter((request) => /\/source|\/screenshot/.test(request)).length,
+      0,
+    );
+    assert.equal(api.platforms.status().session, 'idle');
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('iOS readiness stops unknown cold lock proof and cancellation before POST', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ios-ready-cold-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const mock = await mockAppium();
+  const api = iosReadinessApi(root, async () => {
+    throw new Error('IOS_DEVICE_LOCK_STATE_UNKNOWN: current state unproved.');
+  });
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock iPhone' },
+    });
+    await assert.rejects(api.setup.ready(), /IOS_DEVICE_LOCK_STATE_UNKNOWN/);
+    assert.equal(mock.created(), 0);
+    assert.equal(mock.lockQueries(), 0);
+    assert.equal(api.platforms.status().session, 'idle');
+    const controller = new AbortController();
+    controller.abort(new Error('cancelled before bootstrap'));
+    await assert.rejects(
+      api.setup.ready({ signal: controller.signal }),
+      /cancelled before bootstrap/,
+    );
+    assert.equal(mock.created(), 0);
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('iOS locked and unknown live WDA queries do not read UI or replay actions', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ios-ready-lock-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  let locked: unknown = true;
+  const mock = await mockAppium({ isLocked: () => locked });
+  const api = iosReadinessApi(root);
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock iPhone' },
+    });
+    await assert.rejects(api.setup.ready({ screenshot: true }), /IOS_DEVICE_LOCKED/);
+    assert.equal(mock.created(), 1);
+    assert.equal(
+      mock.requests.filter((request) => /\/source|\/screenshot/.test(request)).length,
+      0,
+    );
+    locked = 'unknown';
+    await assert.rejects(api.setup.ready(), /IOS_DEVICE_LOCK_STATE_UNKNOWN/);
+    assert.equal(mock.created(), 1);
+    locked = false;
+    assert.equal((await api.setup.ready()).platform, 'ios');
+    locked = true;
+    await assert.rejects(
+      api.exploration.executeJavaScript('console.log(await driver.getPageSource());'),
+      /IOS_DEVICE_LOCKED/,
+    );
+    assert.equal(mock.requests.filter((request) => request.endsWith('/source')).length, 1);
+    assert.equal(mock.created(), 1);
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('iOS readiness rejects App targets and explicit simulator routing before initialization', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-ios-ready-target-'));
+  const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
+  process.env.MAAT_SESSION_HINTS_DIR = root;
+  const mock = await mockAppium();
+  const api = iosReadinessApi(root);
+  try {
+    await api.platforms.configureSession({
+      serverUrl: mock.url,
+      device: { kind: 'device', name: 'mock iPhone' },
+      capabilities: { 'appium:bundleId': 'com.example.target' },
+    });
+    await assert.rejects(api.setup.ready(), /base Session/);
+    assert.equal(mock.created(), 0);
+    assert.deepEqual((api.registry.current as AppiumPlatformAdapter).appTarget, {
+      'appium:bundleId': 'com.example.target',
+    });
+    await api.platforms.configureSession({
+      clearAppTarget: true,
+      device: { kind: 'simulator', name: 'mock iPhone' },
+    });
+    await assert.rejects(api.setup.ready(), /IOS_READINESS_UNSUPPORTED/);
+    assert.equal(mock.created(), 0);
+  } finally {
+    await api.close();
+    if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
+    else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
+    mock.server.close();
+    await rm(root, { recursive: true, force: true });
   }
 });
 

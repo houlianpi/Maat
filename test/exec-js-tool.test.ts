@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { validateToolArguments } from '@earendil-works/pi-ai';
 import { createExecJsTool } from '../packages/pi/src/tools/exec-js-tool.ts';
+import { createPlatformTools } from '../packages/pi/src/tools/platform-tools.ts';
+import { createMaat } from '../packages/core/src/api/create-maat.ts';
+import { isRecord } from '../packages/core/src/core/exploration/protocol.ts';
 import {
   ExplorationExecutionError,
   WorkerTerminatedError,
@@ -38,6 +41,71 @@ test('exe_js returns observations and exposes only the execution input', async (
   );
   assert.deepEqual(result.content, [{ type: 'text', text: 'observed' }]);
   assert.deepEqual(result.details, { observationCount: 1 });
+});
+
+test('list_platforms exposes mobile control-first strategies in model-visible content', async () => {
+  const maat = createMaat();
+  try {
+    const tool = createPlatformTools(maat).find((item) => item.name === 'list_platforms');
+    assert.ok(tool);
+    const result = await tool.execute(
+      'context',
+      {},
+      undefined,
+      undefined,
+      {} as Parameters<typeof tool.execute>[4],
+    );
+    const text = result.content
+      .filter((item) => item.type === 'text')
+      .map((item) => item.text)
+      .join('\n');
+    const platforms: unknown = JSON.parse(text);
+    assert.ok(Array.isArray(platforms));
+    for (const id of ['android', 'ios']) {
+      const platform = platforms.find((item: unknown) => isRecord(item) && item.id === id);
+      assert.ok(
+        isRecord(platform) &&
+          isRecord(platform.codeContext) &&
+          Array.isArray(platform.codeContext.guidelines),
+      );
+      assert.ok(platform.codeContext.guidelines.every((line: unknown) => typeof line === 'string'));
+      const guidelines = platform.codeContext.guidelines.join('\n');
+      assert.match(guidelines, /Generate Appium JavaScript for exe_js/);
+      assert.match(guidelines, /Controls first/);
+      assert.match(guidelines, /Only use visual absolute-coordinate actions when/);
+      assert.match(guidelines, /Appium viewport units/);
+    }
+  } finally {
+    await maat.close();
+  }
+});
+
+test('exe_js leaves control and permitted coordinate choices in the supplied JavaScript', async () => {
+  const calls: string[] = [];
+  const signal = new AbortController().signal;
+  const tool = createExecJsTool({
+    close: async () => {},
+    execute: async (code, receivedSignal) => {
+      assert.equal(receivedSignal, signal);
+      calls.push(code);
+      return [{ type: 'text', text: 'current observation' }];
+    },
+  });
+  const code = [
+    "await driver.$('~observed-control').click();",
+    "await driver.execute('mobile: tap', {x: 10, y: 20});",
+  ];
+  for (const input of code) {
+    const result = await tool.execute(
+      'generated',
+      { code: input },
+      signal,
+      undefined,
+      {} as Parameters<typeof tool.execute>[4],
+    );
+    assert.deepEqual(result.content, [{ type: 'text', text: 'current observation' }]);
+  }
+  assert.deepEqual(calls, code);
 });
 
 test('exe_js classifies an unknown execution failure without a success fallback', async () => {

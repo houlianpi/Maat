@@ -11,12 +11,12 @@ export function createPlatformTools(maat: MaatApi): ToolDefinition<any, any, any
       label: 'Release Phone Session',
       executionMode: 'sequential',
       description:
-        'Release the owned Android Worker and Appium Session when this conversation no longer needs phone interaction. Keep the Pi conversation, App data/login and external Appium/ADB services. Do not release while waiting for a user action followed by more phone work. Never infer business completion from release.',
+        'Release the owned Android or iPhone Worker and Appium Session when this conversation no longer needs phone interaction. Keep the Pi conversation, App data/login and external services. Do not release while waiting for a user action followed by more phone work or merely at model-turn end. Never infer business completion from release.',
       parameters: Type.Object({}, { additionalProperties: false }),
       async execute(_id, _input, _signal, _update, ctx) {
         const adapter = maat.platforms.current();
-        if (adapter.id !== 'android')
-          throw new Error('release_device_session requires the Android platform.');
+        if (adapter.id !== 'android' && adapter.id !== 'ios')
+          throw new Error('release_device_session requires the Android or iOS platform.');
         await adapter.close();
         const locale = resolveSetupLocale(undefined, ctx);
         return {
@@ -24,12 +24,16 @@ export function createPlatformTools(maat: MaatApi): ToolDefinition<any, any, any
             {
               type: 'text',
               text:
-                locale === 'zh-CN'
-                  ? '手机操作连接已释放，Pi 对话继续保留。未主动关闭 App 或停止外部连接服务。'
-                  : 'Phone control Session released; the Pi conversation remains available. No explicit App termination or external-service stop was requested.',
+                adapter.id === 'ios'
+                  ? locale === 'zh-CN'
+                    ? '手机操作连接已释放，Pi 对话继续保留。未停止外部服务；释放不代表业务任务完成。'
+                    : 'Phone control Session released; the Pi conversation remains available. External services were not stopped; release is not business validation.'
+                  : locale === 'zh-CN'
+                    ? '手机操作连接已释放，Pi 对话继续保留。未主动关闭 App 或停止外部连接服务。'
+                    : 'Phone control Session released; the Pi conversation remains available. No explicit App termination or external-service stop was requested.',
             },
           ],
-          details: { released: true, platform: 'android' },
+          details: { released: true, platform: adapter.id },
         };
       },
     }),
@@ -75,7 +79,7 @@ export function createPlatformTools(maat: MaatApi): ToolDefinition<any, any, any
       label: 'Configure Session',
       executionMode: 'sequential',
       description:
-        'Provide connection hints to the active adapter. For Android first-use readiness, configure the selected local device and server only; establish the base phone channel before launching an App through exe_js. App capabilities are optional and may change Session lifecycle.',
+        'Provide connection hints to the active adapter. For Android/iPhone first-use readiness, configure the selected local physical device and server only; establish the base phone channel before launching an App through exe_js. App capabilities are optional and may change Session lifecycle.',
       parameters: Type.Object({
         serverUrl: Type.Optional(Type.String()),
         device: Type.Optional(
@@ -89,7 +93,7 @@ export function createPlatformTools(maat: MaatApi): ToolDefinition<any, any, any
         clearAppTarget: Type.Optional(
           Type.Boolean({
             description:
-              'Clear legacy App routing before a base Android readiness check. Closes the existing Session using its current lifecycle; does not delete App data. Cannot be combined with a new App target.',
+              'Clear legacy App routing before a base Android/iPhone readiness check. Closes the existing Session using its current lifecycle; does not delete App data. Cannot be combined with a new App target.',
           }),
         ),
       }),

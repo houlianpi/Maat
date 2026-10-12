@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { aggregateSetup } from '../packages/core/src/setup-assistant/model.ts';
-import { setupDoctor, setupPanel } from '../packages/pi/src/setup-ui.ts';
+import { setupAgentContext, setupDoctor, setupPanel } from '../packages/pi/src/setup-ui.ts';
 import { resolveSetupLocale } from '../packages/pi/src/setup-i18n.ts';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 
@@ -161,6 +161,64 @@ test('Android unknown or blocked preparation never suggests starting a test', ()
       },
     ],
   });
+
   assert.match(setupPanel(ready, 'zh-CN').join('\n'), /手机操作通道尚需确认/);
   assert.match(setupDoctor(ready, 'en'), /does not create a phone Session/);
+});
+
+test('iOS preparation reports its own next actions and never substitutes Android startup tooling', () => {
+  for (const locale of ['en', 'zh-CN'] as const) {
+    for (const [id, messageKey, actionId, labelKey] of [
+      ['iosDevice', 'capability.iosDevice.trust', 'trust-ios-device', 'action.trustIosDevice'],
+      [
+        'iosDeveloperMode',
+        'capability.iosDeveloperMode.required',
+        'enable-ios-developer-mode',
+        'action.enableIosDeveloperMode',
+      ],
+      [
+        'xcuitestDriver',
+        'capability.xcuitest.install',
+        'install-xcuitest',
+        'action.installXcuitest',
+      ],
+      ['appiumServer', 'capability.appium.start', 'start-appium', 'action.startAppium'],
+    ] as const) {
+      const snapshot = aggregateSetup({
+        platform: 'ios',
+        capabilities: [
+          {
+            id,
+            messageKey,
+            required: true,
+            status: 'action-required',
+            action: { id: actionId, labelKey },
+          },
+        ],
+      });
+      const facts = setupAgentContext(snapshot, locale);
+      assert.match(facts, new RegExp(actionId));
+      assert.match(setupPanel(snapshot, locale).join('\n'), /Maat · iOS/);
+      assert.doesNotMatch(facts, /android-tools\.mjs|uiautomator2@|SDK paths/);
+      if (actionId === 'start-appium') assert.doesNotMatch(facts, /"command":/);
+    }
+    const ready = aggregateSetup({
+      platform: 'ios',
+      capabilities: [
+        {
+          id: 'iosDevice',
+          messageKey: 'capability.iosDevice.ready',
+          required: true,
+          status: 'ready',
+        },
+      ],
+    });
+    assert.match(setupAgentContext(ready, locale), /"tool":"check_device_ready"/);
+    assert.match(
+      setupAgentContext(ready, locale),
+      /IOS_DEVICE_LOCK_STATE_UNKNOWN|allowWdaInitialization/,
+    );
+    assert.match(setupDoctor(ready, locale), /does not create|不会创建/);
+    assert.match(setupPanel(ready, locale).join('\n'), /尚需确认|verify the phone control/);
+  }
 });
