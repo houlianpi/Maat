@@ -1,6 +1,9 @@
 # Maat agent development guide
 
 Keep this file focused on navigation, ownership, safety and review decisions.
+Product intent and confirmed decisions live in the [product baseline](docs/product/maat-product-spec.md).
+The first approved user task is [mobile content search](docs/specs/mobile/content-search.md).
+Spec approval is not proof of implementation or validation.
 Product usage belongs in the [README](README.md) and [Chinese README](README.zh-CN.md);
 executable contracts belong in exported types and tests. Preparation details live in
 [Setup Assistant](docs/setup-assistant.md) and [native setup](docs/native-testing.md).
@@ -76,7 +79,8 @@ artifacts/     Generated output, never editable source
 
 ## Working procedure
 
-1. Read this file, package manifests, affected producers, exports, consumers and
+1. Read this file, relevant confirmed product/task requirements, package manifests,
+   affected producers, exports, consumers and
    nearest tests. When the user names a reference project, inspect its relevant
    workflow and implementation, not just its README; adapt the strategy without
    copying another runtime or violating Maat's boundaries.
