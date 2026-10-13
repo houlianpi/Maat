@@ -654,6 +654,296 @@ test('capability gate selects one immutable backend across the required route ma
   );
 });
 
+test('local discovery resolves by platform configuration without target routing data', () => {
+  const configuration: G3ReadOnlyBackendConfiguration = {
+    android: { discovery: true },
+    ios: { discovery: false },
+  };
+  const android = resolveCapabilityBackend(
+    { kind: 'local-discovery', platform: 'android', provider: 'local-adb' },
+    'discovery',
+    configuration,
+  );
+  const ios = resolveCapabilityBackend(
+    { kind: 'local-discovery', platform: 'ios', provider: 'local-core-device' },
+    'discovery',
+    configuration,
+  );
+
+  assert.deepEqual(android, {
+    capability: 'discovery',
+    backend: 'g3',
+    routeKind: 'local-discovery',
+    platform: 'android',
+    provider: 'local-adb',
+  });
+  assert.deepEqual(ios, {
+    capability: 'discovery',
+    backend: 'legacy',
+    routeKind: 'local-discovery',
+    platform: 'ios',
+    provider: 'local-core-device',
+  });
+  assert.equal(Object.isFrozen(android), true);
+  assert.equal(Object.isFrozen(ios), true);
+  assert.doesNotMatch(
+    JSON.stringify([android, ios]),
+    /routingId|endpoint(Id|Key|Url)?|target|deviceKind|serial|udid/i,
+  );
+});
+
+test('local discovery rejects invalid provider combinations and sensitive route fields', () => {
+  const configuration: G3ReadOnlyBackendConfiguration = {
+    android: { discovery: true },
+    ios: { discovery: true },
+  };
+  const invalidRoutes: unknown[] = [
+    { kind: 'local-discovery', platform: 'android', provider: 'local-core-device' },
+    { kind: 'local-discovery', platform: 'ios', provider: 'local-adb' },
+    {
+      kind: 'local-discovery',
+      platform: 'android',
+      provider: 'local-adb',
+      routingId: 'PRIVATE_ROUTE',
+    },
+    {
+      kind: 'local-discovery',
+      platform: 'android',
+      provider: 'local-adb',
+      endpoint: 'PRIVATE_ENDPOINT',
+    },
+    {
+      kind: 'local-discovery',
+      platform: 'android',
+      provider: 'local-adb',
+      target: targetKey,
+    },
+    {
+      kind: 'local-discovery',
+      platform: 'android',
+      provider: 'local-adb',
+      deviceKind: 'emulator',
+    },
+  ];
+
+  for (const invalid of invalidRoutes) {
+    assert.throws(
+      () => resolveCapabilityBackend(invalid as CapabilityRoute, 'discovery', configuration),
+      /Invalid local discovery route/,
+    );
+  }
+});
+
+test('local discovery parser rejects prototypes, inherited fields, and accessors before handlers', async () => {
+  let getterCalls = 0;
+  const inherited = Object.create({
+    platform: 'android',
+    provider: 'local-adb',
+  }) as Record<string, unknown>;
+  Object.defineProperty(inherited, 'kind', {
+    value: 'local-discovery',
+    enumerable: true,
+  });
+  const customPrototype = Object.assign(Object.create({ custom: true }), {
+    kind: 'local-discovery',
+    platform: 'android',
+    provider: 'local-adb',
+  });
+  const symbolKey = Symbol('private-route');
+  const hostileRoutes: unknown[] = [
+    inherited,
+    customPrototype,
+    {
+      get kind() {
+        getterCalls += 1;
+        return 'local-discovery';
+      },
+      platform: 'android',
+      provider: 'local-adb',
+    },
+    {
+      kind: 'local-discovery',
+      get platform() {
+        getterCalls += 1;
+        return getterCalls === 1 ? 'android' : 'ios';
+      },
+      provider: 'local-adb',
+    },
+    {
+      kind: 'local-discovery',
+      platform: 'android',
+      get provider() {
+        getterCalls += 1;
+        return getterCalls === 1 ? 'local-adb' : 'local-core-device';
+      },
+    },
+    { kind: 'local-discovery', platform: 'android' },
+    {
+      kind: 'local-discovery',
+      platform: 'android',
+      provider: 'local-adb',
+      extra: 'PRIVATE_EXTRA',
+    },
+    {
+      kind: 'local-discovery',
+      platform: 'android',
+      provider: 'local-adb',
+      endpoint: 'PRIVATE_ENDPOINT',
+    },
+    {
+      kind: 'local-discovery',
+      platform: 'android',
+      provider: 'local-adb',
+      [symbolKey]: 'PRIVATE_SYMBOL',
+    },
+  ];
+  const calls = { g3: 0, legacy: 0, notApplicable: 0 };
+  const handlers: CapabilityBackendHandlers<string> = {
+    async g3() {
+      calls.g3 += 1;
+      return 'g3';
+    },
+    async legacy() {
+      calls.legacy += 1;
+      return 'legacy';
+    },
+    async notApplicable() {
+      calls.notApplicable += 1;
+      return 'not-applicable';
+    },
+  };
+
+  for (const hostile of hostileRoutes) {
+    await assert.rejects(
+      dispatchCapabilityBackend(
+        hostile as CapabilityRoute,
+        'discovery',
+        { android: { discovery: true }, ios: { discovery: true } },
+        handlers,
+      ),
+      (error) => {
+        assert.equal(error instanceof Error, true);
+        if (!(error instanceof Error)) return false;
+        assert.match(error.message, /Invalid (local discovery|capability) route/);
+        assert.doesNotMatch(error.message, /PRIVATE|android|ios|local-adb|local-core-device/);
+        return true;
+      },
+    );
+  }
+  assert.equal(getterCalls, 0);
+  assert.deepEqual(calls, { g3: 0, legacy: 0, notApplicable: 0 });
+});
+
+test('local discovery rejects non-discovery capabilities before any handler', async () => {
+  const calls = { g3: 0, legacy: 0, notApplicable: 0 };
+  const handlers: CapabilityBackendHandlers<string> = {
+    async g3() {
+      calls.g3 += 1;
+      return 'g3';
+    },
+    async legacy() {
+      calls.legacy += 1;
+      return 'legacy';
+    },
+    async notApplicable() {
+      calls.notApplicable += 1;
+      return 'not-applicable';
+    },
+  };
+  const route: CapabilityRoute = {
+    kind: 'local-discovery',
+    platform: 'android',
+    provider: 'local-adb',
+  };
+
+  for (const capability of [
+    'preparation-facts',
+    'application-inspection',
+    'endpoint-status',
+  ] as const) {
+    await assert.rejects(
+      dispatchCapabilityBackend(
+        route,
+        capability,
+        { android: { [capability]: true }, ios: {} },
+        handlers,
+      ),
+      /only support the discovery capability/,
+    );
+  }
+  assert.deepEqual(calls, { g3: 0, legacy: 0, notApplicable: 0 });
+});
+
+test('local discovery dispatch correlates provider and invokes one configured backend', async () => {
+  const androidRoute: CapabilityRoute = {
+    kind: 'local-discovery',
+    platform: 'android',
+    provider: 'local-adb',
+  };
+  const iosRoute: CapabilityRoute = {
+    kind: 'local-discovery',
+    platform: 'ios',
+    provider: 'local-core-device',
+  };
+  const configuration: G3ReadOnlyBackendConfiguration = {
+    android: { discovery: true },
+    ios: { discovery: false },
+  };
+  const resolution = resolveCapabilityBackend(androidRoute, 'discovery', configuration);
+  const calls = { resolver: 0, g3: 0, legacy: 0, notApplicable: 0 };
+  const handlers: CapabilityBackendHandlers<string> = {
+    async g3() {
+      calls.g3 += 1;
+      return 'g3';
+    },
+    async legacy() {
+      calls.legacy += 1;
+      return 'legacy';
+    },
+    async notApplicable() {
+      calls.notApplicable += 1;
+      return 'not-applicable';
+    },
+  };
+  const countingResolver: typeof resolveCapabilityBackend = (...parameters) => {
+    calls.resolver += 1;
+    return resolveCapabilityBackend(...parameters);
+  };
+
+  await assert.rejects(
+    dispatchResolvedCapabilityBackend(iosRoute, resolution, handlers),
+    /does not match the operation target/,
+  );
+  assert.deepEqual(calls, { resolver: 0, g3: 0, legacy: 0, notApplicable: 0 });
+
+  let providerGetterCalls = 0;
+  const accessorRoute = {
+    kind: 'local-discovery',
+    platform: 'android',
+    get provider() {
+      providerGetterCalls += 1;
+      return 'local-adb';
+    },
+  };
+  await assert.rejects(
+    dispatchResolvedCapabilityBackend(accessorRoute as CapabilityRoute, resolution, handlers),
+    /Invalid local discovery route/,
+  );
+  assert.equal(providerGetterCalls, 0);
+  assert.deepEqual(calls, { resolver: 0, g3: 0, legacy: 0, notApplicable: 0 });
+
+  const selected = await dispatchCapabilityBackend(
+    androidRoute,
+    'discovery',
+    configuration,
+    handlers,
+    undefined,
+    countingResolver,
+  );
+  assert.equal(selected, 'g3');
+  assert.deepEqual(calls, { resolver: 1, g3: 1, legacy: 0, notApplicable: 0 });
+});
+
 test('resolved backend has no post-start fallback behavior or alternate backend', () => {
   const resolution = resolveCapabilityBackend(
     { kind: 'lifecycle-target', target },
@@ -981,6 +1271,32 @@ function assertSensitiveRoutingInputsDoNotCompile(
   void endpointStatus.inspect('http://private-endpoint.invalid');
 }
 void assertSensitiveRoutingInputsDoNotCompile;
+
+function assertInvalidLocalDiscoveryRoutesDoNotCompile() {
+  const androidWrongProvider: CapabilityRoute = {
+    kind: 'local-discovery',
+    platform: 'android',
+    // @ts-expect-error Android local discovery can only use the local ADB provider.
+    provider: 'local-core-device',
+  };
+  const iosWrongProvider: CapabilityRoute = {
+    kind: 'local-discovery',
+    platform: 'ios',
+    // @ts-expect-error iOS local discovery can only use the local CoreDevice provider.
+    provider: 'local-adb',
+  };
+  const routingData: CapabilityRoute = {
+    kind: 'local-discovery',
+    platform: 'android',
+    provider: 'local-adb',
+    // @ts-expect-error Pre-target discovery routes cannot contain routing identity.
+    routingId: 'PRIVATE_ROUTE',
+  };
+  void androidWrongProvider;
+  void iosWrongProvider;
+  void routingData;
+}
+void assertInvalidLocalDiscoveryRoutesDoNotCompile;
 
 function assertInvalidReadyInputsDoNotCompile() {
   // @ts-expect-error A ready proof cannot omit its viewport observation.

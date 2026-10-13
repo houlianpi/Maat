@@ -8,6 +8,8 @@ export type G3ReadOnlyCapability =
   | 'endpoint-status';
 
 export type CapabilityRoute =
+  | Readonly<{ kind: 'local-discovery'; platform: 'android'; provider: 'local-adb' }>
+  | Readonly<{ kind: 'local-discovery'; platform: 'ios'; provider: 'local-core-device' }>
   | Readonly<{ kind: 'lifecycle-target'; target: LifecycleTarget }>
   | Readonly<{ kind: 'remote'; platform: MobilePlatform }>
   | Readonly<{ kind: 'host'; platform: 'web' | 'macos' }>;
@@ -17,6 +19,13 @@ export type G3ReadOnlyBackendConfiguration = Readonly<
 >;
 
 export type ResolvedCapabilityBackend =
+  | Readonly<{
+      capability: 'discovery';
+      backend: 'g3' | 'legacy';
+      routeKind: 'local-discovery';
+      platform: MobilePlatform;
+      provider: 'local-adb' | 'local-core-device';
+    }>
   | Readonly<{
       capability: G3ReadOnlyCapability;
       backend: 'g3' | 'legacy';
@@ -43,6 +52,66 @@ export type CapabilityBackendHandlers<Result> = Readonly<{
   notApplicable(signal?: AbortSignal): Promise<Result>;
 }>;
 
+type LocalDiscoverySnapshot =
+  | Readonly<{ kind: 'local-discovery'; platform: 'android'; provider: 'local-adb' }>
+  | Readonly<{
+      kind: 'local-discovery';
+      platform: 'ios';
+      provider: 'local-core-device';
+    }>;
+
+function isEnumerableDataDescriptor(
+  descriptor: PropertyDescriptor | undefined,
+): descriptor is PropertyDescriptor & { value: unknown } {
+  return (
+    descriptor !== undefined && descriptor.enumerable === true && Object.hasOwn(descriptor, 'value')
+  );
+}
+
+/**
+ * Snapshot an untrusted pre-target route without invoking accessors or rereading validated fields.
+ * Null means another route kind with a safe own kind data descriptor.
+ */
+function parseLocalDiscoveryRoute(value: unknown): LocalDiscoverySnapshot | null {
+  if (typeof value !== 'object' || value === null) throw new Error('Invalid capability route.');
+  const prototype = Object.getPrototypeOf(value);
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const kind = descriptors.kind;
+  if (!isEnumerableDataDescriptor(kind)) throw new Error('Invalid capability route.');
+  if (kind.value !== 'local-discovery') return null;
+
+  if (prototype !== Object.prototype && prototype !== null)
+    throw new Error('Invalid local discovery route.');
+  const ownKeys = Reflect.ownKeys(descriptors);
+  if (
+    ownKeys.length !== 3 ||
+    !['kind', 'platform', 'provider'].every((key) => ownKeys.includes(key))
+  )
+    throw new Error('Invalid local discovery route.');
+  const platform = descriptors.platform;
+  const provider = descriptors.provider;
+  if (!isEnumerableDataDescriptor(platform) || !isEnumerableDataDescriptor(provider))
+    throw new Error('Invalid local discovery route.');
+
+  const platformValue = platform.value;
+  const providerValue = provider.value;
+  if (platformValue === 'android' && providerValue === 'local-adb') {
+    return Object.freeze({
+      kind: 'local-discovery',
+      platform: 'android',
+      provider: 'local-adb',
+    });
+  }
+  if (platformValue === 'ios' && providerValue === 'local-core-device') {
+    return Object.freeze({
+      kind: 'local-discovery',
+      platform: 'ios',
+      provider: 'local-core-device',
+    });
+  }
+  throw new Error('Invalid local discovery route.');
+}
+
 /**
  * Resolve exactly one backend before an operation starts.
  *
@@ -55,32 +124,46 @@ export function resolveCapabilityBackend(
   capability: G3ReadOnlyCapability,
   configuration: G3ReadOnlyBackendConfiguration,
 ): ResolvedCapabilityBackend {
-  if (route.kind === 'host') {
+  const localDiscovery = parseLocalDiscoveryRoute(route);
+  if (localDiscovery) {
+    if (capability !== 'discovery')
+      throw new Error('Local discovery routes only support the discovery capability.');
     return Object.freeze({
       capability,
-      backend: 'not-applicable',
-      routeKind: route.kind,
-      platform: route.platform,
-    });
-  }
-  if (route.kind === 'remote') {
-    return Object.freeze({
-      capability,
-      backend: 'legacy',
-      routeKind: route.kind,
-      platform: route.platform,
+      backend: configuration[localDiscovery.platform].discovery === true ? 'g3' : 'legacy',
+      routeKind: localDiscovery.kind,
+      platform: localDiscovery.platform,
+      provider: localDiscovery.provider,
     });
   }
 
-  const { identity } = route.target;
+  const nonLocalRoute = route as Exclude<CapabilityRoute, { kind: 'local-discovery' }>;
+  if (nonLocalRoute.kind === 'host') {
+    return Object.freeze({
+      capability,
+      backend: 'not-applicable',
+      routeKind: nonLocalRoute.kind,
+      platform: nonLocalRoute.platform,
+    });
+  }
+  if (nonLocalRoute.kind === 'remote') {
+    return Object.freeze({
+      capability,
+      backend: 'legacy',
+      routeKind: nonLocalRoute.kind,
+      platform: nonLocalRoute.platform,
+    });
+  }
+
+  const { identity } = nonLocalRoute.target;
   const useG3 =
     isLocalPhysicalMobileTarget(identity) && configuration[identity.platform][capability] === true;
   return Object.freeze({
     capability,
     backend: useG3 ? 'g3' : 'legacy',
-    routeKind: route.kind,
+    routeKind: nonLocalRoute.kind,
     platform: identity.platform,
-    target: route.target.key,
+    target: nonLocalRoute.target.key,
   });
 }
 
@@ -88,16 +171,26 @@ function routeMatchesResolution(
   route: CapabilityRoute,
   resolution: ResolvedCapabilityBackend,
 ): boolean {
-  if (route.kind !== resolution.routeKind) return false;
-  if (route.kind === 'lifecycle-target') {
+  const localDiscovery = parseLocalDiscoveryRoute(route);
+  if (localDiscovery) {
+    return (
+      resolution.routeKind === 'local-discovery' &&
+      localDiscovery.platform === resolution.platform &&
+      localDiscovery.provider === resolution.provider
+    );
+  }
+
+  const nonLocalRoute = route as Exclude<CapabilityRoute, { kind: 'local-discovery' }>;
+  if (nonLocalRoute.kind !== resolution.routeKind) return false;
+  if (nonLocalRoute.kind === 'lifecycle-target') {
     if (resolution.routeKind !== 'lifecycle-target') return false;
     return (
-      route.target.key === resolution.target &&
-      route.target.identity.platform === resolution.platform
+      nonLocalRoute.target.key === resolution.target &&
+      nonLocalRoute.target.identity.platform === resolution.platform
     );
   }
   if (resolution.routeKind === 'lifecycle-target') return false;
-  return route.platform === resolution.platform;
+  return nonLocalRoute.platform === resolution.platform;
 }
 
 /**
@@ -124,7 +217,7 @@ export async function dispatchResolvedCapabilityBackend<Result>(
 }
 
 /** Resolve at operation start and invoke only the selected backend for that operation. */
-export function dispatchCapabilityBackend<Result>(
+export async function dispatchCapabilityBackend<Result>(
   route: CapabilityRoute,
   capability: G3ReadOnlyCapability,
   configuration: G3ReadOnlyBackendConfiguration,
@@ -133,5 +226,5 @@ export function dispatchCapabilityBackend<Result>(
   resolver: typeof resolveCapabilityBackend = resolveCapabilityBackend,
 ): Promise<Result> {
   const resolution = resolver(route, capability, configuration);
-  return dispatchResolvedCapabilityBackend(route, resolution, handlers, signal);
+  return await dispatchResolvedCapabilityBackend(route, resolution, handlers, signal);
 }
