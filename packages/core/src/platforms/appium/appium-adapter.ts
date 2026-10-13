@@ -43,6 +43,27 @@ import {
   PhoneCloseUncertainError,
 } from '../../mobile/contracts/device.ts';
 import { assertMobileCreationAllowed } from '../../mobile/devices/coordinator.ts';
+import {
+  acquireDeviceLock,
+  assertDeviceLockReleaseCertain,
+  DeviceLockHandleCleanupError,
+  DeviceLockReleaseUncertainError,
+  type DeviceLockLease,
+} from '../../mobile/devices/device-lock.ts';
+
+function errorWithDeviceLockReleaseFailure(
+  primary: unknown,
+  supplemental: DeviceLockHandleCleanupError | DeviceLockReleaseUncertainError,
+): AggregateError {
+  const message = primary instanceof Error ? primary.message : String(primary);
+  const suffix =
+    supplemental instanceof DeviceLockHandleCleanupError
+      ? 'Device lock ownership was released, but local handle cleanup also failed.'
+      : 'Device lock release also became uncertain.';
+  return new AggregateError([primary, supplemental], `${message}; ${suffix}`, {
+    cause: primary,
+  });
+}
 
 export type AppiumAdapterDefinition = {
   id: NativePlatform;
@@ -50,6 +71,22 @@ export type AppiumAdapterDefinition = {
   platformName: string;
   automationName: string;
 };
+
+type InspectionProviders = Readonly<{
+  devices(platform: NativePlatform): ReturnType<typeof discoverDevices>;
+  applications(
+    environment: NativeEnvironment,
+    query: string,
+    identity?: DeviceIdentity,
+  ): ReturnType<typeof discoverApplications>;
+}>;
+
+const inspectionProviders = new WeakMap<AppiumPlatformAdapter, InspectionProviders>();
+const productionInspectionProviders: InspectionProviders = Object.freeze({
+  devices: discoverDevices,
+  applications: (environment, query, identity) =>
+    discoverApplications(environment, query, undefined, identity),
+});
 
 export class AppiumPlatformAdapter implements PlatformAdapter {
   readonly id: NativePlatform;
@@ -135,6 +172,7 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     candidate: PublicDeviceCandidate;
   };
   #lifecycleToken?: object;
+  #deviceLock?: DeviceLockLease;
   #closeUncertain = false;
   private get hintsFile(): string {
     const directory =
@@ -189,6 +227,13 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   }
 
   hasLifecycleUncertainty(): boolean {
+    if (this.id === 'android' || this.id === 'ios') {
+      try {
+        assertDeviceLockReleaseCertain();
+      } catch {
+        return true;
+      }
+    }
     return this.#closeUncertain || this.#runtime.hasUncertainOwnedSession;
   }
 
@@ -256,8 +301,10 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   }
 
   async inspectSetup(request: SetupInspection): Promise<unknown> {
+    if (this.id === 'android' || this.id === 'ios') assertDeviceLockReleaseCertain();
+    const providers = inspectionProviders.get(this) ?? productionInspectionProviders;
     if (request.kind === 'devices') {
-      const devices = await discoverDevices(this.id);
+      const devices = await providers.devices(this.id);
       if (this.id === 'macos') return devices;
       return devices.map((device, index) => ({
         number: index + 1,
@@ -278,10 +325,9 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       !this.#target
     )
       throw new Error('Select the current phone with check_device_ready before finding apps.');
-    const apps = await discoverApplications(
+    const apps = await providers.applications(
       this.#targetEnvironment() ?? this.environment!,
       request.query ?? '',
-      undefined,
       this.#target?.identity,
     );
     const appCapability = this.id === 'android' ? 'appium:appPackage' : 'appium:bundleId';
@@ -359,6 +405,7 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         if (typeof nestedDeviceName === 'string') selectors.push({ name: nestedDeviceName });
       }
     }
+
     if (!selectors.length) return candidates;
 
     const matches = identities.filter((identity) =>
@@ -432,6 +479,13 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       }
       const identity = exact[0]!;
       const candidate = this.#publicCandidate(identity, selection.candidateNumber);
+      const deviceLock = acquireDeviceLock(identity);
+      this.#deviceLock = deviceLock;
+      try {
+        signal?.throwIfAborted();
+      } catch (error) {
+        this.#releaseBeforePin(deviceLock, error);
+      }
       this.#target = {
         identity,
         endpoint,
@@ -477,6 +531,13 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     }
     const identity = identities[0]!;
     const candidate = candidates[0]!;
+    const deviceLock = acquireDeviceLock(identity);
+    this.#deviceLock = deviceLock;
+    try {
+      signal?.throwIfAborted();
+    } catch (error) {
+      this.#releaseBeforePin(deviceLock, error);
+    }
     this.#target = {
       identity,
       endpoint,
@@ -534,8 +595,25 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   }
 
   #assertCloseCertain() {
+    if (this.id === 'android' || this.id === 'ios') assertDeviceLockReleaseCertain();
     assertMobileCreationAllowed(this.isMigratedLocalPhysicalRoute());
     if (this.hasLifecycleUncertainty()) throw new PhoneCloseUncertainError();
+  }
+
+  #releaseBeforePin(deviceLock: DeviceLockLease, primary: unknown): never {
+    try {
+      deviceLock.release();
+      this.#deviceLock = undefined;
+    } catch (cleanup) {
+      if (cleanup instanceof DeviceLockHandleCleanupError) this.#deviceLock = undefined;
+      const supplemental =
+        cleanup instanceof DeviceLockHandleCleanupError ||
+        cleanup instanceof DeviceLockReleaseUncertainError
+          ? cleanup
+          : new DeviceLockReleaseUncertainError();
+      throw errorWithDeviceLockReleaseFailure(primary, supplemental);
+    }
+    throw primary;
   }
 
   #persistentHintsEnvironment(): NativeEnvironment {
@@ -926,6 +1004,7 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     };
   }
   async close() {
+    if (this.id === 'android' || this.id === 'ios') assertDeviceLockReleaseCertain();
     assertMobileCreationAllowed(this.isMigratedLocalPhysicalRoute());
     if (this.#closeUncertain) throw new PhoneCloseUncertainError();
     const observingPriorCleanup = this.#runtime.hasUncertainOwnedSession;
@@ -936,9 +1015,37 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         this.#closeUncertain = true;
       throw error;
     }
+    try {
+      this.#deviceLock?.release();
+    } catch (error) {
+      if (error instanceof DeviceLockHandleCleanupError) {
+        this.#deviceLock = undefined;
+        this.#target = undefined;
+        this.#lifecycleToken = undefined;
+        this.#selectionSnapshot = undefined;
+        this.#closeUncertain = false;
+        throw error;
+      }
+      if (error instanceof DeviceLockReleaseUncertainError) throw error;
+      throw new DeviceLockReleaseUncertainError();
+    }
+    this.#deviceLock = undefined;
     this.#target = undefined;
     this.#lifecycleToken = undefined;
     this.#selectionSnapshot = undefined;
     this.#closeUncertain = false;
   }
+}
+
+/**
+ * Source-internal inspection harness. Providers are held outside the instance and can only be
+ * reached by inspectSetup after its mobile admission barrier.
+ */
+export function createAppiumPlatformAdapterWithInspectionProvidersForTests(
+  definition: AppiumAdapterDefinition,
+  providers: InspectionProviders,
+): AppiumPlatformAdapter {
+  const adapter = new AppiumPlatformAdapter(definition);
+  inspectionProviders.set(adapter, Object.freeze({ ...providers }));
+  return adapter;
 }

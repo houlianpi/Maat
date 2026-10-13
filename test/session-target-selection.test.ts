@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { connect, createServer } from 'node:net';
 import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -9,9 +10,25 @@ import { AppiumPlatformAdapter } from '../packages/core/src/platforms/appium/app
 import type { Device } from '../packages/core/src/setup/devices.ts';
 import type { IosDevice } from '../packages/core/src/setup/ios-devices.ts';
 import type { TargetSelectionResult } from '../packages/core/src/mobile/contracts/device.ts';
+import { identityFromLocalFact } from '../packages/core/src/mobile/contracts/device.ts';
+import {
+  acquireDeviceLock,
+  setDeviceLockStateDirectoryForTests,
+} from '../packages/core/src/mobile/devices/device-lock.ts';
+import { MobileBusyError } from '../packages/core/src/mobile/devices/coordinator.ts';
 import { MaatApi } from '../packages/core/src/api/maat-api.ts';
 import { PlatformRegistry } from '../packages/core/src/core/platforms/registry.ts';
 import { aggregateSetup } from '../packages/core/src/setup-assistant/model.ts';
+
+let deviceLockRoot = '';
+test.beforeEach(() => {
+  deviceLockRoot = mkdtempSync(path.join(tmpdir(), 'maat-adapter-lock-'));
+  setDeviceLockStateDirectoryForTests(deviceLockRoot);
+});
+test.afterEach(() => {
+  setDeviceLockStateDirectoryForTests(undefined);
+  rmSync(deviceLockRoot, { recursive: true, force: true });
+});
 
 class SelectionAdapter extends AppiumPlatformAdapter {
   devices: Device[] = [];
@@ -85,6 +102,68 @@ const iphones: IosDevice[] = [
     developerMode: 'enabled',
   },
 ];
+
+function phoneIdentity(device = phones[0]!) {
+  return identityFromLocalFact({ source: 'local-adb', platform: 'android', device });
+}
+
+test('device lock conflict precedes lifecycle pin, Session, preparation, and action', async () => {
+  const owner = acquireDeviceLock(phoneIdentity());
+  const adapter = new SelectionAdapter();
+  adapter.devices = [phones[0]!];
+  try {
+    await assert.rejects(adapter.selectReadinessTarget(), MobileBusyError);
+    assert.equal(adapter.isMigratedLocalPhysicalRoute(), false);
+    assert.equal(adapter.runtime.isRunning, false);
+    assert.equal(adapter.runtime.currentSessionGeneration, undefined);
+    assert.doesNotMatch(
+      JSON.stringify(adapter, Object.getOwnPropertyNames(adapter)),
+      /machine-secret|[a-f0-9]{64}|\.lock|deviceLock|file descriptor/i,
+    );
+  } finally {
+    owner.release();
+  }
+});
+
+test('stale selection acquires no lock and successful close releases the selected device', async () => {
+  const staleAdapter = new SelectionAdapter();
+  staleAdapter.devices = phones;
+  const proposal = await staleAdapter.selectReadinessTarget();
+  assert.equal(proposal.status, 'selection-required');
+  if (proposal.status !== 'selection-required') return;
+  staleAdapter.devices = [phones[0]!];
+  assert.equal(
+    (
+      await staleAdapter.selectReadinessTarget({
+        discoveryId: proposal.discoveryId,
+        candidateNumber: 1,
+      })
+    ).status,
+    'selection-stale',
+  );
+  acquireDeviceLock(phoneIdentity()).release();
+
+  const adapter = new SelectionAdapter();
+  adapter.devices = [phones[0]!];
+  assert.equal((await adapter.selectReadinessTarget()).status, 'target-selected');
+  assert.throws(() => acquireDeviceLock(phoneIdentity()), MobileBusyError);
+  await adapter.close();
+  acquireDeviceLock(phoneIdentity()).release();
+});
+
+test('Abort observed after acquisition releases before lifecycle pin', async () => {
+  const controller = new AbortController();
+  class AbortingSelectionAdapter extends SelectionAdapter {
+    protected override async discoverSelectionDevices(): Promise<Device[]> {
+      controller.abort(new Error('test abort'));
+      return [phones[0]!];
+    }
+  }
+  const adapter = new AbortingSelectionAdapter();
+  await assert.rejects(adapter.selectReadinessTarget(undefined, controller.signal), /test abort/);
+  assert.equal(adapter.isMigratedLocalPhysicalRoute(), false);
+  acquireDeviceLock(phoneIdentity()).release();
+});
 
 test('zero, one and multiple candidates produce safe lifecycle selection outcomes', async () => {
   const adapter = new SelectionAdapter();
@@ -237,6 +316,7 @@ test('top-level and supported nested Appium deviceName hints narrow an exact pro
         ).status,
         'target-selected',
       );
+      await adapter.close();
     }
   } finally {
     if (previous === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;

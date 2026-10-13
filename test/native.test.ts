@@ -41,8 +41,73 @@ import type {
   SetupReadiness,
   SetupReadinessSuccess,
 } from '../packages/core/src/setup-assistant/types.ts';
+import {
+  deviceLockReleaseCallCountsForTests,
+  resetDeviceLockFaultTestState,
+  setDeviceLockCloseFailureForTests,
+  setDeviceLockStateDirectoryForTests,
+} from '../packages/core/src/mobile/devices/device-lock.ts';
 let workerCreations = 0;
 channel('maat.exploration-worker.creation').subscribe(() => workerCreations++);
+
+let nativeDeviceLockRoot = '';
+test.beforeEach(async () => {
+  nativeDeviceLockRoot = await mkdtemp(path.join(tmpdir(), 'maat-native-device-lock-'));
+  setDeviceLockStateDirectoryForTests(nativeDeviceLockRoot);
+});
+test.afterEach(async () => {
+  setDeviceLockStateDirectoryForTests(undefined);
+  resetDeviceLockFaultTestState();
+  await rm(nativeDeviceLockRoot, { recursive: true, force: true });
+});
+
+async function deviceLockChild(
+  routingId: string,
+  behavior = 'release',
+): Promise<Record<string, unknown>> {
+  const child = spawn(
+    process.execPath,
+    [
+      '--experimental-strip-types',
+      path.join(import.meta.dirname, 'fixtures', 'device-lock-child.ts'),
+      nativeDeviceLockRoot,
+      routingId,
+      behavior,
+    ],
+    { stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk: Buffer) => {
+    stdout += chunk.toString();
+  });
+  child.stderr.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
+  const deadline = setTimeout(() => {
+    if (child.pid === undefined) return;
+    try {
+      process.kill(child.pid, 'SIGKILL');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+    }
+  }, 3_000);
+  try {
+    const [code, signal] = await new Promise<[number | null, NodeJS.Signals | null]>(
+      (resolve, reject) => {
+        child.once('error', reject);
+        child.once('close', (exitCode, exitSignal) => resolve([exitCode, exitSignal]));
+      },
+    );
+    assert.equal(signal, null);
+    assert.equal(code, 0, stderr);
+    const firstLine = stdout.split('\n').find(Boolean);
+    assert.ok(firstLine, 'Device-lock contender returned no result.');
+    return JSON.parse(firstLine) as Record<string, unknown>;
+  } finally {
+    clearTimeout(deadline);
+  }
+}
 
 function publicErrorReachableText(value: unknown, seen = new Set<unknown>()): string {
   if (value === null || value === undefined || seen.has(value)) return '';
@@ -942,6 +1007,8 @@ test('cold Android ready refuses remote or ambiguous routing without local probe
         mock.adb!.requests.some((request) => request.startsWith('shell,')),
         false,
       );
+      await api.close();
+      apis.pop();
     }
   } finally {
     for (const api of apis) await api.close();
@@ -1728,6 +1795,13 @@ test('uncertain user release blocks ready, execute and configure without a secon
     });
     assert.equal(adapter.runtime.hasUncertainOwnedSession, true);
     assert.equal(adapter.runtime.isRunning, false);
+    assert.deepEqual(deviceLockReleaseCallCountsForTests(), { unlock: 0, close: 0 });
+    assert.deepEqual(await deviceLockChild('MOCK_LOCAL_DEVICE'), {
+      status: 'error',
+      name: 'MobileBusyError',
+      code: 'mobile-busy',
+      message: 'Another mobile operation is already in progress.',
+    });
     const requestsAfterClose = mock.requests.length;
     const blocked = (error: unknown) => {
       assert.ok(error instanceof Error);
@@ -1758,6 +1832,106 @@ test('uncertain user release blocks ready, execute and configure without a secon
     else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test('released lock with handle close failure forgets the target without retrying unlock', async () => {
+  class CloseFailureAdapter extends AppiumPlatformAdapter {
+    protected override async discoverSelectionDevices() {
+      return [{ id: 'MOCK_CLOSE_DEVICE', name: 'mock close phone', kind: 'device' as const }];
+    }
+  }
+  const adapter = new CloseFailureAdapter({
+    id: 'android',
+    label: 'Android',
+    platformName: 'Android',
+    automationName: 'UiAutomator2',
+  });
+  assert.equal((await adapter.selectReadinessTarget())?.status, 'target-selected');
+  setDeviceLockCloseFailureForTests(new Error('private injected close failure'));
+  await assert.rejects(adapter.close(), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.equal((error as Error & { code?: string }).code, 'device-lock-handle-cleanup');
+    assert.equal(error.message.includes('private injected'), false);
+    return true;
+  });
+  assert.equal(adapter.isMigratedLocalPhysicalRoute(), false);
+  assert.equal(adapter.hasLifecycleUncertainty(), false);
+  assert.deepEqual(deviceLockReleaseCallCountsForTests(), { unlock: 1, close: 1 });
+  assert.deepEqual(await deviceLockChild('MOCK_CLOSE_DEVICE'), { status: 'acquired' });
+  await adapter.close();
+  assert.deepEqual(deviceLockReleaseCallCountsForTests(), { unlock: 1, close: 1 });
+  await assert.rejects(adapter.execute('return 1;'), /PHONE_TARGET_SELECTION_REQUIRED/);
+});
+
+test('device unlock failure retains the target and blocks later mobile entries', async () => {
+  const result = await deviceLockChild('MOCK_UNLOCK_DEVICE', 'barrier-active');
+  assert.deepEqual(result, {
+    status: 'barrier-confirmed',
+    behavior: 'barrier-active',
+    code: 'lock-release-uncertain',
+    unlock: 1,
+    close: 0,
+    current: 'macos',
+    deviceInspections: 0,
+    applicationInspections: 0,
+  });
+  assert.doesNotMatch(JSON.stringify(result), /MOCK_|private|path|pid|digest|[a-f0-9]{64}/i);
+});
+
+test('Abort primary survives released-lock handle close failure without retaining a target', async () => {
+  const controller = new AbortController();
+  const primary = new Error('primary close-failure abort');
+  class AbortCloseFailureAdapter extends AppiumPlatformAdapter {
+    protected override async discoverSelectionDevices() {
+      controller.abort(primary);
+      return [{ id: 'MOCK_ABORT_CLOSE_DEVICE', name: 'mock abort phone', kind: 'device' as const }];
+    }
+  }
+  const adapter = new AbortCloseFailureAdapter({
+    id: 'android',
+    label: 'Android',
+    platformName: 'Android',
+    automationName: 'UiAutomator2',
+  });
+  setDeviceLockCloseFailureForTests(new Error('private injected close failure'));
+  await assert.rejects(
+    adapter.selectReadinessTarget(undefined, controller.signal),
+    (error: unknown) => {
+      assert.ok(error instanceof AggregateError);
+      assert.equal(error.cause, primary);
+      assert.equal(error.errors[0], primary);
+      assert.equal(
+        (error.errors[1] as Error & { code?: string }).code,
+        'device-lock-handle-cleanup',
+      );
+      assert.equal(error.message.includes('private injected'), false);
+      return true;
+    },
+  );
+  assert.equal(adapter.isMigratedLocalPhysicalRoute(), false);
+  assert.equal(adapter.hasLifecycleUncertainty(), false);
+  assert.deepEqual(deviceLockReleaseCallCountsForTests(), { unlock: 1, close: 1 });
+  assert.deepEqual(await deviceLockChild('MOCK_ABORT_CLOSE_DEVICE'), {
+    status: 'acquired',
+  });
+  await adapter.close();
+  assert.deepEqual(deviceLockReleaseCallCountsForTests(), { unlock: 1, close: 1 });
+  await assert.rejects(adapter.execute('return 1;'), /PHONE_TARGET_SELECTION_REQUIRED/);
+});
+
+test('Abort primary is preserved when pre-pin device unlock cleanup also fails', async () => {
+  const result = await deviceLockChild('MOCK_ABORT_UNLOCK_DEVICE', 'barrier-abort');
+  assert.deepEqual(result, {
+    status: 'barrier-confirmed',
+    behavior: 'barrier-abort',
+    code: 'lock-release-uncertain',
+    unlock: 1,
+    close: 0,
+    current: 'macos',
+    deviceInspections: 0,
+    applicationInspections: 0,
+  });
+  assert.doesNotMatch(JSON.stringify(result), /MOCK_|private|path|pid|digest|[a-f0-9]{64}/i);
 });
 
 test(
@@ -2328,6 +2502,19 @@ test('native API reuses its Session after execution failure and retains the exte
     assert.deepEqual((persisted.capabilities as Record<string, unknown>)['vendor:options'], {
       nested: { ordinarySetting: 'safe-setting' },
     });
+    const firstRelease = projects.mobile.releaseCurrentSession();
+    const secondRelease = projects.mobile.releaseCurrentSession();
+    assert.equal(firstRelease, secondRelease);
+    assert.deepEqual(await Promise.all([firstRelease, secondRelease]), [
+      { released: true, platform: 'android' },
+      { released: true, platform: 'android' },
+    ]);
+    assert.equal(mock.deleted(), 1);
+    await projects.mobile.releaseCurrentSession();
+    assert.equal(mock.deleted(), 1);
+    assert.equal(adapter.runtime.isRunning, false);
+    assert.equal(adapter.runtime.hasUncertainOwnedSession, false);
+    assert.equal(mock.server.listening, true);
     class RestartAdapter extends AppiumPlatformAdapter {
       protected override async discoverSelectionDevices() {
         return [{ id: 'MOCK_LOCAL_DEVICE', name: 'mock', kind: 'device' as const }];
@@ -2342,19 +2529,7 @@ test('native API reuses its Session after execution failure and retains the exte
     await restored.initialize();
     assert.equal(restored.runtime.isRunning, false);
     assert.equal((await restored.selectReadinessTarget())?.status, 'target-selected');
-    const firstRelease = projects.mobile.releaseCurrentSession();
-    const secondRelease = projects.mobile.releaseCurrentSession();
-    assert.equal(firstRelease, secondRelease);
-    assert.deepEqual(await Promise.all([firstRelease, secondRelease]), [
-      { released: true, platform: 'android' },
-      { released: true, platform: 'android' },
-    ]);
-    assert.equal(mock.deleted(), 1);
-    await projects.mobile.releaseCurrentSession();
-    assert.equal(mock.deleted(), 1);
-    assert.equal(adapter.runtime.isRunning, false);
-    assert.equal(adapter.runtime.hasUncertainOwnedSession, false);
-    assert.equal(mock.server.listening, true);
+    await restored.close();
   } finally {
     if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
     else process.env.MAAT_SESSION_HINTS_DIR = previousHints;

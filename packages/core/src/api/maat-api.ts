@@ -20,6 +20,7 @@ import { ExplorationExecutionError } from '../core/exploration/runtime.ts';
 import { AppiumPlatformAdapter } from '../platforms/appium/appium-adapter.ts';
 import { nativeReadinessCode } from '../platforms/appium/runtime/session.ts';
 import { isMobilePlatform, runMobileOperation } from '../mobile/devices/coordinator.ts';
+import { assertDeviceLockReleaseCertain } from '../mobile/devices/device-lock.ts';
 import {
   processConnectionJobSupervisor,
   type ConnectionJobSupervisor,
@@ -244,8 +245,18 @@ export class MaatApi {
       assertConnectionJobAccess();
       const current = this.registry.current as PlatformRegistry['current'] & MigratedRouteAdapter;
       const target = this.registry.get(id);
+      if (isMobilePlatform(id)) assertDeviceLockReleaseCertain();
+      let leavingAfterLockReleaseUncertainty = false;
+      if (!isMobilePlatform(id)) {
+        try {
+          assertDeviceLockReleaseCertain();
+        } catch {
+          leavingAfterLockReleaseUncertainty = true;
+        }
+      }
       const select = async () => {
-        if (isMigratedLocalPhysicalRoute(current)) current.assertLifecycleCertain?.();
+        if (isMigratedLocalPhysicalRoute(current) && !leavingAfterLockReleaseUncertainty)
+          current.assertLifecycleCertain?.();
         await this.registry.select(id);
         const status = this.registry.current.status();
         if (id === 'macos') {
@@ -269,6 +280,7 @@ export class MaatApi {
     status: () => this.registry.current.status(),
     configure: async (configuration: Record<string, unknown>) => {
       const adapter = this.registry.current;
+      if (isMobilePlatform(adapter.id)) assertDeviceLockReleaseCertain();
       if (isMigratedLocalPhysicalRoute(adapter)) {
         this.connectionJobs.assertAccess();
         assertConnectionJobAccess();
@@ -281,15 +293,18 @@ export class MaatApi {
       if (!adapter.configureSession) {
         throw new Error(`${adapter.label} does not accept Session hints.`);
       }
-      if (isMobilePlatform(adapter.id))
+      if (isMobilePlatform(adapter.id)) {
+        assertDeviceLockReleaseCertain();
         return runMobileOperation(
           () => adapter.configureSession!(setup),
           () => isMigratedLocalPhysicalRoute(adapter),
         );
+      }
       await adapter.configureSession(setup);
     },
     inspectSetup: async (request: SetupInspection) => {
       const adapter = this.registry.current;
+      if (isMobilePlatform(adapter.id)) assertDeviceLockReleaseCertain();
       if (!adapter.inspectSetup) {
         throw new Error(`${adapter.label} does not support this setup inspection.`);
       }
@@ -309,6 +324,11 @@ export class MaatApi {
         return Promise.reject(
           new Error('releaseCurrentSession requires the Android or iOS platform.'),
         );
+      try {
+        assertDeviceLockReleaseCertain();
+      } catch (error) {
+        return Promise.reject(error);
+      }
       const platform = adapter.id;
       const release = runMobileOperation(
         async () => {
@@ -392,6 +412,7 @@ export class MaatApi {
         throw new Error(
           `Setup readiness is unsupported for ${adapter.id}; only Android and iOS are supported.`,
         );
+      assertDeviceLockReleaseCertain();
       const platform = adapter.id;
       if (
         input.targetSelection !== undefined &&
@@ -561,23 +582,27 @@ export class MaatApi {
   readonly exploration = {
     executeJavaScript: (code: string, signal?: AbortSignal) => {
       const adapter = this.registry.current;
-      return isMobilePlatform(adapter.id)
-        ? runMobileOperation(
-            () => adapter.execute(code, signal),
-            () => isMigratedLocalPhysicalRoute(adapter),
-          )
-        : adapter.execute(code, signal);
+      if (!isMobilePlatform(adapter.id)) return adapter.execute(code, signal);
+      assertDeviceLockReleaseCertain();
+      return runMobileOperation(
+        () => adapter.execute(code, signal),
+        () => isMigratedLocalPhysicalRoute(adapter),
+      );
     },
     context: () => this.registry.current.codeContext,
   };
 
   close(): Promise<void> {
     const adapters = this.registry.list();
-    return adapters.some((adapter) => isMobilePlatform(adapter.id))
-      ? runMobileOperation(
-          () => this.registry.close(),
-          () => adapters.some(isMigratedLocalPhysicalRoute),
-        )
-      : this.registry.close();
+    if (!adapters.some((adapter) => isMobilePlatform(adapter.id))) return this.registry.close();
+    try {
+      assertDeviceLockReleaseCertain();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return runMobileOperation(
+      () => this.registry.close(),
+      () => adapters.some(isMigratedLocalPhysicalRoute),
+    );
   }
 }
