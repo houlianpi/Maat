@@ -8,6 +8,7 @@ import type { TargetSelectionResult } from '../packages/core/src/mobile/contract
 import { MaatApi } from '../packages/core/src/api/maat-api.ts';
 import { PlatformRegistry } from '../packages/core/src/core/platforms/registry.ts';
 import { aggregateSetup } from '../packages/core/src/setup-assistant/model.ts';
+import type { JavaScriptSession } from '../packages/core/src/core/exploration/runtime.ts';
 
 class SelectionAdapter extends AppiumPlatformAdapter {
   devices: Device[] = [];
@@ -166,6 +167,64 @@ test('successful close clears target and candidate handles while a new adapter i
   const next = new SelectionAdapter();
   next.devices = phones;
   assert.equal((await next.selectReadinessTarget()).status, 'selection-required');
+});
+
+test('concurrent successful API releases share one owned cleanup and start fresh discovery', async () => {
+  const adapter = new SelectionAdapter();
+  adapter.devices = phones;
+  const proposal = await adapter.selectReadinessTarget();
+  assert.equal(proposal.status, 'selection-required');
+  if (proposal.status !== 'selection-required') return;
+  assert.equal(
+    (
+      await adapter.selectReadinessTarget({
+        discoveryId: proposal.discoveryId,
+        candidateNumber: 1,
+      })
+    ).status,
+    'target-selected',
+  );
+  await adapter.runtime.configureResolved({
+    environment: {
+      platform: 'android',
+      serverUrl: 'http://127.0.0.1:4723/',
+      capabilities: {},
+    },
+    capabilities: {},
+  });
+  let cleanups = 0;
+  const owned: JavaScriptSession = {
+    async execute() {
+      return [];
+    },
+    async close() {
+      cleanups += 1;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    },
+  };
+  (adapter.runtime as unknown as { session: JavaScriptSession }).session = owned;
+  const api = new MaatApi(new PlatformRegistry([adapter], 'android'), process.cwd());
+
+  const firstRelease = api.mobile.releaseCurrentSession();
+  const secondRelease = api.mobile.releaseCurrentSession();
+  assert.equal(firstRelease, secondRelease);
+  assert.deepEqual(await Promise.all([firstRelease, secondRelease]), [
+    { released: true, platform: 'android' },
+    { released: true, platform: 'android' },
+  ]);
+  assert.equal(cleanups, 1);
+  assert.equal(
+    (
+      await adapter.selectReadinessTarget({
+        discoveryId: proposal.discoveryId,
+        candidateNumber: 1,
+      })
+    ).status,
+    'selection-stale',
+  );
+  assert.equal((await adapter.selectReadinessTarget()).status, 'selection-required');
+  await api.mobile.releaseCurrentSession();
+  assert.equal(cleanups, 1);
 });
 
 test('MaatApi discloses a newly selected target before doctor and readiness side effects', async () => {

@@ -1,6 +1,6 @@
 # Maat MVP 设备管理与连接管理重建设计
 
-> 状态：设计已按 PROD-006 修订确认；尚未实装，G1 尚未完成
+> 状态：设计已按 PROD-006 修订确认；部分 G1 合同已实装，G1 尚未完成
 >
 > 范围：Android / iOS 设备发现、生命周期目标选择、连接、Appium Session、就绪与恢复
 >
@@ -577,7 +577,7 @@ recovery 不创建新的目标选择；原 identity 缺失或原 endpoint 变化
 | Gate            | 顺序与进入条件                | 退出证据                                                                                                                         |
 | --------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | G0 设计确认     | **已按 PROD-006 修订通过**    | 生命周期选择设计已获批；不表示已实装、G1 已完成或共享旧代码获删除授权                                                            |
-| G1 合同测试     | **待完成**                    | identity、零／单／多候选、临时引用重验证、生命周期 pin/forget、无磁盘 binding、全局 busy、ownership、防重放和负合同通过          |
+| G1 合同测试     | **部分合同已实装，仍待完成**  | identity、零／单／多候选、临时引用重验证、生命周期 pin/forget、无磁盘 binding、全局 busy、ownership、防重放和负合同通过          |
 | G2 新内部端口   | **新内部端口**                | facade 后建立 device selection/connection/preparation/session/readiness ports；公开 API 与 Pi wire shape 不变                    |
 | G3 切只读路径   | **切只读路径**                | discovery、PreparationFacts、application inspection、endpoint status 按平台切换；不得创建 Session 或执行准备副作用               |
 | G3P 切准备计划  | **G3 后、G4 前**              | planner/policy/grant store 接入；事实满足为 no-op，副作用由单一 connection job 执行一次，uncertain 不重试                        |
@@ -591,6 +591,12 @@ recovery 不创建新的目标选择；原 identity 缺失或原 endpoint 变化
 到旧 backend。legacy Session hints 只作兼容输入，不迁移到 `BindingStore`，不持久化或
 静默重解释为用户选择。G1 可删除上述隔离的新 `BindingStore`，但 G5/G5M/G6/G7 继续保护
 共享旧 resolver、hints 解释、macOS backend 和 compatibility 路径。
+
+当前生命周期 release/close 切片的自动化证据绑定
+`test/session-target-selection.test.ts` 与 `test/native.test.ts`：覆盖成功释放后重新 discovery、
+旧候选引用失效、owned Session 一次 cleanup、cleanup 失败后的 fail-closed、创建不确定时不
+DELETE 未知 Session、动作不重放，以及 legacy hints 写盘脱敏。该证据仅说明部分 G1 合同已
+实装；不代表 G1 通过，不证明跨进程锁或后续 Gate，也不替代 Android／iOS 真机验收。
 
 ## 9. 验收标准与真机矩阵
 

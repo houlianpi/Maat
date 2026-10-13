@@ -147,7 +147,17 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     return isLocalPhysicalMobileTarget(this.target?.identity);
   }
 
+  /** Internal facade guard used before switching away from a blocked mobile lifecycle. */
+  assertLifecycleCertain(): void {
+    this.assertCloseCertain();
+  }
+
+  hasLifecycleUncertainty(): boolean {
+    return this.closeUncertain || this.runtime.hasUncertainOwnedSession;
+  }
+
   async initialize(): Promise<void> {
+    this.assertCloseCertain();
     assertMobileCreationAllowed(this.isMigratedLocalPhysicalRoute());
     if (this.initialized) return;
     this.environment = await readNativeEnvironment(this.hintsFile).catch((error) => {
@@ -430,7 +440,124 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
 
   private assertCloseCertain() {
     assertMobileCreationAllowed(this.isMigratedLocalPhysicalRoute());
-    if (this.closeUncertain) throw new PhoneCloseUncertainError();
+    if (this.hasLifecycleUncertainty()) throw new PhoneCloseUncertainError();
+  }
+
+  private persistentHintsEnvironment(): NativeEnvironment {
+    if (this.id !== 'android' && this.id !== 'ios') return this.environment!;
+    const routingId = this.target?.identity.routingId;
+    // These exact normalized names cover the same cold-routing inputs consumed by
+    // session-resolver, plus transient lifecycle/selection metadata. Do not infer
+    // routing from substrings: valid automation, App and signing capabilities survive.
+    const unsafeCapabilityNames = new Set([
+      'remoteadbhost',
+      'adbport',
+      'systemport',
+      'wdalocalport',
+      'udid',
+      'serial',
+      'devicename',
+      'avd',
+      'webdriveragenturl',
+      'wdabaseurl',
+      'sessionid',
+      'routingid',
+      'canonicalkey',
+      'discoveryid',
+      'candidatereference',
+      'candidatenumber',
+      'selectedby',
+      'consent',
+      'lifecyclepin',
+    ]);
+    const normalizedCapabilityName = (key: string) => key.split(':').at(-1)!.toLowerCase();
+    const normalizedCredentialName = (key: string) =>
+      normalizedCapabilityName(key).replace(/[_-]/g, '');
+    const unsafeSecretNames = new Set([
+      'password',
+      'secret',
+      'token',
+      'accesstoken',
+      'credential',
+      'accesskey',
+      'apikey',
+      'authorization',
+      'clientsecret',
+      'clienttoken',
+      'authtoken',
+      'bearertoken',
+      'refreshtoken',
+      'securitytoken',
+      'privatekey',
+      'oauthtoken',
+      'oauthsecret',
+      'sessiontoken',
+      'signingkey',
+    ]);
+    const unsafeVendorIdentityNames = new Set(['username', 'user']);
+    const isVendorOptions = (key: string) =>
+      /^[^:]+:options$/i.test(key) && key.toLowerCase() !== 'appium:options';
+    const unsafePath = /^(?:file:|\/|[A-Za-z]:[\\/])/i;
+    const sanitize = (value: unknown, vendorOptions = false): unknown => {
+      if (typeof value === 'string') {
+        if ((routingId && value === routingId) || unsafePath.test(value)) return undefined;
+        try {
+          const url = new URL(value);
+          if (
+            url.username ||
+            url.password ||
+            [...url.searchParams.keys()].some((key) => {
+              const normalized = normalizedCredentialName(key);
+              return unsafeSecretNames.has(normalized) || unsafeVendorIdentityNames.has(normalized);
+            })
+          )
+            return undefined;
+        } catch {
+          // Non-URL strings are ordinary capability values.
+        }
+        return value;
+      }
+      if (Array.isArray(value)) {
+        const items = value
+          .map((item) => sanitize(item, vendorOptions))
+          .filter((item) => item !== undefined);
+        return items;
+      }
+      if (isRecord(value)) {
+        return Object.fromEntries(
+          Object.entries(value).flatMap(([key, item]) => {
+            const normalized = normalizedCapabilityName(key);
+            if (
+              unsafeCapabilityNames.has(normalized) ||
+              unsafeSecretNames.has(normalizedCredentialName(key)) ||
+              (vendorOptions && unsafeVendorIdentityNames.has(normalized))
+            )
+              return [];
+            const safe = sanitize(item, vendorOptions || isVendorOptions(key));
+            return safe === undefined ? [] : [[key, safe]];
+          }),
+        );
+      }
+      return value;
+    };
+    const capabilities = sanitize(this.environment!.capabilities);
+    return {
+      platform: this.environment!.platform,
+      ...(this.environment!.serverUrl ? { serverUrl: this.environment!.serverUrl } : {}),
+      ...(this.environment!.device
+        ? {
+            device: {
+              ...(this.environment!.device.kind ? { kind: this.environment!.device.kind } : {}),
+              ...(this.environment!.device.name &&
+              this.environment!.device.name !== routingId &&
+              !unsafePath.test(this.environment!.device.name)
+                ? { name: this.environment!.device.name }
+                : {}),
+            },
+          }
+        : {}),
+      capabilities: isRecord(capabilities) ? capabilities : {},
+    };
   }
 
   private async prepare(
@@ -642,9 +769,13 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     }
     // A successful Session confirms stable hints; transient UUID/App data never enter environment.
     await mkdir(path.dirname(this.hintsFile), { recursive: true });
-    await writeFile(this.hintsFile, JSON.stringify(this.environment, null, 2) + '\n', {
-      mode: 0o600,
-    });
+    await writeFile(
+      this.hintsFile,
+      JSON.stringify(this.persistentHintsEnvironment(), null, 2) + '\n',
+      {
+        mode: 0o600,
+      },
+    );
     const notices = this.notices.splice(0);
     return notices.length
       ? [{ type: 'text' as const, text: notices.join('\n') }, ...observations]
@@ -660,11 +791,14 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     };
   }
   async close() {
-    this.assertCloseCertain();
+    assertMobileCreationAllowed(this.isMigratedLocalPhysicalRoute());
+    if (this.closeUncertain) throw new PhoneCloseUncertainError();
+    const observingPriorCleanup = this.runtime.hasUncertainOwnedSession;
     try {
       await this.runtime.close();
     } catch (error) {
-      if (this.id === 'android' || this.id === 'ios') this.closeUncertain = true;
+      if (!observingPriorCleanup && (this.id === 'android' || this.id === 'ios'))
+        this.closeUncertain = true;
       throw error;
     }
     this.target = undefined;

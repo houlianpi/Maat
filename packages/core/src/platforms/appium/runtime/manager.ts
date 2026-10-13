@@ -109,7 +109,20 @@ export class NativeManager implements JavaScriptSession {
   private async invalidateSession() {
     const current = this.session;
     if (this.session === current) this.session = undefined;
-    await current?.close();
+    if (current) await this.closeOwnedSession(current);
+  }
+  private async closeOwnedSession(current: JavaScriptSession) {
+    if (this.uncertainOwnership) {
+      await this.uncertainOwnership.closeResult;
+      return;
+    }
+    const ownership = Object.freeze({
+      session: current,
+      closeResult: Promise.resolve().then(() => current.close()),
+    });
+    this.uncertainOwnership = ownership;
+    await ownership.closeResult;
+    if (this.uncertainOwnership === ownership) this.uncertainOwnership = undefined;
   }
   async close() {
     if (this.creationUncertain) throw new PhoneSessionCreationUncertainError();
@@ -122,12 +135,6 @@ export class NativeManager implements JavaScriptSession {
     // Explicit release immediately revokes execution, while retaining the exact ownership
     // and one-shot close result until cleanup is known to have succeeded.
     this.session = undefined;
-    const ownership = Object.freeze({
-      session: current,
-      closeResult: Promise.resolve().then(() => current.close()),
-    });
-    this.uncertainOwnership = ownership;
-    await ownership.closeResult;
-    if (this.uncertainOwnership === ownership) this.uncertainOwnership = undefined;
+    await this.closeOwnedSession(current);
   }
 }

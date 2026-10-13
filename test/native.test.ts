@@ -1430,7 +1430,7 @@ test('Native manager cancellation cleanup failure preserves the exact primary ex
   assert.equal(manager.isRunning, false);
 });
 
-test('native timeout plus remote DELETE failure is visible at API level and never triggers App fallback', async () => {
+test('native timeout plus remote DELETE failure blocks all lifecycle entry points without replay or retry', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'maat-native-double-failure-'));
   const previousHints = process.env.MAAT_SESSION_HINTS_DIR;
   process.env.MAAT_SESSION_HINTS_DIR = root;
@@ -1451,8 +1451,20 @@ test('native timeout plus remote DELETE failure is visible at API level and neve
     platformName: 'Android',
     automationName: 'UiAutomator2',
   });
-
-  const api = new MaatApi(new PlatformRegistry([adapter], 'android'), root);
+  const fallback: PlatformAdapter = {
+    id: 'web',
+    label: 'Web',
+    codeContext: { language: 'javascript', globals: [], guidelines: [] },
+    async initialize() {},
+    async execute() {
+      return [];
+    },
+    status() {
+      return { id: 'web', label: 'Web', session: 'idle' };
+    },
+    async close() {},
+  };
+  const api = new MaatApi(new PlatformRegistry([adapter, fallback], 'android'), root);
   try {
     await api.platforms.configureSession({
       serverUrl: mock.url,
@@ -1460,11 +1472,13 @@ test('native timeout plus remote DELETE failure is visible at API level and neve
       capabilities: { 'appium:deviceName': 'mock', 'appium:appPackage': 'com.example.target' },
     });
     await selectTestTarget(api);
+    let executionFailure: unknown;
     await assert.rejects(api.exploration.executeJavaScript('while (true) {}'), (error: unknown) => {
       assert.ok(error instanceof AggregateError);
       assert.ok(error.cause instanceof WorkerTerminatedError);
       assert.match(error.message, /exceeded 1000ms/);
       assert.match(error.message, /delete Session failed/);
+      executionFailure = error;
       return true;
     });
     assert.equal(api.platforms.status().session, 'idle');
@@ -1472,10 +1486,31 @@ test('native timeout plus remote DELETE failure is visible at API level and neve
     assert.equal(mock.deleted(), 1);
     assert.deepEqual(adapter.appTarget, { 'appium:appPackage': 'com.example.target' });
     options.deleteFailure = false;
-    await api.exploration.executeJavaScript("console.log('explicit recovery');");
-    assert.equal(mock.created(), 2);
+    const requestsAfterFailure = [...mock.requests];
+    const blocked = (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /ownership is uncertain|PHONE_CLOSE_UNCERTAIN/);
+      return true;
+    };
+    await assert.rejects(api.setup.ready(), blocked);
+    await assert.rejects(
+      api.exploration.executeJavaScript("console.log('explicit recovery');"),
+      blocked,
+    );
+    await assert.rejects(api.platforms.configureSession({ capabilities: {} }), blocked);
+    await assert.rejects(api.platforms.select('web'), blocked);
+    assert.equal(api.registry.current, adapter);
+    assert.ok(executionFailure instanceof AggregateError);
+    const cleanupFailure = executionFailure.errors[1];
+    const firstRelease = api.mobile.releaseCurrentSession();
+    const secondRelease = api.mobile.releaseCurrentSession();
+    assert.equal(firstRelease, secondRelease);
+    await assert.rejects(firstRelease, (error: unknown) => error === cleanupFailure);
+    await assert.rejects(api.close(), (error: unknown) => error === cleanupFailure);
+    assert.equal(mock.created(), 1);
+    assert.equal(mock.deleted(), 1);
+    assert.deepEqual(mock.requests, requestsAfterFailure);
   } finally {
-    await api.close();
     if (previousHints === undefined) delete process.env.MAAT_SESSION_HINTS_DIR;
     else process.env.MAAT_SESSION_HINTS_DIR = previousHints;
     await mock.close();
@@ -1552,7 +1587,10 @@ test('uncertain user release blocks ready, execute and configure without a secon
       blocked,
     );
     await assert.rejects(api.platforms.configureSession({ device: { name: 'other' } }), blocked);
-    await assert.rejects(api.mobile.releaseCurrentSession(), blocked);
+    await assert.rejects(api.mobile.releaseCurrentSession(), (error: unknown) => {
+      assert.equal(error, primary);
+      return true;
+    });
     await assert.rejects(adapter.runtime.execute("console.log('must not execute');"), /ownership/);
     assert.equal(adapter.runtime.hasUncertainOwnedSession, true);
     assert.equal(mock.created(), 1);
@@ -2035,6 +2073,60 @@ test('native API reuses its Session after execution failure and retains the exte
   try {
     process.env.MAAT_SESSION_HINTS_DIR = hints;
     await projects.platforms.select('android');
+    const persistedCapabilityInput = {
+      'appium:routingId': 'MOCK_LOCAL_DEVICE',
+      'appium:canonicalKey': 'canonical-MOCK_LOCAL_DEVICE',
+      'appium:discoveryId': 'private-discovery',
+      'appium:candidateReference': 'private-candidate',
+      'appium:selectedBy': 'single-candidate',
+      'appium:consent': true,
+      'appium:lifecyclePin': 'private-pin',
+      'appium:sessionId': 'private-session',
+      'appium:localConfigPath': '/Users/private/mobile.json',
+      'sauce:options': {
+        username: 'private-sauce-user',
+        accessKey: 'private-sauce-key',
+        build: 'safe-build',
+      },
+      'bstack:options': {
+        userName: 'private-bstack-user',
+        accessKey: 'private-bstack-key',
+        projectName: 'safe-project',
+      },
+      'vendor:options': {
+        clientSecret: 'private-client-secret',
+        securityToken: 'private-security-token',
+        privateKey: 'private-key',
+        nested: {
+          apiKey: 'private-api-key',
+          authorization: 'private-authorization',
+          ordinarySetting: 'safe-setting',
+        },
+      },
+      'example:userInfoEndpoint': 'https://private-user:private-password@example.test/wd/hub',
+      'example:queryEndpoint': 'https://example.test/wd/hub?accessKey=private-query-key',
+      'example:apiQueryEndpoint': 'https://example.test/wd/hub?api_key=private-api-query',
+      'example:accessQueryEndpoint': 'https://example.test/wd/hub?access_key=private-access-query',
+      'appium:options': {
+        remoteAdbHost: 'private-host',
+        'appium:adbPort': 7000,
+        systemPort: 8201,
+        'appium:wdaLocalPort': 8101,
+        udid: 'MOCK_LOCAL_DEVICE',
+        serial: 'PRIVATE_SERIAL',
+        deviceName: 'PRIVATE_DEVICE_ROUTE',
+        sessionId: 'nested-private-session',
+        discoveryId: 'nested-private-discovery',
+        appPackage: 'example.nested',
+        appActivity: '.Main',
+        bundleId: 'example.bundle',
+        automationName: 'UiAutomator2',
+        xcodeOrgId: 'SAFE_TEAM',
+        xcodeSigningId: 'Apple Development',
+        updatedWDABundleId: 'example.wda',
+      },
+    };
+    const originalCapabilities = structuredClone(persistedCapabilityInput);
     await projects.platforms.configureSession({
       serverUrl: mock.url,
       device: { kind: 'device', name: 'mock' },
@@ -2050,6 +2142,7 @@ test('native API reuses its Session after execution failure and retains the exte
     assert.equal(adapter.sessionHints?.capabilities['appium:deviceName'], 'mock');
     const code = `await expect(driver.$('~welcome')).toHaveText('Welcome');`;
     await projects.exploration.executeJavaScript(code);
+    Object.assign(adapter.sessionHints!.capabilities, structuredClone(persistedCapabilityInput));
     await assert.rejects(projects.exploration.executeJavaScript('expect(1).toBe(2);'), /2/);
     assert.equal(adapter.runtime.isRunning, true);
     assert.equal(mock.deleted(), 0);
@@ -2057,7 +2150,56 @@ test('native API reuses its Session after execution failure and retains the exte
     assert.equal(mock.created(), 1);
     assert.deepEqual(await readdir(base), []);
     assert.deepEqual(await readdir(hints), ['android.json']);
-    await projects.close();
+    const persistedHints = await readFile(path.join(hints, 'android.json'), 'utf8');
+    assert.deepEqual(persistedCapabilityInput, originalCapabilities);
+    assert.doesNotMatch(
+      persistedHints,
+      /MOCK_LOCAL_DEVICE|PRIVATE_SERIAL|PRIVATE_DEVICE_ROUTE|private-host|canonical|discovery|candidate|selectedBy|consent|lifecycle|sessionId|remoteAdbHost|adbPort|systemPort|wdaLocalPort|\/Users\/private|private-sauce|private-bstack|private-api-key|private-authorization|private-client-secret|private-security-token|private-key|private-user|private-password|private-query-key|private-api-query|private-access-query/,
+    );
+    const persisted = JSON.parse(persistedHints) as {
+      capabilities: { 'appium:options': Record<string, unknown> };
+    };
+    assert.deepEqual(persisted.capabilities['appium:options'], {
+      appPackage: 'example.nested',
+      appActivity: '.Main',
+      bundleId: 'example.bundle',
+      automationName: 'UiAutomator2',
+      xcodeOrgId: 'SAFE_TEAM',
+      xcodeSigningId: 'Apple Development',
+      updatedWDABundleId: 'example.wda',
+    });
+    assert.deepEqual((persisted.capabilities as Record<string, unknown>)['sauce:options'], {
+      build: 'safe-build',
+    });
+    assert.deepEqual((persisted.capabilities as Record<string, unknown>)['bstack:options'], {
+      projectName: 'safe-project',
+    });
+    assert.deepEqual((persisted.capabilities as Record<string, unknown>)['vendor:options'], {
+      nested: { ordinarySetting: 'safe-setting' },
+    });
+    class RestartAdapter extends AppiumPlatformAdapter {
+      protected override async discoverSelectionDevices() {
+        return [{ id: 'MOCK_LOCAL_DEVICE', name: 'mock', kind: 'device' as const }];
+      }
+    }
+    const restored = new RestartAdapter({
+      id: 'android',
+      label: 'Android',
+      platformName: 'Android',
+      automationName: 'UiAutomator2',
+    });
+    await restored.initialize();
+    assert.equal(restored.runtime.isRunning, false);
+    assert.equal((await restored.selectReadinessTarget())?.status, 'target-selected');
+    const firstRelease = projects.mobile.releaseCurrentSession();
+    const secondRelease = projects.mobile.releaseCurrentSession();
+    assert.equal(firstRelease, secondRelease);
+    assert.deepEqual(await Promise.all([firstRelease, secondRelease]), [
+      { released: true, platform: 'android' },
+      { released: true, platform: 'android' },
+    ]);
+    assert.equal(mock.deleted(), 1);
+    await projects.mobile.releaseCurrentSession();
     assert.equal(mock.deleted(), 1);
     assert.equal(adapter.runtime.isRunning, false);
     assert.equal(adapter.runtime.hasUncertainOwnedSession, false);
@@ -2882,6 +3024,74 @@ test('one process-wide mobile execute blocks other instances before configure, r
   assert.equal(configures, 1);
 });
 
+test('platform selection shares the mobile slot while non-mobile selection remains independent', async () => {
+  const execution = deferred<JavaScriptObservation[]>();
+  let webInitializes = 0;
+  let iosInitializes = 0;
+  const android = operationAdapter('android', { execute: () => execution.promise });
+  const web = operationAdapter('web', {
+    initialize: async () => {
+      webInitializes++;
+    },
+  });
+  const ios = operationAdapter('ios', {
+    initialize: async () => {
+      iosInitializes++;
+    },
+  });
+  const api = new MaatApi(new PlatformRegistry([android, web, ios], 'android'), process.cwd());
+  const running = api.exploration.executeJavaScript('long mobile execution');
+  await assert.rejects(api.platforms.select('web'), assertMobileBusy);
+  await assert.rejects(api.platforms.select('ios'), assertMobileBusy);
+  assert.equal(api.registry.current, android);
+  assert.deepEqual({ webInitializes, iosInitializes }, { webInitializes: 0, iosInitializes: 0 });
+
+  let nonMobileInitializes = 0;
+  const macos = operationAdapter('macos', {
+    initialize: async () => {
+      nonMobileInitializes++;
+    },
+  });
+  const independent = new MaatApi(
+    new PlatformRegistry([operationAdapter('web'), macos], 'web'),
+    process.cwd(),
+    {
+      detector: async () => aggregateSetup({ platform: 'macos', capabilities: [] }),
+    },
+  );
+  await independent.platforms.select('macos');
+  await independent.platforms.select('web');
+  assert.equal(nonMobileInitializes, 1);
+
+  execution.resolve([]);
+  await running;
+  await api.platforms.select('web');
+  await api.platforms.select('ios');
+  assert.equal(api.registry.current, ios);
+  assert.deepEqual({ webInitializes, iosInitializes }, { webInitializes: 1, iosInitializes: 1 });
+
+  const release = deferred<void>();
+  let releaseTargetInitializes = 0;
+  const releaseAndroid = operationAdapter('android', { close: () => release.promise });
+  const releaseWeb = operationAdapter('web', {
+    initialize: async () => {
+      releaseTargetInitializes++;
+    },
+  });
+  const releaseApi = new MaatApi(
+    new PlatformRegistry([releaseAndroid, releaseWeb], 'android'),
+    process.cwd(),
+  );
+  const releasing = releaseApi.mobile.releaseCurrentSession();
+  await assert.rejects(releaseApi.platforms.select('web'), assertMobileBusy);
+  assert.equal(releaseApi.registry.current, releaseAndroid);
+  assert.equal(releaseTargetInitializes, 0);
+  release.resolve();
+  await releasing;
+  await releaseApi.platforms.select('web');
+  assert.equal(releaseTargetInitializes, 1);
+});
+
 test('mobile readiness is a reverse holder and leases survive error or Abort until execution settles', async () => {
   const readiness = deferred<JavaScriptObservation[]>();
   const readyOwner = operationApi(
@@ -2966,6 +3176,14 @@ test('idle close is one mobile lease, waits for every adapter, and aggregates cl
     process.cwd(),
   );
   const contender = operationApi(operationAdapter('android'));
+  let selectInitializes = 0;
+  const selectWeb = operationAdapter('web');
+  const selectIos = operationAdapter('ios', {
+    initialize: async () => {
+      selectInitializes++;
+    },
+  });
+  const selecting = new MaatApi(new PlatformRegistry([selectWeb, selectIos], 'web'), process.cwd());
   let closeSettled = false;
   const closing = api.close().finally(() => {
     closeSettled = true;
@@ -2974,6 +3192,9 @@ test('idle close is one mobile lease, waits for every adapter, and aggregates cl
     contender.exploration.executeJavaScript('blocked by close'),
     assertMobileBusy,
   );
+  await assert.rejects(selecting.platforms.select('ios'), assertMobileBusy);
+  assert.equal(selecting.registry.current, selectWeb);
+  assert.equal(selectInitializes, 0);
   assert.equal(androidCloses, 1);
   slowWeb.resolve();
   await new Promise((resolve) => setImmediate(resolve));
@@ -2985,6 +3206,8 @@ test('idle close is one mobile lease, waits for every adapter, and aggregates cl
     return true;
   });
   await contender.exploration.executeJavaScript('after all cleanup settled');
+  await selecting.platforms.select('ios');
+  assert.equal(selectInitializes, 1);
 
   const singleFailure = new Error('single close failure');
   const single = new PlatformRegistry([

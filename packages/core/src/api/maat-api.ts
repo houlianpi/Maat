@@ -22,6 +22,8 @@ import { assertConnectionJobAccess } from '../mobile/connection/job-slot.ts';
 
 type MigratedRouteAdapter = {
   isMigratedLocalPhysicalRoute(): boolean;
+  assertLifecycleCertain?(): void;
+  hasLifecycleUncertainty?(): boolean;
 };
 
 function isMigratedLocalPhysicalRoute(adapter: unknown): boolean {
@@ -131,6 +133,7 @@ function validateReadyInput(input: SetupReadyInput): {
 /** Stable, host-neutral product API. Agent hosts translate this API into their own tools and UI. */
 export class MaatApi {
   readonly #connectionJobCaller = Symbol('maat-api-connection-job-caller');
+  #mobileRelease?: Promise<{ released: true; platform: 'android' | 'ios' }>;
   readonly workspaceRoot: string;
   readonly registry: PlatformRegistry;
   readonly setupAssistant: SetupAssistant;
@@ -154,16 +157,29 @@ export class MaatApi {
     select: async (id: string) => {
       this.connectionJobs.assertAccess();
       assertConnectionJobAccess();
-      await this.registry.select(id);
-      const status = this.registry.current.status();
-      if (id === 'macos') {
-        const adapter = this.registry.current as { sessionHints?: { serverUrl?: string } };
-        await this.setupAssistant.check({
-          platform: id,
-          serverUrl: adapter.sessionHints?.serverUrl,
-        });
-      }
-      return status;
+      const current = this.registry.current as PlatformRegistry['current'] & MigratedRouteAdapter;
+      const target = this.registry.get(id);
+      const select = async () => {
+        if (isMigratedLocalPhysicalRoute(current)) current.assertLifecycleCertain?.();
+        await this.registry.select(id);
+        const status = this.registry.current.status();
+        if (id === 'macos') {
+          const adapter = this.registry.current as { sessionHints?: { serverUrl?: string } };
+          await this.setupAssistant.check({
+            platform: id,
+            serverUrl: adapter.sessionHints?.serverUrl,
+          });
+        }
+        return status;
+      };
+      return isMobilePlatform(current.id) || (target && isMobilePlatform(target.id))
+        ? runMobileOperation(
+            select,
+            () =>
+              isMigratedLocalPhysicalRoute(current) ||
+              (target !== undefined && isMigratedLocalPhysicalRoute(target)),
+          )
+        : select();
     },
     status: () => this.registry.current.status(),
     configure: async (configuration: Record<string, unknown>) => {
@@ -202,16 +218,34 @@ export class MaatApi {
       released: true;
       platform: 'android' | 'ios';
     }> => {
+      if (this.#mobileRelease) return this.#mobileRelease;
       const adapter = this.registry.current;
-      return runMobileOperation(
+      if (!isMobilePlatform(adapter.id))
+        return Promise.reject(
+          new Error('releaseCurrentSession requires the Android or iOS platform.'),
+        );
+      const platform = adapter.id;
+      const release = runMobileOperation(
         async () => {
-          if (!isMobilePlatform(adapter.id))
-            throw new Error('releaseCurrentSession requires the Android or iOS platform.');
           await adapter.close();
-          return { released: true, platform: adapter.id };
+          return { released: true as const, platform };
         },
         () => isMigratedLocalPhysicalRoute(adapter),
       );
+      this.#mobileRelease = release;
+      void release.then(
+        () => {
+          if (this.#mobileRelease === release) this.#mobileRelease = undefined;
+        },
+        () => {
+          const lifecycle = adapter as typeof adapter & MigratedRouteAdapter;
+          if (!lifecycle.hasLifecycleUncertainty?.() && this.#mobileRelease === release)
+            this.#mobileRelease = undefined;
+          // A failed owned cleanup retains this exact release result as the process-local
+          // safety record. Admission failures such as mobile-busy remain retryable.
+        },
+      );
+      return release;
     },
   };
 

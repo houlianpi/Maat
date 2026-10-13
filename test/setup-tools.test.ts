@@ -312,7 +312,7 @@ test('iOS setup command and later retry/diagnostics remain iOS and read-only', a
   }
 });
 
-test('iOS readiness schema removes initialization gate and only forwards explicit first-install grant', async () => {
+test('iOS readiness schema removes initialization gate and only forwards explicit first-install grant', async (t) => {
   const maat = createMaat();
   await maat.platforms.select('ios');
   const calls: unknown[] = [];
@@ -393,42 +393,45 @@ test('iOS readiness schema removes initialization gate and only forwards explici
       signal: undefined,
     });
 
-    test('check_device_ready returns model-visible selection without claiming readiness', async () => {
-      const maat = createMaat();
-      await maat.platforms.select('android');
-      maat.setup.ready = async () =>
-        ({
-          ready: false,
-          platform: 'android',
-          status: 'selection-required',
-          discoveryId: 'ephemeral-discovery',
-          candidates: [
-            {
-              candidateNumber: 1,
-              displayName: 'Alpha Phone',
-              platform: 'android',
-              kind: 'device',
-              discriminator: 'phone-a1b2',
-            },
-            {
-              candidateNumber: 2,
-              displayName: 'Beta Phone',
-              platform: 'android',
-              kind: 'device',
-              discriminator: 'phone-c3d4',
-            },
-          ],
-        }) as never;
-      const tool = createSetupTools(maat).find((item) => item.name === 'check_device_ready')!;
-      try {
-        const result = await tool.execute('select', {}, undefined, undefined, context);
-        assert.match(resultText(result), /selection|required|Alpha Phone|Beta Phone/i);
-        assert.doesNotMatch(resultText(result), /can start|可以开始手机任务/);
-        assert.equal(result.details.status, 'selection-required');
-      } finally {
-        await maat.close();
-      }
-    });
+    await t.test(
+      'check_device_ready returns model-visible selection without claiming readiness',
+      async () => {
+        const maat = createMaat();
+        await maat.platforms.select('android');
+        maat.setup.ready = async () =>
+          ({
+            ready: false,
+            platform: 'android',
+            status: 'selection-required',
+            discoveryId: 'ephemeral-discovery',
+            candidates: [
+              {
+                candidateNumber: 1,
+                displayName: 'Alpha Phone',
+                platform: 'android',
+                kind: 'device',
+                discriminator: 'phone-a1b2',
+              },
+              {
+                candidateNumber: 2,
+                displayName: 'Beta Phone',
+                platform: 'android',
+                kind: 'device',
+                discriminator: 'phone-c3d4',
+              },
+            ],
+          }) as never;
+        const tool = createSetupTools(maat).find((item) => item.name === 'check_device_ready')!;
+        try {
+          const result = await tool.execute('select', {}, undefined, undefined, context);
+          assert.match(resultText(result), /selection|required|Alpha Phone|Beta Phone/i);
+          assert.doesNotMatch(resultText(result), /can start|可以开始手机任务/);
+          assert.equal(result.details.status, 'selection-required');
+        } finally {
+          await maat.close();
+        }
+      },
+    );
     await tool.execute('grant', { allowWdaInstallation: true }, signal, undefined, context);
     assert.deepEqual(calls[2], { screenshot: undefined, allowWdaInstallation: true, signal });
     await tool.execute('deny', { allowWdaInstallation: false }, signal, undefined, context);
