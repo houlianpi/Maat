@@ -219,9 +219,12 @@ test('MaatApi discloses a newly selected target before doctor and readiness side
       androidDetector: readyDetector,
     });
     const result = await api.setup.ready();
-    assert.equal(result.ready ? 'ready' : result.status, expected);
+    if ('jobId' in result) assert.fail('Selection discovery must not create a connection job.');
+    assert.equal(result.ready, false);
+    if (result.ready) assert.fail('Expected target selection result, not readiness success.');
+    assert.equal(result.status, expected);
     assert.deepEqual(adapter.events, []);
-    if (!result.ready && result.status === 'target-selected') {
+    if (result.status === 'target-selected') {
       assert.equal(result.selectedBy, 'single-candidate');
       assert.equal(result.candidate.displayName, 'Alpha Phone');
       const continued = await api.setup.ready();

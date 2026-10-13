@@ -31,8 +31,9 @@ import type {
 } from '../packages/core/src/setup-assistant/types.ts';
 
 function successfulReadiness(result: SetupReadiness): SetupReadinessSuccess {
+  if ('jobId' in result) assert.fail('Expected direct readiness success, not a connection job.');
   assert.equal(result.ready, true);
-  if (!result.ready) throw new Error('Expected readiness success.');
+  if (result.ready !== true) assert.fail('Expected readiness success, not target selection.');
   return result;
 }
 

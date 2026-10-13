@@ -54,6 +54,14 @@ export function createSetupTools(
         'Establish or reuse the selected local Android or physical iPhone control connection and verify readiness before returning its current UI observation. Ordinary iOS connection initialization is allowed by default using a valid WDA build and an existing phone helper; live WDA must confirm unlocked state before source, screenshot or business UI. First WDA installation, signing changes and restarts require separate explicit authorization; never automatically unlock. This is not a dependency-only doctor or business validation; remote readiness is unsupported.',
       parameters: Type.Object(
         {
+          jobId: Type.Optional(
+            Type.String({
+              description:
+                'Opaque bearer ID returned by a prior check_device_ready start. With jobId, omit all start-only fields.',
+            }),
+          ),
+          jobAction: Type.Optional(Type.Union([Type.Literal('query'), Type.Literal('cancel')])),
+          waitSeconds: Type.Optional(Type.Number({ minimum: 0, maximum: 20 })),
           screenshot: Type.Optional(Type.Boolean()),
           allowWdaInstallation: Type.Optional(
             Type.Boolean({
@@ -85,9 +93,17 @@ export function createSetupTools(
         let result: Awaited<ReturnType<typeof maat.setup.ready>>;
         try {
           result = await maat.setup.ready({
-            screenshot: params.screenshot,
-            allowWdaInstallation: params.allowWdaInstallation,
-            ...(params.targetSelection ? { targetSelection: params.targetSelection } : {}),
+            ...(params.jobId
+              ? {
+                  jobId: params.jobId,
+                  ...(params.jobAction ? { jobAction: params.jobAction } : {}),
+                }
+              : {
+                  screenshot: params.screenshot,
+                  allowWdaInstallation: params.allowWdaInstallation,
+                  ...(params.targetSelection ? { targetSelection: params.targetSelection } : {}),
+                }),
+            ...(params.waitSeconds === undefined ? {} : { waitSeconds: params.waitSeconds }),
             signal,
           });
         } catch (error) {
@@ -109,6 +125,37 @@ export function createSetupTools(
           const guidance = phoneReadinessGuidance(message, locale);
           if (guidance) throw new Error(`${message}\n${guidance}`, { cause: error });
           throw error;
+        }
+        if ('jobId' in result) {
+          if (result.state !== 'succeeded') {
+            const text =
+              result.state === 'creation-uncertain'
+                ? `PHONE_READINESS_RECOVERY_REQUIRED\ncategory: ${result.category}\njobId: ${result.jobId}\nreadiness: recovery-required\nDo not start, recreate, delete, release, configure, or execute phone operations in this process.`
+                : `Phone connection job ${result.state} (jobId: ${result.jobId}${result.category ? `, category: ${result.category}` : ''}). ${
+                    result.state === 'queued' || result.state === 'running'
+                      ? 'This wait ended without stopping or extending the job; query the same jobId.'
+                      : 'This is not device readiness or business success.'
+                  }`;
+            return {
+              content: [{ type: 'text', text }],
+              structuredContent: result,
+              details: result,
+            };
+          }
+          if (result.ready !== true || !result.platform || !result.proof || !result.observations)
+            throw new Error('Succeeded connection job did not retain its readiness result.');
+          const { observations, ...snapshot } = result;
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Conclusion: phone tasks can start. The ${result.platform === 'ios' ? 'iOS' : 'Android'} control channel is ready; reuse the current observation below. This does not prove the business task completed.`,
+              },
+              ...observations,
+            ],
+            structuredContent: snapshot,
+            details: snapshot,
+          };
         }
         if (!result.ready) {
           const text =

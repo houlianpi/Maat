@@ -18,9 +18,13 @@ or an emulator for a real phone. Java is not an unconditional Mobile Use check;
 APK signing/install workflows may still require it. A Java-free real-device
 path must be verified, not inferred from an upstream doctor checklist.
 
-`check_device_ready` creates or reuses a Session and returns the current source
-and viewport, plus an optional screenshot. Session creation may deploy automation
-helpers. A service `/status` response is not proof of phone operation.
+For a selected local physical phone, `check_device_ready` starts one process-wide
+connection job that creates or reuses a Session and obtains the current source and
+viewport, plus an optional screenshot. Callers can wait for 0–20 seconds, then query
+or cancel using the returned opaque `jobId`; a wait timeout does not cancel or extend
+the job. Terminal sanitized records remain in process memory for ten minutes, capped
+at 32, and are not persisted. Session creation may deploy automation helpers. A
+service `/status` response is not proof of phone operation.
 Readiness checks the lock/screen-off state before returning observations. A locked
 phone requires the user to wake and unlock it; initialization must not unlock it
 automatically. Successful readiness includes `phoneUnlocked: true`.

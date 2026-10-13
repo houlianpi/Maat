@@ -347,6 +347,14 @@ flowchart TD
 
 - 唯一 active job slot 在 `queued` 前、任何副作用前占用；`queued`、`running`、`creation-uncertain` 均保持占用，只有终态记录完成后释放。wait deadline 只结束本次等待。
 - 同一调用方可按 job ID 查询自己的 job；其他启动请求只得到 `mobile-busy`，不得获得、共享或收养 active job。终态结果按 job ID 有界保留。
+- `check_device_ready` 的 job wire 已冻结：启动不带 `jobId`，可在既有启动字段上增加
+  `waitSeconds`；查询使用 `{jobId, waitSeconds}`（`jobAction` 省略或为 `query`）；取消使用
+  `{jobId, jobAction:"cancel", waitSeconds}`。`waitSeconds` 范围为 0–20 秒，只限制本次等待，
+  不改变 job 的固定连接截止时间。带 `jobId` 时禁止携带截图、WDA 授权或目标选择等启动字段。
+- job ID 是 CSPRNG 生成的不透明 bearer，不含设备、时间或 endpoint 信息。unknown、foreign
+  和已过期 ID 统一返回 `connection-job-not-found`，且不会回退为启动。终态脱敏快照仅存进程
+  内存，完成后保留 10 分钟且最多 32 条（任一限制先到即移除）；查询不续期。active 与
+  `creation-uncertain` 不淘汰，进程退出后全部丢失。
 - device operation 使用另一个进程/工作区全局 slot，覆盖目标选择的最终重验证、create、
   execute、close 和 readiness；冲突同样立即 `mobile-busy`，不排队。候选编号与
   `discoveryId` 只存在内存中，不能跨刷新或重启解释。

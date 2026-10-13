@@ -1,4 +1,5 @@
 import { PhoneSessionCreationUncertainError } from '../contracts/device.ts';
+import { assertConnectionJobAccess } from '../connection/job-slot.ts';
 
 let activeOwner: symbol | undefined;
 let creationBarrier: Readonly<{ state: 'creation-uncertain'; causeCategory: string }> | undefined;
@@ -16,7 +17,11 @@ type MobileOperationLease = {
   release(): void;
 };
 
-function acquireMobileOperation(protectedRoute: () => boolean): MobileOperationLease {
+function acquireMobileOperation(
+  protectedRoute: () => boolean,
+  connectionJobOwner?: symbol,
+): MobileOperationLease {
+  assertConnectionJobAccess(connectionJobOwner);
   assertMobileCreationAllowed(protectedRoute());
   if (activeOwner) throw new MobileBusyError();
   const owner = Symbol('mobile-operation-owner');
@@ -34,10 +39,11 @@ function acquireMobileOperation(protectedRoute: () => boolean): MobileOperationL
 export async function runMobileOperation<T>(
   operation: () => Promise<T>,
   protectedRoute: boolean | (() => boolean) = false,
+  connectionJobOwner?: symbol,
 ): Promise<T> {
   const isProtectedRoute =
     typeof protectedRoute === 'function' ? protectedRoute : () => protectedRoute;
-  const lease = acquireMobileOperation(isProtectedRoute);
+  const lease = acquireMobileOperation(isProtectedRoute, connectionJobOwner);
   try {
     return await operation();
   } catch (error) {

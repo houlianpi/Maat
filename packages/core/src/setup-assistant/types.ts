@@ -251,13 +251,29 @@ export type AndroidSetupCheckInput = {
 
 export type IosSetupCheckInput = Pick<AndroidSetupCheckInput, 'serverUrl' | 'device' | 'signal'>;
 
-export type SetupReadyInput = {
+export type SetupReadyStartInput = {
+  jobId?: never;
+  jobAction?: never;
   screenshot?: boolean;
   signal?: AbortSignal;
+  waitSeconds?: number;
   allowWdaInitialization?: boolean;
   allowWdaInstallation?: boolean;
   targetSelection?: TargetSelectionInput;
 };
+
+export type SetupReadyJobInput = {
+  jobId: string;
+  jobAction?: 'query' | 'cancel';
+  waitSeconds?: number;
+  signal?: AbortSignal;
+  screenshot?: never;
+  allowWdaInitialization?: never;
+  allowWdaInstallation?: never;
+  targetSelection?: never;
+};
+
+export type SetupReadyInput = SetupReadyStartInput | SetupReadyJobInput;
 
 export type SetupReadinessSuccess = {
   platform: 'android' | 'ios';
@@ -298,4 +314,9 @@ export type SetupReadinessSelection =
       candidate: PublicDeviceCandidate;
     };
 
-export type SetupReadiness = SetupReadinessSuccess | SetupReadinessSelection;
+import type { ConnectionJobSnapshot } from '../mobile/connection/job-supervisor.ts';
+
+export type SetupReadiness =
+  | SetupReadinessSuccess
+  | SetupReadinessSelection
+  | ConnectionJobSnapshot;

@@ -340,12 +340,17 @@ test('iOS readiness schema removes initialization gate and only forwards explici
   const signal = new AbortController().signal;
   try {
     assert.deepEqual(Object.keys(tool.parameters.properties), [
+      'jobId',
+      'jobAction',
+      'waitSeconds',
       'screenshot',
       'allowWdaInstallation',
       'targetSelection',
     ]);
     assert.equal(tool.parameters.required?.length ?? 0, 0);
     assert.equal(tool.parameters.properties.allowWdaInstallation.type, 'boolean');
+    assert.equal(tool.parameters.properties.waitSeconds.minimum, 0);
+    assert.equal(tool.parameters.properties.waitSeconds.maximum, 20);
     const schemaText = JSON.stringify(tool.parameters);
     assert.match(schemaText, /explicitly authorizes first installation/);
     assert.match(schemaText, /Never infer|Not permission for signing changes, restart or unlock/);
@@ -360,6 +365,13 @@ test('iOS readiness schema removes initialization gate and only forwards explici
         ...call,
         arguments: { allowWdaInstallation: { approve: true } },
       }),
+    );
+    assert.deepEqual(
+      validateToolArguments(tool, {
+        ...call,
+        arguments: { jobId: 'opaque-job-id', jobAction: 'cancel', waitSeconds: 2 },
+      }),
+      { jobId: 'opaque-job-id', jobAction: 'cancel', waitSeconds: 2 },
     );
     assert.deepEqual(
       validateToolArguments(tool, {
