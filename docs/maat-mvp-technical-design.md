@@ -30,6 +30,8 @@
 - macOS 不属于本轮设备管理重建范围，但它仍是共享 Appium 路径的现有消费者；迁移期间必须保持其旧 backend 和兼容入口可用。
 - 不自动解锁、认证、接受授权、改签名、清 App 数据、卸载 App 或切换设备。
 - 不保存用户／工作区默认设备，不提供“记住此设备”，不跨进程恢复或收养目标选择。
+- MVP 跨进程锁不排队，不运行 broker/daemon，不建立 durable ownership、crash
+  quarantine 或手动恢复系统，也不共享或收养 job/Session。
 - 不把本设计写入视为已实装、已通过测试或已完成真机验证。
 
 ### 关键决策
@@ -300,7 +302,13 @@ type ReadinessState =
 - 目标选择不授权 preparation 或手机动作，不表示 service ready、device ready、动作完成或业务成功。
 - identity equality 是 `platform + providerInstanceId + routingId + kind` 的逐字段相等；`displayName` 和当前连接状态不参与。`canonicalDeviceKey` 是该元组的版本化、无歧义编码；本地 provider instance 使用稳定常量，日志只记录其脱敏摘要。
 - MVP 使用一个进程/工作区全局 active job slot，不按 endpoint、设备或 operation 分槽；已有 active job 时，新启动请求返回 `mobile-busy`。调用方只能按自己获得的 job ID 查询；等待超时不创建第二个 job。`creation-uncertain` 是独立非终态。
-- 跨进程只按 `canonicalDeviceKey` 获取非阻塞设备锁来防止碰撞；锁冲突返回 `mobile-busy`。进程之间不共享/收养 job、Session ID、generation、Worker 或 active slot。
+- 跨进程只按 `canonicalDeviceKey` 的私密派生值获取本机、非阻塞的设备级 OS/process-lifetime
+  锁来防止碰撞；锁跨 workspace、项目和 VS Code Session 生效。最终候选重验证成功后、
+  lifecycle target pin 前获取，覆盖整个 active lifecycle；成功 release/close 后释放，
+  close 失败或结果不确定时由存活进程继续持有，进程退出或崩溃时由 OS 自动释放。锁冲突
+  立即返回 `mobile-busy`，不得建立 target pin、创建 Session、执行 preparation 或手机动作，
+  也不得泄露锁持有者或设备 key。锁名称、路径、日志和错误不得包含或可逆编码原始设备
+  identity。进程之间不共享/收养 job、Session ID、generation、Worker 或 active slot。
 - `connectionKey = endpointId + canonicalDeviceKey` 的多槽 single-flight 仅保留为未来并发扩展方向，不属于 MVP 合同或验收。
 - `SessionIdentity` 相等要求 lifecycle target 的 endpoint、canonical device、platform、backend 和
   generation 全部一致；内部清理由 session handle 和 creator identity 证明，公开结果必须脱敏。
@@ -577,7 +585,7 @@ recovery 不创建新的目标选择；原 identity 缺失或原 endpoint 变化
 | Gate            | 顺序与进入条件                | 退出证据                                                                                                                         |
 | --------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | G0 设计确认     | **已按 PROD-006 修订通过**    | 生命周期选择设计已获批；不表示已实装、G1 已完成或共享旧代码获删除授权                                                            |
-| G1 合同测试     | **部分合同已实装，仍待完成**  | identity、零／单／多候选、临时引用重验证、生命周期 pin/forget、无磁盘 binding、全局 busy、ownership、防重放和负合同通过          |
+| G1 合同测试     | **部分合同已实装，仍待完成**  | identity、零／单／多候选、临时引用重验证、生命周期 pin/forget、无磁盘 binding、进程内全局 busy、跨进程设备锁、ownership、防重放和负合同通过 |
 | G2 新内部端口   | **新内部端口**                | facade 后建立 device selection/connection/preparation/session/readiness ports；公开 API 与 Pi wire shape 不变                    |
 | G3 切只读路径   | **切只读路径**                | discovery、PreparationFacts、application inspection、endpoint status 按平台切换；不得创建 Session 或执行准备副作用               |
 | G3P 切准备计划  | **G3 后、G4 前**              | planner/policy/grant store 接入；事实满足为 no-op，副作用由单一 connection job 执行一次，uncertain 不重试                        |
@@ -662,7 +670,13 @@ Android/iOS 物理机迁移而删除或宣称已迁移。
    单候选可为本生命周期自动选择并清楚披露；多候选须用户按当前事实明确选择。active
    生命周期固定精确 identity 与 endpoint，断线、缺失或 endpoint 变化不换目标、不 fallback；
    成功 release/close 后忘记，重启不恢复或收养。“记住此设备”留作未来可选能力。
-3. **并发范围**：MVP 在同一进程/工作区全局只允许一个 active connection job 和一个 device operation；冲突立即 `mobile-busy`，不排队。跨进程只用设备级锁防碰撞，不共享或收养 job/Session。endpoint + canonical key 多槽 single-flight 仅为未来扩展。
+3. **并发范围**：MVP 在同一进程/工作区全局只允许一个 active connection job 和一个
+   device operation；冲突立即 `mobile-busy`，不排队。跨进程采用同一机器范围、跨
+   workspace／项目／VS Code Session 的非阻塞 per-device OS/process-lifetime 锁；原始
+   设备 identity 不落盘，锁键使用私密派生。锁覆盖 active lifecycle，成功 close 后释放，
+   close 不确定时保留到进程结束，进程退出或崩溃后由 OS 自动释放。不使用 broker/daemon，
+   不建立 durable ownership、crash quarantine 或手动恢复，不共享或收养 job/Session。
+   endpoint + canonical key 多槽 single-flight 仅为未来扩展。
 4. **自动恢复**：只在当前 lifecycle 的原 identity 和原 endpoint 上恢复有 creator proof 的
    Maat-owned Session/控制通道；不 restart/kill 用户管理 Appium、ADB 或 Appium-managed
    WDA/UiAutomator2，不切换设备或 endpoint。ownership uncertain 转人工恢复；
