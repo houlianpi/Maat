@@ -1,4 +1,8 @@
-import type { SessionSetup, SetupInspection } from '../core/platforms/contracts.ts';
+import {
+  validateReadinessObservations,
+  type SessionSetup,
+  type SetupInspection,
+} from '../core/platforms/contracts.ts';
 import { PlatformRegistry } from '../core/platforms/registry.ts';
 import { SetupAssistant, type SetupAssistantOptions } from '../setup-assistant/setup-assistant.ts';
 import type {
@@ -11,8 +15,10 @@ import type {
 } from '../setup-assistant/types.ts';
 import { sameFingerprint } from '../setup-assistant/storage.ts';
 import type { NativeAppTarget, NativeEnvironment } from '../platforms/appium/schema.ts';
-import { isRecord, parseObservations } from '../core/exploration/protocol.ts';
-import { androidLockGuardCode, iosLockGuardCode } from '../platforms/appium/runtime/session.ts';
+import { isRecord, parseWorkerError, type WorkerError } from '../core/exploration/protocol.ts';
+import { ExplorationExecutionError } from '../core/exploration/runtime.ts';
+import { AppiumPlatformAdapter } from '../platforms/appium/appium-adapter.ts';
+import { nativeReadinessCode } from '../platforms/appium/runtime/session.ts';
 import { isMobilePlatform, runMobileOperation } from '../mobile/devices/coordinator.ts';
 import {
   processConnectionJobSupervisor,
@@ -36,29 +42,108 @@ function isMigratedLocalPhysicalRoute(adapter: unknown): boolean {
   );
 }
 
-function readinessErrorSummary(error: unknown, depth = 0): string {
-  if (error instanceof AggregateError && depth < 3) {
-    return error.errors
-      .slice(0, 3)
-      .map((failure) => readinessErrorSummary(failure, depth + 1))
-      .join('; Owned Session cleanup also failed: ')
-      .slice(0, 1_000);
+const readinessDiagnostics = new WeakMap<Error, unknown>();
+const readinessPublicCodes = new Set([
+  'APPIUM_SERVICE_UNAVAILABLE',
+  'ANDROID_DEVICE_MISSING',
+  'ANDROID_DEVICE_OFFLINE',
+  'ANDROID_DEVICE_SELECTION_REQUIRED',
+  'ANDROID_DEVICE_UNAUTHORIZED',
+  'ANDROID_DEVICE_LOCKED',
+  'ANDROID_DEVICE_LOCK_STATE_UNKNOWN',
+  'ANDROID_READINESS_COLD_UNSUPPORTED',
+  'ANDROID_READINESS_UNLOCK_UNSAFE',
+  'IOS_APP_DISCOVERY_FAILED',
+  'IOS_CONNECTION_INITIALIZATION_DISABLED',
+  'IOS_DEVELOPER_MODE_REQUIRED',
+  'IOS_DEVICE_CHECK_FAILED',
+  'IOS_DEVICE_LOCKED',
+  'IOS_DEVICE_LOCK_STATE_UNKNOWN',
+  'IOS_DEVICE_MISSING',
+  'IOS_DEVICE_SELECTION_REQUIRED',
+  'IOS_DEVICE_UNAVAILABLE',
+  'IOS_HOST_UNSUPPORTED',
+  'IOS_READINESS_BASE_SESSION_REQUIRED',
+  'IOS_READINESS_UNSUPPORTED',
+  'IOS_WDA_AUTHORIZATION_INVALID',
+  'IOS_WDA_BUILD_INVALID',
+  'IOS_WDA_BUILD_PATH_INVALID',
+  'IOS_WDA_CERTIFICATE_INVALID',
+  'IOS_WDA_CLEANUP_FAILED',
+  'IOS_WDA_COMMAND_FAILED',
+  'IOS_WDA_CONFIGURATION_CONFLICT',
+  'IOS_WDA_DEVICE_REQUIRED',
+  'IOS_WDA_IDENTITY_CONFLICT',
+  'IOS_WDA_INSPECTION_FAILED',
+  'IOS_WDA_INSTALLATION_AUTHORIZATION_REQUIRED',
+  'IOS_WDA_OUTPUT_LIMIT',
+  'IOS_WDA_PREPARATION_CANCELLED',
+  'IOS_WDA_PREPARATION_FAILED',
+  'IOS_WDA_PREPARATION_TIMEOUT',
+  'IOS_WDA_PROFILE_INVALID',
+  'IOS_WDA_SECURITY_REJECTED',
+  'IOS_WDA_SIGNING_AUTHORIZATION_REQUIRED',
+  'IOS_WDA_SIGNING_CHANGED',
+  'IOS_WDA_SIGNING_REQUIRED',
+  'NATIVE_SESSION_CHANGED',
+  'NATIVE_SESSION_LEASE_MISMATCH',
+  'NATIVE_SESSION_RECOVERY_REQUIRED',
+  'PHONE_CLOSE_UNCERTAIN',
+  'PHONE_SESSION_CREATION_UNCERTAIN',
+  'PHONE_TARGET_SELECTION_REQUIRED',
+  'READINESS_OUTPUT_LIMIT',
+  'READINESS_PROOF_INVALID',
+  'READINESS_SCREENSHOT_FAILED',
+  'READINESS_SOURCE_EMPTY',
+  'READINESS_VIEWPORT_INVALID',
+]);
+
+function readinessAggregateErrors(error: unknown): unknown[] | undefined {
+  if (error instanceof AggregateError) return error.errors;
+  return isRecord(error) && Array.isArray(error.errors) ? error.errors : undefined;
+}
+
+function readinessExecutionDetails(error: unknown, depth = 0): WorkerError | undefined {
+  if (depth > 4) return;
+  if (error instanceof ExplorationExecutionError) return error.details;
+  if (isRecord(error)) {
+    const details = parseWorkerError(error.details);
+    if (details) return details;
   }
-  const message =
-    isRecord(error) && typeof error.message === 'string' ? error.message : String(error);
-  return message
-    .replace(/https?:\/\/[^\s"'<>]+/gi, '[endpoint]')
-    .replace(/(?:\/(?:Users|home|private|tmp|var)\/|[A-Za-z]:\\)[^\s"'<>]+/g, '[path]')
-    .replace(
-      /\b(password|secret|token|authorization|api[-_]?key|udid|serial)\s*[:=]\s*\S+/gi,
-      '$1=[redacted]',
-    )
-    .replace(
-      /\b(?:[A-Fa-f0-9]{8}-[A-Fa-f0-9]{16}|[A-Fa-f0-9]{8}(?:-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}|[A-Fa-f0-9]{40})\b/g,
-      '[device-id]',
-    )
-    .split('\n')[0]!
-    .slice(0, 1_000);
+  const errors = readinessAggregateErrors(error);
+  if (errors)
+    for (const item of errors) {
+      const details = readinessExecutionDetails(item, depth + 1);
+      if (details) return details;
+    }
+  return error instanceof Error ? readinessExecutionDetails(error.cause, depth + 1) : undefined;
+}
+
+function readinessSafeCode(error: unknown): string | undefined {
+  if (!isRecord(error) || typeof error.message !== 'string') return;
+  const match = /^([A-Z][A-Z0-9_]+): /.exec(error.message);
+  return match && readinessPublicCodes.has(match[1]) ? match[1] : undefined;
+}
+
+function safeReadinessError(prefix: string, raw: unknown): Error {
+  const details = readinessExecutionDetails(raw);
+  const code = readinessSafeCode(raw);
+  const category =
+    code === 'READINESS_OUTPUT_LIMIT' ? 'output-limit' : (details?.category ?? 'runtime-error');
+  const phase = details?.phase ?? 'execute';
+  const actionState = details?.actionState ?? 'uncertain';
+  const cleanup = readinessAggregateErrors(raw) ? ' Owned Session cleanup failed.' : '';
+  const message = `${prefix}${code ? ` (${code})` : ''}: ${category} during ${phase}; action state ${actionState}.${cleanup} No JavaScript was replayed. Retry setup.ready only after the fixed phone and Session ownership are ready for a fresh observation.`;
+  const cause = new ExplorationExecutionError(message, {
+    name: 'ReadinessExecutionError',
+    message,
+    category,
+    phase,
+    actionState,
+  });
+  const error = new Error(message, { cause });
+  readinessDiagnostics.set(error, raw);
+  return error;
 }
 
 function iosWdaSecurityRejection(error: unknown, depth = 0): boolean {
@@ -340,13 +425,15 @@ export class MaatApi {
         ...(input.signal ? [input.signal] : []),
         AbortSignal.timeout(adapter.id === 'ios' ? 180_000 : 15_000),
       ]);
-      input.signal?.throwIfAborted();
       const label = adapter.label;
+      if (input.signal?.aborted)
+        throw safeReadinessError(`${label} setup readiness cancelled`, input.signal.reason);
       const targetSelection = await runMobileOperation(
         async () => await adapter.selectReadinessTarget?.(input.targetSelection, signal),
         () => isMigratedLocalPhysicalRoute(adapter),
       );
-      signal.throwIfAborted();
+      if (signal.aborted)
+        throw safeReadinessError(`${label} setup readiness cancelled`, signal.reason);
       if (targetSelection && targetSelection.status !== 'selected')
         return {
           ...targetSelection,
@@ -394,96 +481,39 @@ export class MaatApi {
               throw new Error(
                 `${adapter.id === 'ios' ? 'IOS' : 'ANDROID'}_READINESS_UNLOCK_UNSAFE: this adapter cannot observe readiness without automatic unlock.`,
               );
-            const lockGuard = adapter.id === 'ios' ? iosLockGuardCode : androidLockGuardCode;
-            const code = [
-              lockGuard,
-              'const source = await driver.getPageSource();',
-              `if (typeof source !== "string" || !source.trim()) throw new Error("${label} readiness: page source is empty.");`,
-              'const viewport = await driver.getWindowSize();',
-              `if (!viewport || !Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) || viewport.width <= 0 || viewport.height <= 0) throw new Error("${label} readiness: viewport is invalid.");`,
-              ...(input.screenshot ? ['await evidence.screenshot();'] : []),
-              // Catch a lock/screen-off transition while source/image were being read, without retry.
-              lockGuard,
-              'console.log(JSON.stringify({maatSetupReadiness: 1, phoneUnlocked: true, sessionUsable: true, sourceReadable: true, viewportReadable: true, source, viewport: {width: viewport.width, height: viewport.height}}));',
-            ].join('\n');
             let observations;
             try {
-              observations = parseObservations(
-                await adapter.executeReadiness(code, jobSignal, {
+              observations = await adapter.executeReadiness(
+                nativeReadinessCode(adapter.id as 'android' | 'ios', input.screenshot === true),
+                jobSignal,
+                {
                   allowWdaInitialization: input.allowWdaInitialization,
                   allowWdaInstallation: input.allowWdaInstallation,
-                }),
+                  screenshot: input.screenshot,
+                },
               );
-              jobSignal.throwIfAborted();
+              if (!(adapter instanceof AppiumPlatformAdapter))
+                observations = validateReadinessObservations(
+                  observations,
+                  label,
+                  input.screenshot === true,
+                );
             } catch (error) {
               if (hasErrorCode(error, 'phone-session-creation-uncertain')) throw error;
-              // Preserve the execution error (including any cleanup failure) on cancellation.
               if (!connectionJobOwner && input.signal?.aborted)
-                throw new Error(
-                  `${label} setup readiness cancelled: ${readinessErrorSummary(error)}`,
-                  {
-                    cause: error,
-                  },
-                );
+                throw safeReadinessError(`${label} setup readiness cancelled`, error);
               if (jobSignal.aborted)
-                throw new Error(
-                  `${label} setup readiness timed out: ${readinessErrorSummary(error)}`,
-                  {
-                    cause: error,
-                  },
-                );
+                throw safeReadinessError(`${label} setup readiness timed out`, error);
               if (adapter.id === 'ios' && iosWdaSecurityRejection(error))
-                throw new Error(
-                  `IOS_WDA_SECURITY_REJECTED: iOS refused WDA because its signature, entitlements or developer-profile trust are not accepted. Ask the user to check developer App trust; if already trusted, inspect signing. Do not blindly retry, reinstall or change signing. Original failure: ${readinessErrorSummary(error)}`,
-                  { cause: error },
+                throw safeReadinessError(
+                  'IOS_WDA_SECURITY_REJECTED: iOS refused WDA because its signature, entitlements or developer-profile trust are not accepted. Ask the user to check developer App trust; if already trusted, inspect signing. Do not blindly retry, reinstall or change signing.',
+                  error,
                 );
-              throw new Error(
-                `${label} setup readiness observation failed: ${readinessErrorSummary(error)}`,
-                { cause: error },
-              );
+              throw safeReadinessError(`${label} setup readiness observation failed`, error);
             }
-            const proof = observations.find((observation) => {
-              if (observation.type !== 'text') return false;
-              try {
-                const value: unknown = JSON.parse(observation.text);
-                return (
-                  typeof value === 'object' &&
-                  value !== null &&
-                  'maatSetupReadiness' in value &&
-                  value.maatSetupReadiness === 1 &&
-                  'phoneUnlocked' in value &&
-                  value.phoneUnlocked === true &&
-                  'sessionUsable' in value &&
-                  value.sessionUsable === true &&
-                  'sourceReadable' in value &&
-                  value.sourceReadable === true &&
-                  'viewportReadable' in value &&
-                  value.viewportReadable === true &&
-                  'source' in value &&
-                  typeof value.source === 'string' &&
-                  Boolean(value.source.trim()) &&
-                  'viewport' in value &&
-                  isRecord(value.viewport) &&
-                  typeof value.viewport.width === 'number' &&
-                  Number.isFinite(value.viewport.width) &&
-                  value.viewport.width > 0 &&
-                  typeof value.viewport.height === 'number' &&
-                  Number.isFinite(value.viewport.height) &&
-                  value.viewport.height > 0
-                );
-              } catch {
-                return false;
-              }
-            });
-            if (!proof)
-              throw new Error(
-                `${label} setup readiness did not return phoneUnlocked:true, nonempty source and valid viewport observation.`,
-              );
             const screenshotReadable = observations.some(
               (observation) => observation.type === 'image',
             );
-            if (input.screenshot && !screenshotReadable)
-              throw new Error(`${label} setup readiness did not return a screenshot observation.`);
             return {
               platform,
               ready: true,
@@ -502,9 +532,7 @@ export class MaatApi {
                 viewportReadable: true,
                 screenshotReadable,
               },
-              observations: observations.filter(
-                (observation) => observation === proof || observation.type === 'image',
-              ),
+              observations,
             };
           },
           () => isMigratedLocalPhysicalRoute(adapter),

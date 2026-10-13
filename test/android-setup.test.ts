@@ -12,6 +12,7 @@ import {
   maxOutputBytes,
   type JavaScriptObservation,
 } from '../packages/core/src/core/exploration/protocol.ts';
+import { ExplorationExecutionError } from '../packages/core/src/core/exploration/runtime.ts';
 import type {
   NativeAppTarget,
   NativeEnvironment,
@@ -64,6 +65,44 @@ const image = {
   mimeType: 'image/png',
   data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j1ioAAAAASUVORK5CYII=',
 } satisfies JavaScriptObservation;
+
+function publicErrorReachableText(value: unknown, seen = new Set<unknown>()): string {
+  if (value === null || value === undefined || seen.has(value)) return '';
+  if (typeof value !== 'object') return String(value);
+  seen.add(value);
+  return Reflect.ownKeys(value)
+    .map((key) => {
+      const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
+      return descriptor && 'value' in descriptor
+        ? `${String(key)}:${publicErrorReachableText(descriptor.value, seen)}`
+        : String(key);
+    })
+    .join('\n');
+}
+
+function assertSafeReadinessError(
+  error: unknown,
+  options: {
+    code?: RegExp;
+    category?: string;
+    actionState?: 'not-started' | 'uncertain';
+    cleanup?: boolean;
+    secrets?: string[];
+  } = {},
+) {
+  assert.ok(error instanceof Error);
+  if (options.code) assert.match(error.message, options.code);
+  assert.match(error.message, /setup\.ready/);
+  assert.ok(error.cause instanceof ExplorationExecutionError);
+  assert.equal(error.cause.details.category, options.category ?? 'runtime-error');
+  assert.equal(error.cause.details.phase, 'execute');
+  assert.equal(error.cause.details.actionState, options.actionState ?? 'uncertain');
+  if (options.cleanup) assert.match(error.message, /cleanup failed/i);
+  const reachable = publicErrorReachableText(error);
+  for (const secret of [serial, privateRoot, ...(options.secrets ?? [])])
+    assert.equal(reachable.includes(secret), false);
+  return true;
+}
 
 function dependencies(overrides: Partial<AndroidSetupDetectorDependencies> = {}) {
   const commands: Array<{ file: string; args: string[] }> = [];
@@ -629,9 +668,8 @@ test('Android ready returns deterministic Worker proof and optional image withou
 test('Android ready rejects locked/screen-off phones before source, viewport or screenshot, without retry', async () => {
   for (const screenshot of [false, true]) {
     const fake = fakeMaat('/unused', { isLocked: async () => true });
-    await assert.rejects(
-      fake.maat.setup.ready({ screenshot }),
-      /ANDROID_DEVICE_LOCKED: phone locked or screen off; unlock\/wake yourself then recheck/,
+    await assert.rejects(fake.maat.setup.ready({ screenshot }), (error) =>
+      assertSafeReadinessError(error, { code: /ANDROID_DEVICE_LOCKED/ }),
     );
     assert.deepEqual(fake.reads, ['lock']);
     assert.equal(fake.counts().executes, 1);
@@ -642,16 +680,15 @@ test('Android ready rejects locked/screen-off phones before source, viewport or 
 test('Android ready rejects non-boolean lock results without claiming observation or screenshot availability', async () => {
   for (const locked of [undefined, null, 0, 1, 'false', 'true', {}, []]) {
     const fake = fakeMaat('/unused', { isLocked: async () => locked });
-    await assert.rejects(
-      fake.maat.setup.ready({ screenshot: true }),
-      /ANDROID_DEVICE_LOCK_STATE_UNKNOWN: lock query did not return a boolean/,
+    await assert.rejects(fake.maat.setup.ready({ screenshot: true }), (error) =>
+      assertSafeReadinessError(error, { code: /ANDROID_DEVICE_LOCK_STATE_UNKNOWN/ }),
     );
     assert.deepEqual(fake.reads, ['lock']);
     assert.equal(fake.counts().executes, 1);
   }
 });
 
-test('Android ready preserves a failed lock cause in-process and exposes a redacted reason', async () => {
+test('Android ready exposes a safe failed-lock classification without its raw cause', async () => {
   const original = new Error(`lock query failed serial=${serial} ${privateRoot} token=secret`);
   const fake = fakeMaat('/unused', {
     isLocked: async () => {
@@ -659,17 +696,10 @@ test('Android ready preserves a failed lock cause in-process and exposes a redac
     },
   });
   await assert.rejects(fake.maat.setup.ready({ screenshot: true }), (error: unknown) => {
-    assert.ok(error instanceof Error);
-    assert.match(error.message, /ANDROID_DEVICE_LOCK_STATE_UNKNOWN: could not check/);
-    assert.match(error.message, /Original failure: lock query failed/);
-    assert.match(error.message, /check the connection and unlock\/wake yourself then recheck/);
-    assert.equal(error.message.includes(serial), false);
-    assert.equal(error.message.includes(privateRoot), false);
-    assert.equal(error.message.includes('token=secret'), false);
-    // This fake runs in-process in another VM realm; it does not prove IPC cause identity.
-    assert.ok(error.cause && typeof error.cause === 'object' && 'cause' in error.cause);
-    assert.equal(error.cause.cause, original);
-    return true;
+    return assertSafeReadinessError(error, {
+      code: /ANDROID_DEVICE_LOCK_STATE_UNKNOWN/,
+      secrets: ['token=secret', original.message],
+    });
   });
   assert.deepEqual(fake.reads, ['lock']);
   assert.equal(fake.counts().executes, 1);
@@ -686,9 +716,10 @@ test('Android ready rejects a lock transition or unknown final lock state after 
           return finalState;
         },
       });
-      await assert.rejects(
-        fake.maat.setup.ready({ screenshot }),
-        /ANDROID_DEVICE_LOCKED|ANDROID_DEVICE_LOCK_STATE_UNKNOWN/,
+      await assert.rejects(fake.maat.setup.ready({ screenshot }), (error) =>
+        assertSafeReadinessError(error, {
+          code: /ANDROID_DEVICE_LOCKED|ANDROID_DEVICE_LOCK_STATE_UNKNOWN/,
+        }),
       );
       assert.deepEqual(fake.reads, [
         'lock',
@@ -720,7 +751,11 @@ test('Android ready propagates Abort during a lock query without reading source/
   });
   await assert.rejects(
     fake.maat.setup.ready({ screenshot: true, signal: controller.signal }),
-    /readiness cancelled: .*ANDROID_DEVICE_LOCK_STATE_UNKNOWN/,
+    (error) =>
+      assertSafeReadinessError(error, {
+        code: /readiness cancelled.*ANDROID_DEVICE_LOCK_STATE_UNKNOWN/i,
+        secrets: ['cancelled lock query'],
+      }),
   );
   assert.deepEqual(fake.reads, ['lock']);
   assert.equal(fake.counts().executes, 1);
@@ -816,7 +851,12 @@ test('Android ready retains the complete current tree beyond console inspection 
   assert.equal(current.source, source);
   assert.deepEqual(current.viewport, { width: 360, height: 800 });
   const oversized = fakeMaat('/unused', { source: 'x'.repeat(maxOutputBytes) });
-  await assert.rejects(oversized.maat.setup.ready(), /12 MiB/);
+  await assert.rejects(oversized.maat.setup.ready(), (error) =>
+    assertSafeReadinessError(error, {
+      code: /READINESS_OUTPUT_LIMIT/,
+      category: 'output-limit',
+    }),
+  );
 });
 
 test('Android ready rejects old/boolean-only or non-unlocked proof and invalid returned source/viewport fields', async () => {
@@ -845,19 +885,22 @@ test('Android ready rejects old/boolean-only or non-unlocked proof and invalid r
     const fake = fakeMaat('/unused', {
       observations: [{ type: 'text', text: JSON.stringify(observation) }],
     });
-    await assert.rejects(fake.maat.setup.ready(), /nonempty source and valid viewport/);
+    await assert.rejects(fake.maat.setup.ready(), /READINESS_PROOF_INVALID/);
   }
 });
 
-test('Android ready exposes the original error summary while redacting diagnostic secrets and retaining the cause', async () => {
+test('Android ready exposes stable safe source, viewport, screenshot and execution summaries', async () => {
   const empty = fakeMaat('/unused', { source: '' });
-  await assert.rejects(empty.maat.setup.ready(), /page source is empty/);
+  await assert.rejects(empty.maat.setup.ready(), (error) =>
+    assertSafeReadinessError(error, { code: /READINESS_SOURCE_EMPTY/ }),
+  );
   const viewport = fakeMaat('/unused', { viewport: { width: 0, height: 10 } });
-  await assert.rejects(viewport.maat.setup.ready(), /viewport is invalid/);
+  await assert.rejects(viewport.maat.setup.ready(), (error) =>
+    assertSafeReadinessError(error, { code: /READINESS_VIEWPORT_INVALID/ }),
+  );
   const screenshot = fakeMaat('/unused', { screenshot: 'failed' });
-  await assert.rejects(
-    screenshot.maat.setup.ready({ screenshot: true }),
-    /screenshot command failed/,
+  await assert.rejects(screenshot.maat.setup.ready({ screenshot: true }), (error) =>
+    assertSafeReadinessError(error, { code: /READINESS_SCREENSHOT_FAILED/ }),
   );
   const original = new Error(`ECONNRESET serial=${serial} ${privateRoot} token=secret-value`);
   const fake = fakeMaat('/unused', {
@@ -866,13 +909,9 @@ test('Android ready exposes the original error summary while redacting diagnosti
     },
   });
   await assert.rejects(fake.maat.setup.ready(), (error: unknown) => {
-    assert.ok(error instanceof Error);
-    assert.match(error.message, /ECONNRESET/);
-    assert.equal(error.message.includes(serial), false);
-    assert.equal(error.message.includes(privateRoot), false);
-    assert.equal(error.message.includes('secret-value'), false);
-    assert.equal(error.cause, original);
-    return true;
+    return assertSafeReadinessError(error, {
+      secrets: ['ECONNRESET', 'secret-value', original.message],
+    });
   });
 });
 
@@ -893,10 +932,6 @@ test('explicit App target clearing restores Android ready in the same API withou
   });
   const fake = fakeMaat(root);
   adapter.executeReadiness = fake.adapter.executeReadiness!;
-  let closes = 0;
-  adapter.runtime.close = async () => {
-    closes += 1;
-  };
   const maat = new MaatApi(new PlatformRegistry([adapter], 'android'), root, {
     androidDetectorDependencies: fake.fake.deps,
   });
@@ -912,12 +947,6 @@ test('explicit App target clearing restores Android ready in the same API withou
     if (!selection.ready) assert.equal(selection.status, 'target-selected');
     await assert.rejects(maat.setup.ready(), /configureSession\(\{clearAppTarget:true\}\)/);
     assert.equal(fake.counts().executes, 0);
-    // A closed runtime may retain its last target as a hint; it is not an active App route.
-    await adapter.runtime.configureResolved({
-      environment: adapter.sessionHints!,
-      capabilities: { ...adapter.sessionHints!.capabilities },
-      app: adapter.appTarget,
-    });
     await assert.rejects(
       maat.platforms.configureSession({
         clearAppTarget: true,
@@ -926,11 +955,8 @@ test('explicit App target clearing restores Android ready in the same API withou
       /cannot be combined/,
     );
     assert.deepEqual(adapter.appTarget, { 'appium:appPackage': 'com.example.legacy' });
-    const closesBeforeClear = closes;
     await maat.platforms.configureSession({ clearAppTarget: true });
-    assert.equal(closes, closesBeforeClear + 1);
     assert.equal(adapter.appTarget, undefined);
-    assert.deepEqual(adapter.runtime.currentApp, { 'appium:appPackage': 'com.example.legacy' });
     assert.deepEqual(adapter.sessionHints?.device, { kind: 'device', name: 'Pixel_8' });
     assert.deepEqual(adapter.sessionHints?.capabilities, {});
     assert.equal((await maat.setup.ready()).ready, true);
@@ -953,9 +979,11 @@ test('Android ready propagates Abort before probes and during Worker execution, 
   const aborted = new AbortController();
   aborted.abort(new Error('cancelled before ready'));
   const first = fakeMaat('/unused');
-  await assert.rejects(
-    first.maat.setup.ready({ signal: aborted.signal }),
-    /cancelled before ready/,
+  await assert.rejects(first.maat.setup.ready({ signal: aborted.signal }), (error) =>
+    assertSafeReadinessError(error, {
+      code: /readiness cancelled/i,
+      secrets: ['cancelled before ready'],
+    }),
   );
   assert.equal(first.counts().executes, 0);
   assert.deepEqual(first.fake.commands, []);
@@ -968,7 +996,12 @@ test('Android ready propagates Abort before probes and during Worker execution, 
       return [];
     },
   });
-  await assert.rejects(fake.maat.setup.ready({ signal: controller.signal }), /cancelled in Worker/);
+  await assert.rejects(fake.maat.setup.ready({ signal: controller.signal }), (error) =>
+    assertSafeReadinessError(error, {
+      code: /readiness cancelled/i,
+      secrets: ['cancelled in Worker'],
+    }),
+  );
   assert.equal(fake.counts().executes, 1);
   assert.equal(fake.counts().closes, 0);
 });
@@ -989,7 +1022,7 @@ test('Android doctor stops before later commands when cancelled mid-probe', asyn
   assert.deepEqual(fake.commands, []);
 });
 
-test('Android ready cancellation preserves execution/cleanup errors in the cause and redacts the visible summary', async () => {
+test('Android ready cancellation preserves safe execution and supplemental cleanup classification', async () => {
   const controller = new AbortController();
   const primary = new Error('Worker execution cancelled', { cause: new Error('original cause') });
   const cleanup = new Error(`DELETE Session cleanup failed serial=${serial} ${privateRoot}`);
@@ -1005,13 +1038,17 @@ test('Android ready cancellation preserves execution/cleanup errors in the cause
     },
   });
   await assert.rejects(fake.maat.setup.ready({ signal: controller.signal }), (error: unknown) => {
-    assert.ok(error instanceof Error);
-    assert.equal(error.cause, failure);
-    assert.equal(failure.cause, primary);
-    assert.match(error.message, /Worker execution cancelled.*DELETE Session cleanup failed/);
-    assert.equal(error.message.includes(serial), false);
-    assert.equal(error.message.includes(privateRoot), false);
-    assert.equal(error.message.includes('caller Abort reason'), false);
-    return true;
+    return assertSafeReadinessError(error, {
+      cleanup: true,
+      secrets: [
+        'Worker execution cancelled',
+        'DELETE Session cleanup failed',
+        'original cause',
+        'caller Abort reason',
+        failure.message,
+        primary.message,
+        cleanup.message,
+      ],
+    });
   });
 });

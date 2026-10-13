@@ -2,7 +2,34 @@ import { remote } from 'webdriverio';
 import { capabilities, connection, type ResolvedNativeSession } from '../schema.ts';
 import { createExplorationWorker } from '../../../core/exploration/worker-client.ts';
 import type { JavaScriptSession } from '../../../core/exploration/runtime.ts';
-import { errorWithCleanupFailure } from '../../../core/exploration/runtime.ts';
+import {
+  errorWithCleanupFailure,
+  ExplorationExecutionError,
+} from '../../../core/exploration/runtime.ts';
+
+const nativeInitializationDiagnostics = new WeakMap<Error, unknown>();
+
+function safeNativeInitializationFailure(cause: unknown): ExplorationExecutionError {
+  const message =
+    'Native Session Worker initialization failed before JavaScript dispatch. Retry setup.ready only after Session cleanup and ownership are resolved.';
+  const error = new ExplorationExecutionError(message, {
+    name: 'NativeSessionInitializationError',
+    message,
+    category: 'runtime-error',
+    phase: 'validate',
+    actionState: 'not-started',
+  });
+  nativeInitializationDiagnostics.set(error, cause);
+  return error;
+}
+
+function safeNativeInitializationCleanupFailure(cause: unknown): Error {
+  const error = new Error(
+    'Native Session cleanup failed after Worker initialization failure; recovery is required before another Session can be created.',
+  );
+  nativeInitializationDiagnostics.set(error, cause);
+  return error;
+}
 
 export type NativeSessionCreationFacts = Readonly<{
   dispatchPossible: boolean;
@@ -50,6 +77,24 @@ function phoneLockGuardCode(platform: 'ANDROID' | 'IOS') {
 
 export const androidLockGuardCode = phoneLockGuardCode('ANDROID');
 export const iosLockGuardCode = phoneLockGuardCode('IOS');
+
+export function nativeReadinessCode(platform: 'android' | 'ios', screenshot = false): string {
+  const lockGuard = platform === 'ios' ? iosLockGuardCode : androidLockGuardCode;
+  return [
+    lockGuard,
+    'const source = await driver.getPageSource();',
+    'if (typeof source !== "string" || !source.trim()) throw new Error("READINESS_SOURCE_EMPTY: page source is empty.");',
+    'const viewport = await driver.getWindowSize();',
+    'if (!viewport || !Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) || viewport.width <= 0 || viewport.height <= 0) throw new Error("READINESS_VIEWPORT_INVALID: viewport is invalid.");',
+    ...(screenshot
+      ? [
+          'try { await evidence.screenshot(); } catch (error) { throw new Error("READINESS_SCREENSHOT_FAILED: screenshot command failed.", {cause: error}); }',
+        ]
+      : []),
+    lockGuard,
+    'console.log(JSON.stringify({maatSetupReadiness: 1, phoneUnlocked: true, sessionUsable: true, sourceReadable: true, viewportReadable: true, source, viewport: {width: viewport.width, height: viewport.height}}));',
+  ].join('\n');
+}
 
 export async function startNativeSession(
   target: ResolvedNativeSession,
@@ -170,7 +215,7 @@ export async function startNativeSession(
     initializationSignal.throwIfAborted();
   } catch (error) {
     initializing = false;
-    let failure: unknown = error;
+    let failure: unknown = trustedSessionId ? safeNativeInitializationFailure(error) : error;
     if (!trustedSessionId && dispatchPossible && !explicitFailureReceived) {
       const message = error instanceof Error ? error.message : String(error);
       const invalidResponse = /Could not parse response body/i.test(message);
@@ -209,7 +254,10 @@ export async function startNativeSession(
       try {
         await worker.close();
       } catch (cleanup) {
-        failure = errorWithCleanupFailure(failure, cleanup);
+        failure = errorWithCleanupFailure(
+          failure,
+          trustedSessionId ? safeNativeInitializationCleanupFailure(cleanup) : cleanup,
+        );
       }
     }
     if (driver) {
@@ -217,7 +265,10 @@ export async function startNativeSession(
       try {
         await driver.deleteSession();
       } catch (cleanup) {
-        failure = errorWithCleanupFailure(failure, cleanup);
+        failure = errorWithCleanupFailure(
+          failure,
+          trustedSessionId ? safeNativeInitializationCleanupFailure(cleanup) : cleanup,
+        );
       }
     }
     throw failure;
@@ -226,7 +277,7 @@ export async function startNativeSession(
   const ownedDriver = driver;
   const ownedWorker = worker;
   let closing: Promise<void> | undefined;
-  return {
+  const ownedSession: JavaScriptSession = {
     get isClosed() {
       return Boolean(closing) || ownedWorker.isClosed;
     },
@@ -257,4 +308,5 @@ export async function startNativeSession(
       })());
     },
   };
+  return ownedSession;
 }

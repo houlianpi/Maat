@@ -351,7 +351,7 @@ export async function resolveAppiumSession(
   if (!serverUrl)
     throw new SessionSetupError(
       'server-unavailable',
-      `No Appium server responded. Tried: ${candidates.join(', ')}`,
+      `APPIUM_SERVICE_UNAVAILABLE: No Appium server responded. Tried: ${candidates.join(', ')}`,
       { candidates },
     );
   if (configuredUrl && serverUrl !== configuredUrl)

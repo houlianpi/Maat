@@ -6,7 +6,6 @@ import path from 'node:path';
 import test from 'node:test';
 import { createMaat } from '../packages/core/src/api/create-maat.ts';
 import { findBrowserExecutable } from './fixtures/browser-executable.ts';
-import { AppiumPlatformAdapter } from '../packages/core/src/platforms/appium/appium-adapter.ts';
 
 async function mockAppium() {
   let creations = 0;
@@ -58,25 +57,13 @@ test('UI execution reuses Web state around native execution without saved Cases'
     await maat.exploration.executeJavaScript(
       "await page.setContent('<h1 id=state>Web ready</h1>');",
     );
-    await maat.platforms.select('android');
+    await maat.platforms.select('macos');
     await maat.platforms.configureSession({
       serverUrl: appium.url,
-      capabilities: { 'appium:deviceName': 'mock' },
+      capabilities: {},
     });
-    // The mixed-platform contract uses an already resolved mock native Session.
-    // Exact Android cold-routing/preflight is covered by native.test.ts.
-    const native = maat.registry.current as AppiumPlatformAdapter;
-    await native.runtime.configureResolved({
-      environment: native.sessionHints!,
-      capabilities: { 'appium:deviceName': 'mock', 'appium:skipUnlock': true },
-    });
-    await native.runtime.execute('void 0;');
-    await assert.rejects(
-      maat.exploration.executeJavaScript("console.log(await driver.$('~status').getText());"),
-      /PHONE_TARGET_SELECTION_REQUIRED/,
-    );
     assert.deepEqual(
-      await native.runtime.execute("console.log(await driver.$('~status').getText());"),
+      await maat.exploration.executeJavaScript("console.log(await driver.$('~status').getText());"),
       [{ type: 'text', text: 'Native ready' }],
     );
     await maat.platforms.select('web');

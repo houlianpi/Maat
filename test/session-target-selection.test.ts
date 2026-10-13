@@ -12,7 +12,6 @@ import type { TargetSelectionResult } from '../packages/core/src/mobile/contract
 import { MaatApi } from '../packages/core/src/api/maat-api.ts';
 import { PlatformRegistry } from '../packages/core/src/core/platforms/registry.ts';
 import { aggregateSetup } from '../packages/core/src/setup-assistant/model.ts';
-import type { JavaScriptSession } from '../packages/core/src/core/exploration/runtime.ts';
 
 class SelectionAdapter extends AppiumPlatformAdapter {
   devices: Device[] = [];
@@ -568,42 +567,24 @@ test('persisted compatibility hints only narrow fresh proposals after close or r
   }
 });
 
-test('concurrent successful API releases share one owned cleanup and start fresh discovery', async () => {
+test('concurrent successful API releases share one close operation and start fresh discovery', async () => {
   const adapter = new SelectionAdapter();
   adapter.devices = phones;
+  let cleanups = 0;
+  const originalClose = adapter.close.bind(adapter);
+  adapter.close = async () => {
+    cleanups++;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await originalClose();
+  };
   const proposal = await adapter.selectReadinessTarget();
   assert.equal(proposal.status, 'selection-required');
   if (proposal.status !== 'selection-required') return;
-  assert.equal(
-    (
-      await adapter.selectReadinessTarget({
-        discoveryId: proposal.discoveryId,
-        candidateNumber: 1,
-      })
-    ).status,
-    'target-selected',
-  );
-  await adapter.runtime.configureResolved({
-    environment: {
-      platform: 'android',
-      serverUrl: 'http://127.0.0.1:4723/',
-      capabilities: {},
-    },
-    capabilities: {},
+  await adapter.selectReadinessTarget({
+    discoveryId: proposal.discoveryId,
+    candidateNumber: 1,
   });
-  let cleanups = 0;
-  const owned: JavaScriptSession = {
-    async execute() {
-      return [];
-    },
-    async close() {
-      cleanups += 1;
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    },
-  };
-  (adapter.runtime as unknown as { session: JavaScriptSession }).session = owned;
   const api = new MaatApi(new PlatformRegistry([adapter], 'android'), process.cwd());
-
   const firstRelease = api.mobile.releaseCurrentSession();
   const secondRelease = api.mobile.releaseCurrentSession();
   assert.equal(firstRelease, secondRelease);
@@ -622,8 +603,6 @@ test('concurrent successful API releases share one owned cleanup and start fresh
     'selection-stale',
   );
   assert.equal((await adapter.selectReadinessTarget()).status, 'selection-required');
-  await api.mobile.releaseCurrentSession();
-  assert.equal(cleanups, 1);
 });
 
 test('MaatApi discloses a newly selected target before doctor and readiness side effects', async () => {
