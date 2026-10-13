@@ -1,6 +1,6 @@
 # Maat MVP 设备管理与连接管理重建设计
 
-> 状态：设计已按 PROD-006 修订确认；部分 G1 合同已实装，G1 尚未完成
+> 状态：设计已按 PROD-006 修订确认；G1 自动化合同已通过，G2 及后续 Gate 尚未完成
 >
 > 范围：Android / iOS 设备发现、生命周期目标选择、连接、Appium Session、就绪与恢复
 >
@@ -591,7 +591,7 @@ recovery 不创建新的目标选择；原 identity 缺失或原 endpoint 变化
 | Gate            | 顺序与进入条件                | 退出证据                                                                                                                                    |
 | --------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | G0 设计确认     | **已按 PROD-006 修订通过**    | 生命周期选择设计已获批；不表示已实装、G1 已完成或共享旧代码获删除授权                                                                       |
-| G1 合同测试     | **部分合同已实装，仍待完成**  | identity、零／单／多候选、临时引用重验证、生命周期 pin/forget、无磁盘 binding、进程内全局 busy、跨进程设备锁、ownership、防重放和负合同通过 |
+| G1 合同测试     | **已通过**                    | identity、零／单／多候选、临时引用重验证、生命周期 pin/forget、无磁盘 binding、进程内全局 busy、跨进程设备锁、ownership、防重放和负合同通过 |
 | G2 新内部端口   | **新内部端口**                | facade 后建立 device selection/connection/preparation/session/readiness ports；公开 API 与 Pi wire shape 不变                               |
 | G3 切只读路径   | **切只读路径**                | discovery、PreparationFacts、application inspection、endpoint status 按平台切换；不得创建 Session 或执行准备副作用                          |
 | G3P 切准备计划  | **G3 后、G4 前**              | planner/policy/grant store 接入；事实满足为 no-op，副作用由单一 connection job 执行一次，uncertain 不重试                                   |
@@ -606,11 +606,17 @@ recovery 不创建新的目标选择；原 identity 缺失或原 endpoint 变化
 静默重解释为用户选择。G1 可删除上述隔离的新 `BindingStore`，但 G5/G5M/G6/G7 继续保护
 共享旧 resolver、hints 解释、macOS backend 和 compatibility 路径。
 
-当前生命周期 release/close 切片的自动化证据绑定
-`test/session-target-selection.test.ts` 与 `test/native.test.ts`：覆盖成功释放后重新 discovery、
-旧候选引用失效、owned Session 一次 cleanup、cleanup 失败后的 fail-closed、创建不确定时不
-DELETE 未知 Session、动作不重放，以及 legacy hints 写盘脱敏。该证据仅说明部分 G1 合同已
-实装；不代表 G1 通过，不证明跨进程锁或后续 Gate，也不替代 Android／iOS 真机验收。
+G1 自动化证据绑定 `test/session-target-selection.test.ts`、`test/native.test.ts`、
+`test/device-lock.test.ts` 及 Mobile/shared gates：覆盖成功释放后重新 discovery、旧候选
+引用失效、owned Session 一次 cleanup、cleanup 失败后的 fail-closed、创建不确定时不 DELETE
+未知 Session、动作不重放、legacy hints 写盘脱敏，以及同一 OS 用户下跨 workspace 的
+per-device 进程锁。Ubuntu、macOS 与 Windows Node 24 均已运行真实多进程锁测试。本地
+focused、Mobile、full、package 与 fresh packed-install lock smoke 已通过。该证据关闭 G1
+自动化合同，但不表示 G2/G3/G3P 已实现，也不替代 Android／iOS 真机 G5 或内容搜索业务验收。
+
+分支远端全量 workflow 仍受既有 Ubuntu WDIO worker failure／进程不退出问题阻塞；同一失败点
+已在本任务之前的 `main` CI 复现。本任务保留该失败记录，不把三平台锁 job 的成功冒充完整
+workflow 通过，也不以该基线问题否定已独立通过的 G1 锁合同。
 
 ## 9. 验收标准与真机矩阵
 
@@ -695,5 +701,5 @@ Android/iOS 物理机迁移而删除或宣称已迁移。
    emulator/simulator、远程 Appium provider 与 macOS 不在本轮新迁移范围，
    既有兼容入口继续保留。
 7. **删除门槛**：移除本轮新引入且隔离的 `BindingStore` 属于已确认的 G1 修订范围；
-   G1 当前仍未完成。共享旧 resolver、hints/macOS backend 等仍须在 G5 与 G5M 通过后
+   G1 自动化合同现已通过。共享旧 resolver、hints/macOS backend 等仍须在 G5 与 G5M 通过后
    提交精确批量删除清单并取得一次显式授权；本设计不授权广泛删除。
