@@ -4,6 +4,10 @@ import { discoverIosDevices, matchIosDevices, type IosDevice } from '../setup/io
 import { aggregateSetup } from './model.ts';
 import { defaultCommand, defaultFetchStatus, type SetupCommandResult } from './probes.ts';
 import type { IosSetupCheckInput, SetupCapability, SetupSnapshot } from './types.ts';
+import {
+  setupReadonlyContextSymbol,
+  type InternalSetupCheckInput,
+} from '../mobile/integration/readonly.ts';
 
 export type IosSetupDetectorDependencies = {
   hostPlatform: NodeJS.Platform;
@@ -43,6 +47,9 @@ export async function detectIosSetup(
   dependencies: IosSetupDetectorDependencies = defaults,
 ): Promise<SetupSnapshot> {
   input.signal?.throwIfAborted();
+  const internalContext = (input as InternalSetupCheckInput)[setupReadonlyContextSymbol];
+  const readonlyContext =
+    internalContext && !('facade' in internalContext) ? internalContext : undefined;
   const url = input.serverUrl ?? 'http://127.0.0.1:4723/';
   const endpoint = connection(url);
   if (
@@ -78,7 +85,10 @@ export async function detectIosSetup(
   }
   let status: boolean;
   try {
-    status = await dependencies.fetchStatus(url, input.signal);
+    status = readonlyContext
+      ? readonlyContext.endpoint.state === 'reachable' &&
+        readonlyContext.endpoint.compatibility === 'compatible'
+      : await dependencies.fetchStatus(url, input.signal);
   } catch (error) {
     input.signal?.throwIfAborted();
     throw new Error('IOS_SETUP_CHECK_FAILED: the selected Appium status check failed.', {
@@ -202,84 +212,57 @@ export async function detectIosSetup(
             },
       );
   } else capabilities.push(unknown('xcuitestDriver'));
-  try {
-    const devices = await dependencies.devices(input.signal);
-    input.signal?.throwIfAborted();
-    const matches = matchIosDevices(devices, input.device);
-    const selected = matches.length === 1 ? matches[0] : undefined;
-    facts.devices = devices.map((device) => ({
-      connected: device.connected,
-      paired: device.paired,
-      developerMode: device.developerMode,
-      matchesSelector: matches.some((match) => match.id === device.id),
-    }));
-    const reason = !matches.length
-      ? 'missing'
-      : !selected
-        ? 'select'
-        : !selected.connected
-          ? 'offline'
-          : selected.paired === false
-            ? 'trust'
-            : selected.paired === undefined
-              ? 'unknown'
-              : 'ready';
-    if (reason === 'unknown') capabilities.push(unknown('iosDevice'));
-    else {
-      const keys = {
-        missing: [
-          'capability.iosDevice.missing',
-          'IOS_DEVICE_MISSING',
-          'connect-ios-device',
-          'action.connectIosDevice',
-        ],
-        select: [
-          'capability.iosDevice.select',
-          'IOS_DEVICE_SELECTION_REQUIRED',
-          'select-ios-device',
-          'action.selectIosDevice',
-        ],
-        offline: [
-          'capability.iosDevice.offline',
-          'IOS_DEVICE_OFFLINE',
-          'connect-ios-device',
-          'action.connectIosDevice',
-        ],
-        trust: [
-          'capability.iosDevice.trust',
-          'IOS_DEVICE_UNPAIRED',
-          'trust-ios-device',
-          'action.trustIosDevice',
-        ],
-      } as const;
-      capabilities.push(
-        reason === 'ready'
+  if (readonlyContext) {
+    const blockers = readonlyContext.preparation.blockerCategories;
+    const driverPreparationUnknown = [
+      'artifact-incompatible',
+      'artifact-compatibility-unknown',
+      'signing-required',
+      'signing-compatibility-unknown',
+      'driver-incompatible',
+      'driver-compatibility-unknown',
+    ].some((category) => blockers.includes(category));
+    if (driverPreparationUnknown) {
+      const driverIndex = capabilities.findIndex(({ id }) => id === 'xcuitestDriver');
+      if (driverIndex >= 0) capabilities[driverIndex] = unknown('xcuitestDriver');
+    }
+    const pairingUnknown =
+      blockers.includes('pairing-unknown') || blockers.includes('trust-unknown');
+    const pairingRequired =
+      blockers.includes('pairing-required') || blockers.includes('trust-required');
+    const developerUnknown = blockers.includes('developer-mode-unknown');
+    const developerRequired = blockers.includes('developer-mode-required');
+    facts.devices = [
+      {
+        connected: true,
+        paired: pairingUnknown ? undefined : !pairingRequired,
+        developerMode: developerUnknown ? 'unknown' : developerRequired ? 'disabled' : 'enabled',
+        matchesSelector: true,
+      },
+    ];
+    capabilities.push(
+      pairingUnknown
+        ? unknown('iosDevice')
+        : pairingRequired
           ? {
               id: 'iosDevice',
               required: true,
-              status: 'ready',
-              messageKey: 'capability.iosDevice.ready',
+              status: 'action-required',
+              messageKey: 'capability.iosDevice.trust',
+              errorCode: 'IOS_DEVICE_UNPAIRED',
+              action: { id: 'trust-ios-device', labelKey: 'action.trustIosDevice' },
             }
           : {
               id: 'iosDevice',
               required: true,
-              status: 'action-required',
-              messageKey: keys[reason][0],
-              errorCode: keys[reason][1],
-              action: { id: keys[reason][2], labelKey: keys[reason][3] },
+              status: 'ready',
+              messageKey: 'capability.iosDevice.ready',
             },
-      );
-    }
-    const mode = selected?.developerMode;
+    );
     capabilities.push(
-      mode === 'enabled'
-        ? {
-            id: 'iosDeveloperMode',
-            required: true,
-            status: 'ready',
-            messageKey: 'capability.iosDeveloperMode.ready',
-          }
-        : mode === 'disabled'
+      developerUnknown
+        ? unknown('iosDeveloperMode')
+        : developerRequired
           ? {
               id: 'iosDeveloperMode',
               required: true,
@@ -292,15 +275,113 @@ export async function detectIosSetup(
                 requiresConfirmation: true,
               },
             }
-          : unknown('iosDeveloperMode'),
+          : {
+              id: 'iosDeveloperMode',
+              required: true,
+              status: 'ready',
+              messageKey: 'capability.iosDeveloperMode.ready',
+            },
     );
-  } catch (error) {
-    input.signal?.throwIfAborted();
-    facts.deviceCheck =
-      error instanceof Error && error.message.startsWith('IOS_DEVICE_CHECK_FAILED')
-        ? 'IOS_DEVICE_CHECK_FAILED'
-        : 'failed';
-    capabilities.push(unknown('iosDevice'), unknown('iosDeveloperMode'));
-  }
+  } else
+    try {
+      const devices = await dependencies.devices(input.signal);
+      input.signal?.throwIfAborted();
+      const matches = matchIosDevices(devices, input.device);
+      const selected = matches.length === 1 ? matches[0] : undefined;
+      facts.devices = devices.map((device) => ({
+        connected: device.connected,
+        paired: device.paired,
+        developerMode: device.developerMode,
+        matchesSelector: matches.some((match) => match.id === device.id),
+      }));
+      const reason = !matches.length
+        ? 'missing'
+        : !selected
+          ? 'select'
+          : !selected.connected
+            ? 'offline'
+            : selected.paired === false
+              ? 'trust'
+              : selected.paired === undefined
+                ? 'unknown'
+                : 'ready';
+      if (reason === 'unknown') capabilities.push(unknown('iosDevice'));
+      else {
+        const keys = {
+          missing: [
+            'capability.iosDevice.missing',
+            'IOS_DEVICE_MISSING',
+            'connect-ios-device',
+            'action.connectIosDevice',
+          ],
+          select: [
+            'capability.iosDevice.select',
+            'IOS_DEVICE_SELECTION_REQUIRED',
+            'select-ios-device',
+            'action.selectIosDevice',
+          ],
+          offline: [
+            'capability.iosDevice.offline',
+            'IOS_DEVICE_OFFLINE',
+            'connect-ios-device',
+            'action.connectIosDevice',
+          ],
+          trust: [
+            'capability.iosDevice.trust',
+            'IOS_DEVICE_UNPAIRED',
+            'trust-ios-device',
+            'action.trustIosDevice',
+          ],
+        } as const;
+        capabilities.push(
+          reason === 'ready'
+            ? {
+                id: 'iosDevice',
+                required: true,
+                status: 'ready',
+                messageKey: 'capability.iosDevice.ready',
+              }
+            : {
+                id: 'iosDevice',
+                required: true,
+                status: 'action-required',
+                messageKey: keys[reason][0],
+                errorCode: keys[reason][1],
+                action: { id: keys[reason][2], labelKey: keys[reason][3] },
+              },
+        );
+      }
+      const mode = selected?.developerMode;
+      capabilities.push(
+        mode === 'enabled'
+          ? {
+              id: 'iosDeveloperMode',
+              required: true,
+              status: 'ready',
+              messageKey: 'capability.iosDeveloperMode.ready',
+            }
+          : mode === 'disabled'
+            ? {
+                id: 'iosDeveloperMode',
+                required: true,
+                status: 'action-required',
+                messageKey: 'capability.iosDeveloperMode.required',
+                errorCode: 'IOS_DEVELOPER_MODE_REQUIRED',
+                action: {
+                  id: 'enable-ios-developer-mode',
+                  labelKey: 'action.enableIosDeveloperMode',
+                  requiresConfirmation: true,
+                },
+              }
+            : unknown('iosDeveloperMode'),
+      );
+    } catch (error) {
+      input.signal?.throwIfAborted();
+      facts.deviceCheck =
+        error instanceof Error && error.message.startsWith('IOS_DEVICE_CHECK_FAILED')
+          ? 'IOS_DEVICE_CHECK_FAILED'
+          : 'failed';
+      capabilities.push(unknown('iosDevice'), unknown('iosDeveloperMode'));
+    }
   return aggregateSetup({ platform: 'ios', capabilities, technicalDetails: facts });
 }

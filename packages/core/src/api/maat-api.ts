@@ -26,6 +26,12 @@ import {
   type ConnectionJobSupervisor,
 } from '../mobile/connection/job-supervisor.ts';
 import { assertConnectionJobAccess } from '../mobile/connection/job-slot.ts';
+import {
+  mobileReadonlyFacadeSymbol,
+  setupReadonlyCheckSymbol,
+  type MobileReadonlyFacadeHost,
+  type SetupReadonlyCheckHost,
+} from '../mobile/integration/readonly.ts';
 
 type MigratedRouteAdapter = {
   isMigratedLocalPhysicalRoute(): boolean;
@@ -369,7 +375,7 @@ export class MaatApi {
       }
       const hints =
         platform === 'android' || platform === 'ios' ? adapter?.sessionHints : undefined;
-      const snapshot = await this.setupAssistant.check({
+      const checkInput = {
         ...input,
         platform,
         ...(platform === 'android' || platform === 'ios'
@@ -382,7 +388,18 @@ export class MaatApi {
                   Boolean(hints.capabilities['appium:deviceName'].trim())),
             }
           : {}),
-      });
+      };
+      const facade =
+        platform === 'android' || platform === 'ios'
+          ? (adapter as (typeof adapter & MobileReadonlyFacadeHost) | undefined)?.[
+              mobileReadonlyFacadeSymbol
+            ]?.()
+          : undefined;
+      const snapshot = facade
+        ? await (this.setupAssistant as SetupAssistant & SetupReadonlyCheckHost)[
+            setupReadonlyCheckSymbol
+          ](checkInput, facade)
+        : await this.setupAssistant.check(checkInput);
       const previousHasProcess = Boolean(
         previous.fingerprint.appiumPid || previous.fingerprint.wdaPid,
       );

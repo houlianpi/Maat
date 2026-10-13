@@ -82,14 +82,12 @@ async function runBarrierScenario(
   if (behavior === 'barrier-abort') {
     await assert.rejects(
       barrierOwner.selectReadinessTarget(undefined, controller.signal),
-      (error: unknown) => {
-        assert.ok(error instanceof AggregateError);
-        assert.equal(error.cause, primary);
-        assert.equal(safeCode(error.errors[1]), 'lock-release-uncertain');
-        return true;
-      },
+      (error: unknown) => error === primary,
     );
     assert.equal(barrierOwner.isMigratedLocalPhysicalRoute(), false);
+    assert.equal((await barrierOwner.selectReadinessTarget())?.status, 'target-selected');
+    await rejectedCode(() => barrierOwner.close());
+    assert.equal(barrierOwner.isMigratedLocalPhysicalRoute(), true);
   } else {
     assert.equal((await barrierOwner.selectReadinessTarget())?.status, 'target-selected');
     await rejectedCode(() => barrierOwner.close());

@@ -33,7 +33,6 @@ import { discoverApplications } from '../../setup/applications.ts';
 import type { SessionSetup, SetupInspection } from '../../core/platforms/contracts.ts';
 import {
   canonicalDeviceKey,
-  identityFromLocalFact,
   isLocalPhysicalMobileTarget,
   sameDeviceIdentity,
   type DeviceIdentity,
@@ -42,6 +41,29 @@ import {
   type TargetSelectionResult,
   PhoneCloseUncertainError,
 } from '../../mobile/contracts/device.ts';
+import {
+  dispatchCapabilityBackend,
+  resolveCapabilityBackend,
+  type CapabilityRoute,
+  type G3ReadOnlyCapability,
+} from '../../mobile/contracts/backend-selection.ts';
+import type {
+  EndpointKey,
+  LifecycleTarget,
+  LifecycleTargetKey,
+} from '../../mobile/contracts/lifecycle.ts';
+import {
+  g3ReadonlyConfiguration,
+  localDiscoveryRoute,
+  mobileReadonlyFacadeSymbol,
+  type MobileReadonlyFacadeHost,
+  type MobileReadonlyProvider,
+  type TargetScopedReadonlyFacade,
+} from '../../mobile/integration/readonly.ts';
+import {
+  createProductionAndroidReadonlyProvider,
+  createProductionIosReadonlyProvider,
+} from '../../mobile/integration/production-readonly.ts';
 import { assertMobileCreationAllowed } from '../../mobile/devices/coordinator.ts';
 import {
   acquireDeviceLock,
@@ -79,6 +101,9 @@ type InspectionProviders = Readonly<{
     query: string,
     identity?: DeviceIdentity,
   ): ReturnType<typeof discoverApplications>;
+  mobileReadonly?: MobileReadonlyProvider;
+  readonlyEndpoint?: MobileReadonlyProvider['endpoint'];
+  backendResolver?: typeof resolveCapabilityBackend;
 }>;
 
 const inspectionProviders = new WeakMap<AppiumPlatformAdapter, InspectionProviders>();
@@ -88,7 +113,7 @@ const productionInspectionProviders: InspectionProviders = Object.freeze({
     discoverApplications(environment, query, undefined, identity),
 });
 
-export class AppiumPlatformAdapter implements PlatformAdapter {
+export class AppiumPlatformAdapter implements PlatformAdapter, MobileReadonlyFacadeHost {
   readonly id: NativePlatform;
   readonly label: string;
   readonly #runtime = new NativeManager();
@@ -158,6 +183,7 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   private issue?: string;
   private notices: string[] = [];
   private readonly definition: AppiumAdapterDefinition;
+  readonly #productionMobileReadonly?: MobileReadonlyProvider;
   private initialized = false;
   readonly #selectionSecret = randomBytes(32);
   #selectionSnapshot?: {
@@ -170,6 +196,7 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     endpoint: string;
     selectedBy: 'single-candidate' | 'explicit-user-selection';
     candidate: PublicDeviceCandidate;
+    lifecycle: LifecycleTarget;
   };
   #lifecycleToken?: object;
   #deviceLock?: DeviceLockLease;
@@ -184,6 +211,21 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     this.definition = definition;
     this.id = definition.id;
     this.label = definition.label;
+    this.#productionMobileReadonly =
+      definition.id === 'android'
+        ? createProductionAndroidReadonlyProvider(this.#selectionSecret, async (signal) =>
+            (await this.discoverSelectionDevices(signal)).map((device) => ({
+              routingId: device.id,
+              kind: device.kind === 'emulator' ? 'emulator' : 'device',
+              status: 'online',
+              model: device.name,
+            })),
+          )
+        : definition.id === 'ios'
+          ? createProductionIosReadonlyProvider(
+              (signal) => this.discoverSelectionDevices(signal) as Promise<IosDevice[]>,
+            )
+          : undefined;
     const runtime = this.#runtime;
     const runtimeFacade = Object.freeze({
       get currentApp() {
@@ -215,6 +257,85 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   }
   get appTarget(): Readonly<NativeAppTarget> | undefined {
     return this.app;
+  }
+
+  #mobileReadonlyProvider(): MobileReadonlyProvider {
+    const configured = inspectionProviders.get(this);
+    const provider = configured?.mobileReadonly ?? this.#productionMobileReadonly;
+    if (!provider) throw new Error(`${this.label} has no mobile read-only provider.`);
+    return configured?.readonlyEndpoint
+      ? Object.freeze({ ...provider, endpoint: configured.readonlyEndpoint })
+      : provider;
+  }
+
+  #dispatchReadonly<Result>(
+    route: CapabilityRoute,
+    capability: G3ReadOnlyCapability,
+    handlers: {
+      g3(signal?: AbortSignal): Promise<Result>;
+      legacy(signal?: AbortSignal): Promise<Result>;
+      notApplicable(signal?: AbortSignal): Promise<Result>;
+    },
+    signal?: AbortSignal,
+  ): Promise<Result> {
+    return dispatchCapabilityBackend(
+      route,
+      capability,
+      g3ReadonlyConfiguration,
+      handlers,
+      signal,
+      inspectionProviders.get(this)?.backendResolver ?? resolveCapabilityBackend,
+    );
+  }
+
+  [mobileReadonlyFacadeSymbol](): TargetScopedReadonlyFacade | undefined {
+    const lifecycle = this.#target?.lifecycle;
+    if (!lifecycle) return;
+    const provider = this.#mobileReadonlyProvider();
+    const assertCurrent = () => {
+      if (this.#target?.lifecycle !== lifecycle)
+        throw new Error('MOBILE_READONLY_TARGET_CHANGED: the lifecycle target changed.');
+    };
+    return Object.freeze({
+      platform: lifecycle.identity.platform,
+      target: lifecycle,
+      inspectPreparation: (signal?: AbortSignal) =>
+        this.#dispatchReadonly(
+          { kind: 'lifecycle-target', target: lifecycle },
+          'preparation-facts',
+          {
+            g3: async (operationSignal) => {
+              assertCurrent();
+              return provider.preparation.inspect(lifecycle, operationSignal);
+            },
+            legacy: async () => {
+              throw new Error('Legacy preparation inspection is not target-scoped.');
+            },
+            notApplicable: async () => {
+              throw new Error('Mobile preparation inspection is not applicable.');
+            },
+          },
+          signal,
+        ),
+      inspectEndpoint: (signal?: AbortSignal) =>
+        this.#dispatchReadonly(
+          { kind: 'lifecycle-target', target: lifecycle },
+          'endpoint-status',
+          {
+            g3: async (operationSignal) => {
+              assertCurrent();
+              return provider.endpoint.inspect(lifecycle, operationSignal);
+            },
+            legacy: async () => {
+              throw new Error('Legacy endpoint inspection is not target-scoped.');
+            },
+            notApplicable: async () => {
+              throw new Error('Mobile endpoint inspection is not applicable.');
+            },
+          },
+          signal,
+        ),
+    });
   }
   /** Side-effect-free route classification from an exact locally discovered target pin. */
   isMigratedLocalPhysicalRoute(): boolean {
@@ -304,6 +425,31 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     if (this.id === 'android' || this.id === 'ios') assertDeviceLockReleaseCertain();
     const providers = inspectionProviders.get(this) ?? productionInspectionProviders;
     if (request.kind === 'devices') {
+      if (!this.environment) await this.initialize();
+      if (
+        (this.id === 'android' || this.id === 'ios') &&
+        isLocalAppiumEndpoint(this.environment!.serverUrl ?? 'http://127.0.0.1:4723/') &&
+        this.environment!.device?.kind !== 'emulator' &&
+        this.environment!.device?.kind !== 'simulator'
+      ) {
+        const platform = this.id;
+        const snapshot = await this.#dispatchReadonly(localDiscoveryRoute(platform), 'discovery', {
+          g3: (signal) => this.#mobileReadonlyProvider().inventory.discover(platform, signal),
+          legacy: async () => {
+            throw new Error('Local physical discovery unexpectedly selected the legacy backend.');
+          },
+          notApplicable: async () => {
+            throw new Error('Mobile discovery is not applicable.');
+          },
+        });
+        return snapshot.candidates.map(({ disclosure }) => ({
+          number: disclosure.candidateNumber,
+          displayName: disclosure.displayName,
+          platform: disclosure.platform,
+          kind: disclosure.kind,
+          discriminator: disclosure.discriminator,
+        }));
+      }
       const devices = await providers.devices(this.id);
       if (this.id === 'macos') return devices;
       return devices.map((device, index) => ({
@@ -319,19 +465,41 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     }
     if (!this.environment) await this.initialize();
     if (
-      (this.id === 'android' ||
+      ((this.id === 'android' && this.environment!.device?.kind !== 'emulator') ||
         (this.id === 'ios' && this.environment!.device?.kind !== 'simulator')) &&
       isLocalAppiumEndpoint(this.environment!.serverUrl ?? 'http://127.0.0.1:4723/') &&
       !this.#target
     )
       throw new Error('Select the current phone with check_device_ready before finding apps.');
-    const apps = await providers.applications(
-      this.#targetEnvironment() ?? this.environment!,
-      request.query ?? '',
-      this.#target?.identity,
-    );
+    const query = request.query ?? '';
+    const apps = this.#target
+      ? await this.#dispatchReadonly(
+          { kind: 'lifecycle-target', target: this.#target.lifecycle },
+          'application-inspection',
+          {
+            g3: (signal) =>
+              this.#mobileReadonlyProvider().applications.inspect(
+                this.#target!.lifecycle,
+                query,
+                signal,
+              ),
+            legacy: async () => {
+              throw new Error(
+                'Local physical application inspection unexpectedly selected the legacy backend.',
+              );
+            },
+            notApplicable: async () => {
+              throw new Error('Mobile application inspection is not applicable.');
+            },
+          },
+        )
+      : await providers.applications(this.environment!, query);
     const appCapability = this.id === 'android' ? 'appium:appPackage' : 'appium:bundleId';
-    return apps.map((app) => ({ ...app, capabilities: { [appCapability]: app.id } }));
+    return apps.map((app) => ({
+      name: app.name,
+      id: app.id,
+      capabilities: { [appCapability]: app.id },
+    }));
   }
 
   protected discoverSelectionDevices(signal?: AbortSignal): Promise<(Device | IosDevice)[]> {
@@ -348,27 +516,34 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     return discoverAndroidReadinessDevices(signal, connectAdb);
   }
 
-  #publicCandidate(identity: DeviceIdentity, candidateNumber: number): PublicDeviceCandidate {
-    return {
-      candidateNumber,
-      displayName: identity.displayName ?? `${identity.platform} ${identity.kind}`,
-      platform: identity.platform,
-      kind: identity.kind,
-      discriminator: `${identity.kind}-${createHmac('sha256', this.#selectionSecret)
-        .update(canonicalDeviceKey(identity))
-        .digest('hex')
-        .slice(0, 8)}`,
-    };
-  }
-
-  async #currentSelectionIdentities(signal?: AbortSignal): Promise<DeviceIdentity[]> {
+  async #currentSelectionInventory(signal?: AbortSignal): Promise<{
+    discoveryId: string;
+    identities: DeviceIdentity[];
+    candidates: PublicDeviceCandidate[];
+  }> {
     if (this.id !== 'android' && this.id !== 'ios')
       throw new Error('Phone target selection supports only Android and iOS.');
     const platform = this.id;
-    const source = this.id === 'ios' ? 'local-core-device' : 'local-adb';
-    return (await this.discoverSelectionDevices(signal)).map((device) =>
-      identityFromLocalFact({ source, platform, device }),
+    const snapshot = await this.#dispatchReadonly(
+      localDiscoveryRoute(platform),
+      'discovery',
+      {
+        g3: (operationSignal) =>
+          this.#mobileReadonlyProvider().inventory.discover(platform, operationSignal),
+        legacy: async () => {
+          throw new Error('Local physical discovery unexpectedly selected the legacy backend.');
+        },
+        notApplicable: async () => {
+          throw new Error('Mobile discovery is not applicable.');
+        },
+      },
+      signal,
     );
+    return {
+      discoveryId: snapshot.discoveryKey,
+      identities: snapshot.candidates.map(({ identity }) => identity),
+      candidates: snapshot.candidates.map(({ disclosure }) => disclosure),
+    };
   }
 
   #sameGeneration(left: DeviceIdentity[], right: DeviceIdentity[]): boolean {
@@ -460,9 +635,8 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         )
       )
         return { status: 'selection-invalid', platform };
-      const current = (await this.#currentSelectionIdentities(signal)).filter(
-        isLocalPhysicalMobileTarget,
-      );
+      const inventory = await this.#currentSelectionInventory(signal);
+      const current = inventory.identities.filter(isLocalPhysicalMobileTarget);
       if (
         this.#hasDuplicateIdentities(snapshot.identities) ||
         this.#hasDuplicateIdentities(current) ||
@@ -478,7 +652,14 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         return { status: 'selection-stale', platform };
       }
       const identity = exact[0]!;
-      const candidate = this.#publicCandidate(identity, selection.candidateNumber);
+      const currentIndex = current.findIndex((candidate) =>
+        sameDeviceIdentity(candidate, identity),
+      );
+      const currentDisclosure = inventory.candidates[currentIndex]!;
+      const candidate = {
+        ...currentDisclosure,
+        candidateNumber: selection.candidateNumber,
+      };
       const deviceLock = acquireDeviceLock(identity);
       this.#deviceLock = deviceLock;
       try {
@@ -491,6 +672,12 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         endpoint,
         selectedBy: 'explicit-user-selection',
         candidate,
+        lifecycle: this.#createLifecycleTarget(
+          identity,
+          endpoint,
+          'explicit-user-selection',
+          candidate,
+        ),
       };
       this.#lifecycleToken = Object.freeze({});
       assertMobileCreationAllowed(this.isMigratedLocalPhysicalRoute());
@@ -503,7 +690,8 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       };
     }
 
-    const discovered = await this.#currentSelectionIdentities(signal);
+    const inventory = await this.#currentSelectionInventory(signal);
+    const discovered = inventory.identities;
     const identities = discovered.filter(isLocalPhysicalMobileTarget);
     // A local emulator remains on the pre-migration resolver path. Discovery
     // classifies it but never turns it into a migrated target pin.
@@ -515,17 +703,18 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       this.#selectionSnapshot = undefined;
       return { status: 'device-not-found', platform };
     }
-    const candidates = identities.map((identity, index) =>
-      this.#publicCandidate(identity, index + 1),
-    );
+    const candidates = inventory.candidates;
     if (identities.length > 1) {
-      const id = randomUUID();
       const proposal = this.#legacyHintProposal(identities, candidates);
-      this.#selectionSnapshot = { id, identities, candidates: proposal };
+      this.#selectionSnapshot = {
+        id: inventory.discoveryId,
+        identities,
+        candidates: proposal,
+      };
       return {
         status: 'selection-required',
         platform,
-        discoveryId: id,
+        discoveryId: inventory.discoveryId,
         candidates: proposal,
       };
     }
@@ -543,6 +732,7 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       endpoint,
       selectedBy: 'single-candidate',
       candidate,
+      lifecycle: this.#createLifecycleTarget(identity, endpoint, 'single-candidate', candidate),
     };
     this.#lifecycleToken = Object.freeze({});
     assertMobileCreationAllowed(this.isMigratedLocalPhysicalRoute());
@@ -553,6 +743,26 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
       selectedBy: 'single-candidate',
       candidate,
     };
+  }
+
+  #createLifecycleTarget(
+    identity: DeviceIdentity,
+    endpoint: string,
+    selectedBy: 'single-candidate' | 'explicit-user-selection',
+    candidate: PublicDeviceCandidate,
+  ): LifecycleTarget {
+    return Object.freeze({
+      key: randomUUID() as LifecycleTargetKey,
+      identity: Object.freeze({ ...identity }),
+      endpoint: endpoint as EndpointKey,
+      selectedBy,
+      disclosure: Object.freeze({
+        platform: identity.platform,
+        kind: identity.kind,
+        label: candidate.displayName,
+        selectedBy,
+      }),
+    });
   }
 
   #targetEnvironment(): NativeEnvironment | undefined {
@@ -1048,4 +1258,12 @@ export function createAppiumPlatformAdapterWithInspectionProvidersForTests(
   const adapter = new AppiumPlatformAdapter(definition);
   inspectionProviders.set(adapter, Object.freeze({ ...providers }));
   return adapter;
+}
+
+/** Source-internal test composition for subclasses that exercise lifecycle behavior. */
+export function setAppiumInspectionProvidersForTests(
+  adapter: AppiumPlatformAdapter,
+  providers: InspectionProviders,
+): void {
+  inspectionProviders.set(adapter, Object.freeze({ ...providers }));
 }

@@ -27,11 +27,13 @@ export async function discoverApplications(
     command(
       file: string,
       args: string[],
-      options: { timeout: number },
+      options: { timeout: number; signal?: AbortSignal },
     ): Promise<{ stdout: string }>;
   } = { resolveDevice, resolveAndroidTools, assertAdbServerCompatible, command: exec },
   exactIdentity?: DeviceIdentity,
+  signal?: AbortSignal,
 ) {
+  signal?.throwIfAborted();
   if (input.serverUrl && !input.device)
     throw new Error(
       'Remote installed-app discovery is driver-specific. Supply an app identifier or package path.',
@@ -40,8 +42,9 @@ export async function discoverApplications(
   if (exactIdentity) {
     const devices =
       input.platform === 'ios'
-        ? await (dependencies.discoverIosDevices ?? discoverIosDevices)()
-        : await (dependencies.discoverDevices ?? discoverDevices)('android');
+        ? await (dependencies.discoverIosDevices ?? discoverIosDevices)(signal)
+        : await (dependencies.discoverDevices ?? discoverDevices)('android', signal);
+    signal?.throwIfAborted();
     const source = input.platform === 'ios' ? 'local-core-device' : 'local-adb';
     const device = devices.find((candidate) =>
       sameDeviceIdentity(
@@ -65,17 +68,17 @@ export async function discoverApplications(
       },
     };
   } else {
-    target = await dependencies.resolveDevice(input);
+    target = await dependencies.resolveDevice(input, signal);
   }
   let apps: Array<{ name: string; id: string }> = [];
   if (target.environment.platform === 'android') {
-    const tools = await dependencies.resolveAndroidTools();
+    const tools = await dependencies.resolveAndroidTools({ signal });
     if (!tools.adbPath) throw new Error('ADB_MISSING: prepare Android tools before app discovery.');
-    await dependencies.assertAdbServerCompatible(tools.adbPath);
+    await dependencies.assertAdbServerCompatible(tools.adbPath, signal);
     const { stdout } = await dependencies.command(
       tools.adbPath,
       ['-s', String(target.capabilities['appium:udid']), 'shell', 'pm', 'list', 'packages'],
-      { timeout: 15_000 },
+      { timeout: 15_000, signal },
     );
     apps = stdout
       .split('\n')
@@ -86,7 +89,7 @@ export async function discoverApplications(
       const { stdout } = await dependencies.command(
         'xcrun',
         ['simctl', 'listapps', String(target.capabilities['appium:udid'])],
-        { timeout: 20_000 },
+        { timeout: 20_000, signal },
       );
       const identifiers = [...stdout.matchAll(/^\s*"([^"]+)" =/gm)].map((match) => match[1]!);
       apps = identifiers.map((id) => ({ name: id, id }));
@@ -107,9 +110,10 @@ export async function discoverApplications(
             '--json-output',
             file,
           ],
-          { timeout: 20_000 },
+          { timeout: 20_000, signal },
         );
-        const result: unknown = JSON.parse(await readFile(file, 'utf8'));
+        signal?.throwIfAborted();
+        const result: unknown = JSON.parse(await readFile(file, { encoding: 'utf8', signal }));
         if (!isRecord(result) || !isRecord(result.result) || !Array.isArray(result.result.apps))
           throw new Error(
             'IOS_APP_DISCOVERY_FAILED: CoreDevice returned an invalid installed-app list.',
@@ -133,13 +137,15 @@ export async function discoverApplications(
     for (const folder of ['/Applications', '/System/Applications']) {
       for (const entry of await readdir(folder)) {
         if (!entry.endsWith('.app')) continue;
-        const { stdout } = await exec('/usr/libexec/PlistBuddy', [
-          '-c',
-          'Print :CFBundleIdentifier',
-          path.join(folder, entry, 'Contents/Info.plist'),
-        ]).catch(() => ({ stdout: '' }));
+        signal?.throwIfAborted();
+        const { stdout } = await exec(
+          '/usr/libexec/PlistBuddy',
+          ['-c', 'Print :CFBundleIdentifier', path.join(folder, entry, 'Contents/Info.plist')],
+          { signal },
+        ).catch(() => ({ stdout: '' }));
         if (stdout.trim()) apps.push({ name: entry.slice(0, -4), id: stdout.trim() });
       }
+      signal?.throwIfAborted();
     }
   }
   return apps.filter((app) => `${app.name} ${app.id}`.toLowerCase().includes(query.toLowerCase()));

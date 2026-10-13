@@ -70,6 +70,58 @@ test('physical iOS App discovery includes default Apps, validates output and rem
   }
 });
 
+test('physical iOS App discovery propagates mid-flight Abort and removes its temporary output', async () => {
+  const controller = new AbortController();
+  const reason = new Error('fixture app inspection abort');
+  let temporaryDirectory = '';
+  let commands = 0;
+  let commandStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    commandStarted = resolve;
+  });
+  const operation = discoverApplications(
+    {
+      platform: 'ios',
+      device: { kind: 'device', name: 'Test iPhone' },
+      capabilities: {},
+    },
+    '',
+    {
+      resolveDevice: async () => {
+        throw new Error('exact identity must bypass legacy resolution');
+      },
+      resolveAndroidTools,
+      assertAdbServerCompatible,
+      discoverIosDevices: async () => [phone],
+      command: async (_file, args, options) => {
+        commands += 1;
+        temporaryDirectory = path.dirname(args[args.indexOf('--json-output') + 1]!);
+        commandStarted();
+        await new Promise<void>((_resolve, reject) => {
+          options.signal?.addEventListener('abort', () => reject(options.signal?.reason), {
+            once: true,
+          });
+        });
+        return { stdout: '' };
+      },
+    },
+    {
+      platform: 'ios',
+      providerInstanceId: 'local-core-device',
+      routingId: privateId,
+      kind: 'device',
+      transportScope: 'core-device',
+      displayName: phone.name,
+    },
+    controller.signal,
+  );
+  await started;
+  controller.abort(reason);
+  await assert.rejects(operation, (error) => error === reason);
+  assert.equal(commands, 1);
+  await assert.rejects(access(temporaryDirectory), /ENOENT/);
+});
+
 const privateId = 'PRIVATE_IPHONE_UDID';
 const phone: IosDevice = {
   id: privateId,

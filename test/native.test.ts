@@ -1033,7 +1033,7 @@ test('cold Android ready never falls back from an unavailable configured endpoin
     });
 
     await assert.rejects(api.setup.ready(), /APPIUM_SERVICE_UNAVAILABLE/);
-    assert.deepEqual(mock.requests, ['GET /status']);
+    assert.deepEqual(mock.requests, ['GET /status', 'GET /status']);
     assert.deepEqual(mock.adb!.requests, []);
     assert.equal(mock.created(), 0);
   } finally {
@@ -1878,7 +1878,7 @@ test('device unlock failure retains the target and blocks later mobile entries',
   assert.doesNotMatch(JSON.stringify(result), /MOCK_|private|path|pid|digest|[a-f0-9]{64}/i);
 });
 
-test('Abort primary survives released-lock handle close failure without retaining a target', async () => {
+test('G3 discovery Abort propagates before lock acquisition without retaining a target', async () => {
   const controller = new AbortController();
   const primary = new Error('primary close-failure abort');
   class AbortCloseFailureAdapter extends AppiumPlatformAdapter {
@@ -1896,30 +1896,20 @@ test('Abort primary survives released-lock handle close failure without retainin
   setDeviceLockCloseFailureForTests(new Error('private injected close failure'));
   await assert.rejects(
     adapter.selectReadinessTarget(undefined, controller.signal),
-    (error: unknown) => {
-      assert.ok(error instanceof AggregateError);
-      assert.equal(error.cause, primary);
-      assert.equal(error.errors[0], primary);
-      assert.equal(
-        (error.errors[1] as Error & { code?: string }).code,
-        'device-lock-handle-cleanup',
-      );
-      assert.equal(error.message.includes('private injected'), false);
-      return true;
-    },
+    (error: unknown) => error === primary,
   );
   assert.equal(adapter.isMigratedLocalPhysicalRoute(), false);
   assert.equal(adapter.hasLifecycleUncertainty(), false);
-  assert.deepEqual(deviceLockReleaseCallCountsForTests(), { unlock: 1, close: 1 });
+  assert.deepEqual(deviceLockReleaseCallCountsForTests(), { unlock: 0, close: 0 });
   assert.deepEqual(await deviceLockChild('MOCK_ABORT_CLOSE_DEVICE'), {
     status: 'acquired',
   });
   await adapter.close();
-  assert.deepEqual(deviceLockReleaseCallCountsForTests(), { unlock: 1, close: 1 });
+  assert.deepEqual(deviceLockReleaseCallCountsForTests(), { unlock: 0, close: 0 });
   await assert.rejects(adapter.execute('return 1;'), /PHONE_TARGET_SELECTION_REQUIRED/);
 });
 
-test('Abort primary is preserved when pre-pin device unlock cleanup also fails', async () => {
+test('G3 discovery Abort precedes a separately proven device unlock barrier', async () => {
   const result = await deviceLockChild('MOCK_ABORT_UNLOCK_DEVICE', 'barrier-abort');
   assert.deepEqual(result, {
     status: 'barrier-confirmed',

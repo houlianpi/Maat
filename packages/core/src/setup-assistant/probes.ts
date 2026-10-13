@@ -64,18 +64,39 @@ export async function defaultCommand(
   }
 }
 
-export async function defaultFetchStatus(url: string, signal?: AbortSignal): Promise<boolean> {
+export async function inspectAppiumEndpointStatus(
+  url: string,
+  signal?: AbortSignal,
+): Promise<
+  | { state: 'reachable'; compatibility: 'compatible' | 'incompatible' | 'unknown' }
+  | { state: 'unreachable'; errorCategory: string }
+> {
   const endpoint = new URL(url);
   endpoint.pathname = `${endpoint.pathname.replace(/\/$/, '')}/status`;
   try {
     const response = await fetch(endpoint, {
       signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(3_000)]),
     });
-    if (!response.ok) return false;
+    if (!response.ok) return { state: 'reachable', compatibility: 'incompatible' };
     const body: unknown = await response.json();
-    return isRecord(body) && isRecord(body.value) && body.value.ready === true;
+    if (!isRecord(body) || !isRecord(body.value))
+      return { state: 'reachable', compatibility: 'incompatible' };
+    return {
+      state: 'reachable',
+      compatibility:
+        body.value.ready === true
+          ? 'compatible'
+          : body.value.ready === false
+            ? 'unknown'
+            : 'incompatible',
+    };
   } catch {
     signal?.throwIfAborted();
-    return false;
+    return { state: 'unreachable', errorCategory: 'service-unavailable' };
   }
+}
+
+export async function defaultFetchStatus(url: string, signal?: AbortSignal): Promise<boolean> {
+  const status = await inspectAppiumEndpointStatus(url, signal);
+  return status.state === 'reachable' && status.compatibility === 'compatible';
 }

@@ -13,6 +13,12 @@ import type {
   SetupSnapshot,
   AndroidSetupCheckInput,
 } from './types.ts';
+import {
+  setupReadonlyCheckSymbol,
+  setupReadonlyContextSymbol,
+  type InternalSetupCheckInput,
+  type TargetScopedReadonlyFacade,
+} from '../mobile/integration/readonly.ts';
 
 export type SetupAssistantOptions = {
   preferencesFile?: string;
@@ -121,10 +127,24 @@ export class SetupAssistant {
         state: 'checking',
       });
       try {
+        const internal = (input as InternalSetupCheckInput)[setupReadonlyContextSymbol];
+        const detectorInput =
+          internal && 'facade' in internal
+            ? ({
+                ...input,
+                [setupReadonlyContextSymbol]: Object.freeze({
+                  platform: internal.facade.platform,
+                  target: internal.facade.target,
+                  preparation: await internal.facade.inspectPreparation(input.signal),
+                  endpoint: await internal.facade.inspectEndpoint(input.signal),
+                }),
+              } as AndroidSetupCheckInput & { platform?: string })
+            : input;
+        input.signal?.throwIfAborted();
         this.snapshot =
           input.platform === 'ios'
-            ? await this.iosDetector(input, this.iosDetectorDependencies)
-            : await this.androidDetector(input, this.androidDetectorDependencies);
+            ? await this.iosDetector(detectorInput, this.iosDetectorDependencies)
+            : await this.androidDetector(detectorInput, this.androidDetectorDependencies);
         input.signal?.throwIfAborted();
         this.waitingForRecheck = false;
         this.lastActionId = undefined;
@@ -273,3 +293,24 @@ export class SetupAssistant {
     return this.check({ platform: this.snapshot.platform });
   }
 }
+
+Object.defineProperty(SetupAssistant.prototype, setupReadonlyCheckSymbol, {
+  configurable: false,
+  enumerable: false,
+  writable: false,
+  value: async function (
+    this: SetupAssistant,
+    input: InternalSetupCheckInput,
+    facade: TargetScopedReadonlyFacade,
+  ): Promise<SetupSnapshot> {
+    input.signal?.throwIfAborted();
+    const platform = input.platform ?? facade.platform;
+    if (platform !== facade.platform || facade.target.identity.platform !== facade.platform)
+      throw new Error('Mobile read-only setup facade does not match the requested platform.');
+    return this.check({
+      ...input,
+      platform,
+      [setupReadonlyContextSymbol]: Object.freeze({ facade }),
+    } as AndroidSetupCheckInput & { platform?: string });
+  },
+});

@@ -5,6 +5,10 @@ import { matchDevices, type Device } from '../setup/devices.ts';
 import { aggregateSetup } from './model.ts';
 import { defaultCommand, defaultFetchStatus, type SetupCommandResult } from './probes.ts';
 import type { AndroidSetupCheckInput, SetupCapability, SetupSnapshot } from './types.ts';
+import {
+  setupReadonlyContextSymbol,
+  type InternalSetupCheckInput,
+} from '../mobile/integration/readonly.ts';
 
 export { defaultCommand } from './probes.ts';
 export type AndroidSetupCommandResult = SetupCommandResult;
@@ -147,6 +151,9 @@ export async function detectAndroidSetup(
   dependencies: AndroidSetupDetectorDependencies = defaults,
 ): Promise<SetupSnapshot> {
   input.signal?.throwIfAborted();
+  const internalContext = (input as InternalSetupCheckInput)[setupReadonlyContextSymbol];
+  const readonlyContext =
+    internalContext && !('facade' in internalContext) ? internalContext : undefined;
   const serverUrl = input.serverUrl ?? 'http://127.0.0.1:4723/';
   const endpoint = connection(serverUrl);
   if (
@@ -171,10 +178,13 @@ export async function detectAndroidSetup(
     preparationOnly: true,
     java: 'APK signing or installation may additionally require Java; not checked for an existing App.',
   };
-  const serverReady = await dependencies.fetchStatus(serverUrl, input.signal).catch(() => {
-    input.signal?.throwIfAborted();
-    return false;
-  });
+  const serverReady = readonlyContext
+    ? readonlyContext.endpoint.state === 'reachable' &&
+      readonlyContext.endpoint.compatibility === 'compatible'
+    : await dependencies.fetchStatus(serverUrl, input.signal).catch(() => {
+        input.signal?.throwIfAborted();
+        return false;
+      });
   input.signal?.throwIfAborted();
   capabilities.push(
     serverReady
@@ -385,77 +395,132 @@ export async function detectAndroidSetup(
       }
     }
   }
-  try {
-    input.signal?.throwIfAborted();
-    const output = await dependencies.adbDevices(input.signal);
-    input.signal?.throwIfAborted();
-    technicalDetails.adbServer = output === undefined ? 'not-running' : 'running';
+  if (readonlyContext) {
+    const facts = readonlyContext.preparation;
+    const unauthorized = facts.blockerCategories.includes('android-device-unauthorized');
+    const offline = facts.blockerCategories.includes('android-device-offline');
+    const ready = facts.compatibility === 'compatible' && !facts.blockerCategories.length;
+    technicalDetails.adbServer = 'running';
+    technicalDetails.devices = [
+      {
+        kind: 'device',
+        status: ready ? 'device' : unauthorized ? 'unauthorized' : offline ? 'offline' : 'unknown',
+        matchesSelector: true,
+      },
+    ];
+    capabilities.push({
+      id: 'adbServer',
+      required: true,
+      status: 'ready',
+      messageKey: 'capability.adbServer.ready',
+    });
     capabilities.push(
-      output === undefined
+      ready
         ? {
-            id: 'adbServer',
-            required: true,
-            status: 'action-required',
-            messageKey: 'capability.adbServer.start',
-            errorCode: 'ADB_SERVER_NOT_RUNNING',
-            action: { id: 'start-adb', labelKey: 'action.startAdb' },
-          }
-        : {
-            id: 'adbServer',
+            id: 'androidDevice',
             required: true,
             status: 'ready',
-            messageKey: 'capability.adbServer.ready',
-          },
+            messageKey: 'capability.androidDevice.ready',
+          }
+        : unauthorized
+          ? {
+              id: 'androidDevice',
+              required: true,
+              status: 'action-required',
+              messageKey: 'capability.androidDevice.unauthorized',
+              errorCode: 'ANDROID_DEVICE_UNAUTHORIZED',
+              action: {
+                id: 'authorize-android-device',
+                labelKey: 'action.authorizeAndroidDevice',
+                requiresConfirmation: true,
+              },
+            }
+          : offline
+            ? {
+                id: 'androidDevice',
+                required: true,
+                status: 'action-required',
+                messageKey: 'capability.androidDevice.offline',
+                errorCode: 'ANDROID_DEVICE_OFFLINE',
+                action: {
+                  id: 'connect-android-device',
+                  labelKey: 'action.connectAndroidDevice',
+                },
+              }
+            : unknown('androidDevice'),
     );
-    if (output === undefined) {
+  } else
+    try {
+      input.signal?.throwIfAborted();
+      const output = await dependencies.adbDevices(input.signal);
+      input.signal?.throwIfAborted();
+      technicalDetails.adbServer = output === undefined ? 'not-running' : 'running';
+      capabilities.push(
+        output === undefined
+          ? {
+              id: 'adbServer',
+              required: true,
+              status: 'action-required',
+              messageKey: 'capability.adbServer.start',
+              errorCode: 'ADB_SERVER_NOT_RUNNING',
+              action: { id: 'start-adb', labelKey: 'action.startAdb' },
+            }
+          : {
+              id: 'adbServer',
+              required: true,
+              status: 'ready',
+              messageKey: 'capability.adbServer.ready',
+            },
+      );
+      if (output === undefined) {
+        capabilities.push(unknown('androidDevice'));
+        return aggregateSetup({ platform: 'android', capabilities, technicalDetails });
+      }
+      const available = devices(output ?? '');
+      const matches = matchDevices(available, input.device);
+      technicalDetails.devices = available.map(({ kind, status, id }) => ({
+        kind,
+        status,
+        matchesSelector: matches.some((device) => device.id === id),
+      }));
+      const selected =
+        matches.length === 1 ? available.find((item) => item.id === matches[0]!.id) : undefined;
+      const reason = !matches.length
+        ? 'missing'
+        : !selected
+          ? 'select'
+          : selected.status === 'device'
+            ? 'ready'
+            : selected.status;
+      const actions = {
+        missing: { id: 'connect-android-device', labelKey: 'action.connectAndroidDevice' },
+        select: { id: 'select-android-device', labelKey: 'action.selectAndroidDevice' },
+        unauthorized: {
+          id: 'authorize-android-device',
+          labelKey: 'action.authorizeAndroidDevice',
+          requiresConfirmation: true,
+        },
+        offline: { id: 'connect-android-device', labelKey: 'action.connectAndroidDevice' },
+      } as const;
+      const codes = {
+        missing: 'ANDROID_DEVICE_MISSING',
+        select: 'ANDROID_DEVICE_SELECTION_REQUIRED',
+        unauthorized: 'ANDROID_DEVICE_UNAUTHORIZED',
+        offline: 'ANDROID_DEVICE_OFFLINE',
+      } as const;
+      capabilities.push({
+        id: 'androidDevice',
+        required: true,
+        status: reason === 'ready' ? 'ready' : 'action-required',
+        messageKey: `capability.androidDevice.${reason}`,
+        ...(reason === 'ready' ? {} : { errorCode: codes[reason], action: actions[reason] }),
+      });
+    } catch {
+      input.signal?.throwIfAborted();
+      technicalDetails.adbServer = 'unknown';
+      if (!capabilities.some((item) => item.id === 'adbServer'))
+        capabilities.push(unknown('adbServer'));
       capabilities.push(unknown('androidDevice'));
-      return aggregateSetup({ platform: 'android', capabilities, technicalDetails });
     }
-    const available = devices(output ?? '');
-    const matches = matchDevices(available, input.device);
-    technicalDetails.devices = available.map(({ kind, status, id }) => ({
-      kind,
-      status,
-      matchesSelector: matches.some((device) => device.id === id),
-    }));
-    const selected =
-      matches.length === 1 ? available.find((item) => item.id === matches[0]!.id) : undefined;
-    const reason = !matches.length
-      ? 'missing'
-      : !selected
-        ? 'select'
-        : selected.status === 'device'
-          ? 'ready'
-          : selected.status;
-    const actions = {
-      missing: { id: 'connect-android-device', labelKey: 'action.connectAndroidDevice' },
-      select: { id: 'select-android-device', labelKey: 'action.selectAndroidDevice' },
-      unauthorized: {
-        id: 'authorize-android-device',
-        labelKey: 'action.authorizeAndroidDevice',
-        requiresConfirmation: true,
-      },
-      offline: { id: 'connect-android-device', labelKey: 'action.connectAndroidDevice' },
-    } as const;
-    const codes = {
-      missing: 'ANDROID_DEVICE_MISSING',
-      select: 'ANDROID_DEVICE_SELECTION_REQUIRED',
-      unauthorized: 'ANDROID_DEVICE_UNAUTHORIZED',
-      offline: 'ANDROID_DEVICE_OFFLINE',
-    } as const;
-    capabilities.push({
-      id: 'androidDevice',
-      required: true,
-      status: reason === 'ready' ? 'ready' : 'action-required',
-      messageKey: `capability.androidDevice.${reason}`,
-      ...(reason === 'ready' ? {} : { errorCode: codes[reason], action: actions[reason] }),
-    });
-  } catch {
-    input.signal?.throwIfAborted();
-    technicalDetails.adbServer = 'unknown';
-    if (!capabilities.some((item) => item.id === 'adbServer'))
-      capabilities.push(unknown('adbServer'));
-    capabilities.push(unknown('androidDevice'));
-  }
   return aggregateSetup({ platform: 'android', capabilities, technicalDetails });
 }

@@ -17,7 +17,11 @@ import type {
   NativeAppTarget,
   NativeEnvironment,
 } from '../packages/core/src/platforms/appium/schema.ts';
-import { AppiumPlatformAdapter } from '../packages/core/src/platforms/appium/appium-adapter.ts';
+import {
+  AppiumPlatformAdapter,
+  setAppiumInspectionProvidersForTests,
+} from '../packages/core/src/platforms/appium/appium-adapter.ts';
+import { createEndpointStatusView } from '../packages/core/src/mobile/endpoint/port.ts';
 import { setDeviceLockStateDirectoryForTests } from '../packages/core/src/mobile/devices/device-lock.ts';
 import {
   detectAndroidSetup,
@@ -936,6 +940,18 @@ test('explicit App target clearing restores Android ready in the same API withou
     label: 'Android',
     platformName: 'Android',
     automationName: 'UiAutomator2',
+  });
+  setAppiumInspectionProvidersForTests(adapter, {
+    devices: async () => [],
+    applications: async () => [],
+    readonlyEndpoint: {
+      async inspect() {
+        return createEndpointStatusView({
+          state: 'reachable',
+          compatibility: 'compatible',
+        });
+      },
+    },
   });
   const fake = fakeMaat(root);
   adapter.executeReadiness = fake.adapter.executeReadiness!;

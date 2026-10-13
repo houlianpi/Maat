@@ -11,6 +11,12 @@ import type {
 } from '../platforms/appium/schema.ts';
 const exec = promisify(execFile);
 export type Device = { id: string; name: string; kind: NativeDeviceKind };
+export type AndroidReadonlyDeviceFact = {
+  routingId: string;
+  kind: 'device' | 'emulator';
+  status: 'online' | 'unauthorized' | 'offline' | 'unknown';
+  model?: string;
+};
 
 export function matchDevices(devices: Device[], selector?: NativeEnvironment['device']): Device[] {
   return devices.filter(
@@ -38,13 +44,45 @@ export function parseAndroidDevices(text: string): Device[] {
   });
 }
 
+/** Parse the existing ADB host-protocol inventory without hiding non-online preparation facts. */
+export function parseAndroidReadonlyDeviceFacts(text: string): AndroidReadonlyDeviceFact[] {
+  return text.split('\n').flatMap((line) => {
+    if (!line.trim() || line.startsWith('List of devices attached')) return [];
+    const match = /^(\S+)\s+(device|unauthorized|offline|unknown)(?:\s+(.*))?$/.exec(line);
+    if (!match) throw new Error('ANDROID_DEVICE_CHECK_FAILED: unrecognized ADB device state.');
+    const routingId = match[1]!;
+    const model = /model:(\S+)/.exec(match[3] ?? '')?.[1];
+    return [
+      {
+        routingId,
+        kind: routingId.startsWith('emulator-') ? ('emulator' as const) : ('device' as const),
+        status:
+          match[2] === 'device'
+            ? ('online' as const)
+            : (match[2] as 'unauthorized' | 'offline' | 'unknown'),
+        ...(model ? { model } : {}),
+      },
+    ];
+  });
+}
+
 const coldReadinessUnknown =
   'ANDROID_DEVICE_LOCK_STATE_UNKNOWN: could not verify the local phone before Session initialization; check the existing ADB connection and unlock/wake yourself then recheck.';
+
+/** Internal exact-transport classification. The ADB daemon text is never retained. */
+export class AndroidExactTransportUnavailableError extends Error {
+  readonly code = 'android-exact-transport-unavailable';
+
+  constructor() {
+    super('ANDROID_EXACT_TRANSPORT_UNAVAILABLE: the selected Android transport is unavailable.');
+    this.name = 'AndroidExactTransportUnavailableError';
+  }
+}
 
 // Only the already-running local daemon is used. No CLI, daemon start, helper or key command.
 // The connector is source-internal injection for offline protocol tests, not a routing setting.
 function readReadinessAdb(
-  query: 'devices' | 'power' | 'policy',
+  query: 'devices' | 'power' | 'policy' | 'packages',
   serial: string | undefined,
   signal?: AbortSignal,
   connectAdb: () => Socket = () => connect({ host: '127.0.0.1', port: 5037 }),
@@ -70,7 +108,7 @@ function readReadinessAdb(
     const abort = () => finish(signal?.reason ?? new Error(coldReadinessUnknown));
     const timer = setTimeout(
       () => finish(new Error(`${coldReadinessUnknown} ADB preflight timed out.`)),
-      3_000,
+      query === 'packages' ? 15_000 : 3_000,
     );
     const send = (service: string) =>
       socket.write(Buffer.byteLength(service).toString(16).padStart(4, '0') + service);
@@ -88,14 +126,42 @@ function readReadinessAdb(
       while (!settled) {
         if (phase === 'host-status' || phase === 'shell-status') {
           if (buffer.length < 4) return;
-          if (buffer.toString('ascii', 0, 4) !== 'OKAY')
+          const status = buffer.toString('ascii', 0, 4);
+          if (status === 'FAIL') {
+            if (buffer.length < 8) return;
+            const lengthText = buffer.toString('ascii', 4, 8);
+            if (!/^[0-9a-f]{4}$/i.test(lengthText))
+              return finish(new Error(`${coldReadinessUnknown} Invalid ADB failure response.`));
+            const length = Number.parseInt(lengthText, 16);
+            if (length > 64 * 1024)
+              return finish(new Error(`${coldReadinessUnknown} Invalid ADB failure response.`));
+            if (buffer.length < length + 8) return;
+            const message = buffer.toString('utf8', 8, length + 8);
+            if (
+              phase === 'host-status' &&
+              query === 'packages' &&
+              (/\bdevice\b[^\r\n]*\bnot found\b/i.test(message) ||
+                /\bno devices?(?:\/emulators?)? found\b/i.test(message))
+            )
+              return finish(new AndroidExactTransportUnavailableError());
+            return finish(new Error(`${coldReadinessUnknown} ADB request rejected.`));
+          }
+          if (status !== 'OKAY')
             return finish(new Error(`${coldReadinessUnknown} ADB request rejected.`));
           buffer = buffer.subarray(4);
           if (phase === 'shell-status') phase = 'shell';
           else if (query === 'devices') phase = 'devices';
           else {
             phase = 'shell-status';
-            send(`shell,v2,raw:dumpsys ${query === 'power' ? 'power' : 'window policy'}`);
+            send(
+              `shell,v2,raw:${
+                query === 'power'
+                  ? 'dumpsys power'
+                  : query === 'policy'
+                    ? 'dumpsys window policy'
+                    : 'cmd package list packages'
+              }`,
+            );
           }
         } else if (phase === 'devices') {
           if (buffer.length < 4) return;
@@ -128,12 +194,39 @@ function readReadinessAdb(
   });
 }
 
+/** Query installed packages through an already-running daemon and exact transport only. */
+export async function queryAndroidPackagesReadOnly(
+  serial: string,
+  signal?: AbortSignal,
+  connectAdb?: () => Socket,
+): Promise<string[]> {
+  if (!serial || serial.length > 256 || /[\s\0]/.test(serial))
+    throw new Error('APPLICATION_INSPECTION_FAILED: invalid Android target.');
+  const output = await readReadinessAdb('packages', serial, signal, connectAdb);
+  signal?.throwIfAborted();
+  return output
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('package:'))
+    .map((line) => line.slice(8).trim())
+    .filter(Boolean);
+}
+
 /** Cold Android ready only; unlike normal discovery, never starts an ADB daemon. */
 export async function discoverAndroidReadinessDevices(
   signal?: AbortSignal,
   connectAdb?: () => Socket,
 ): Promise<Device[]> {
   return parseAndroidDevices(await readReadinessAdb('devices', undefined, signal, connectAdb));
+}
+
+/** Read-only Android inventory for G3. It never invokes the ADB CLI or starts a daemon. */
+export async function discoverAndroidReadonlyDeviceFacts(
+  signal?: AbortSignal,
+  connectAdb?: () => Socket,
+): Promise<AndroidReadonlyDeviceFact[]> {
+  return parseAndroidReadonlyDeviceFacts(
+    await readReadinessAdb('devices', undefined, signal, connectAdb),
+  );
 }
 
 /** Require affirmative awake/unlocked evidence on the exact resolved local device, before POST. */
