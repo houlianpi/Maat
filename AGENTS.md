@@ -188,7 +188,8 @@ artifacts/     Generated output, never editable source
 4. Follow the [shared collaboration protocol](#shared-collaboration-protocol).
    Implement success, failure, observation and cleanup behavior together; PM's
    acceptance analysis and Reviewer's independent review are not ceremonial approval.
-5. Run focused regressions, then required gates and installed-package checks.
+5. Run focused regressions, then the applicable daily, full and installed-package
+   gates described below.
 6. Exercise the actual user path proportionally to risk and report unverified areas.
 
 ## Official commands
@@ -201,17 +202,32 @@ npm test --workspace @houlianpi/maat
 npm run build
 npm run typecheck
 npm run format:check
+npm run test:mobile
 npm test
+npm run test:full
 npm run package:check
 ```
 
 `typecheck` builds first. Builds clean only their generated package `dist`.
+The daily Mobile Done gate is `npm run format:check`, `npm run typecheck` and
+`npm run test:mobile`. The Mobile gate runs focused Core and Pi regressions plus
+the shared-boundary smoke test, in sequence and fail-fast. Changes to shared
+runtime, `MaatApi`, `PlatformRegistry`, Worker behavior or public contracts must
+also run `npm run test:full`. `test:full` is only an alias for `npm test`;
+the meaning and coverage of `npm test` are unchanged. Pre-merge and CI validation
+continue to require the full and package gates.
+
 `package:check` packs and installs all three packages, exercises Worker/CLI/Skill
 delivery, checks dependency boundaries and rejects removed modules in tarballs.
-Run it for exports, manifests, dependencies, binaries or compiled-path changes.
+Run it for exports, manifests, dependencies, binaries, compiled-path changes or
+any other package-delivery boundary change.
 
 Focused areas:
 
+- Mobile daily ownership: Core API, native adapters and setup primitives belong
+  to `test:mobile:core`; Pi tools, preparation and host UI belong to
+  `test:mobile:pi`; cross-package exports, dependency direction and registry
+  lifecycle belong to `test:shared:smoke`.
 - Worker/Web: `javascript-session`, `platform-adapter`, `mixed-case` (execution
   switching regression), and `exec-js-tool`.
 - Native execution: `native`, `platform-adapter`, `android-setup`, `ios-setup`.

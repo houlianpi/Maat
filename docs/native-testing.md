@@ -4,6 +4,20 @@ Maat uses WebdriverIO and Appium for Android, iOS and macOS. The host Coding Age
 handles authorized environment preparation with its existing tools. Maat owns
 its Sessions and execution Worker, not user-managed Appium servers.
 
+## Automated regression layers
+
+The daily Mobile gate runs focused Core regressions, focused Pi regressions and
+a lightweight shared-boundary smoke test, sequentially and fail-fast. These tests
+use controlled fakes and manifest inspection; they do not start a Playwright
+browser, persistent browser profile, Appium, ADB or a real device. Passing mocks
+proves code contracts only and does not prove real-phone setup, observation,
+actions or business results.
+
+The full suite remains the broader regression gate and retains Web, macOS and
+browser coverage. Package delivery checks remain separate. A local Chrome
+`ENOTEMPTY` failure must be reported independently: it cannot be described as a
+full-suite pass, and recovery must not delete or clear the user's browser profile.
+
 ## Android preparation
 
 The current setup workflow targets Pi, Appium and the Android phone's ADB
