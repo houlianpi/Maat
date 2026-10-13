@@ -65,6 +65,25 @@ test('local facts normalize parser identities without substituting display data'
   }
 });
 
+test('Android parser uses a safe generic label when ADB omits the model', () => {
+  const rawSerial = 'PRIVATE_RAW_ADB_SERIAL';
+  const rawEmulatorRoute = 'emulator-9876';
+  const devices = parseAndroidDevices(
+    `List of devices attached\n${rawSerial} device product:unknown\n${rawEmulatorRoute} device\n`,
+  );
+  assert.deepEqual(
+    devices.map(({ name, kind }) => ({ name, kind })),
+    [
+      { name: 'Android device', kind: 'device' },
+      { name: 'Android emulator', kind: 'emulator' },
+    ],
+  );
+  assert.equal(
+    devices.some(({ name }) => [rawSerial, rawEmulatorRoute].includes(name)),
+    false,
+  );
+});
+
 test('identity equality and canonical routing compare exactly the stable four-field tuple', () => {
   const renamed = { ...android, displayName: 'Renamed' };
   assert.ok(sameDeviceIdentity(android, renamed));

@@ -25,11 +25,14 @@ export function parseAndroidDevices(text: string): Device[] {
   return text.split('\n').flatMap((line) => {
     const match = /^(\S+)\s+device(?:\s+(.*))?$/.exec(line);
     if (!match || match[1] === 'List') return [];
+    const kind = match[1].startsWith('emulator-') ? 'emulator' : 'device';
     return [
       {
         id: match[1],
-        name: /model:(\S+)/.exec(match[2] ?? '')?.[1] ?? match[1],
-        kind: match[1].startsWith('emulator-') ? 'emulator' : 'device',
+        name:
+          /model:(\S+)/.exec(match[2] ?? '')?.[1] ??
+          (kind === 'emulator' ? 'Android emulator' : 'Android device'),
+        kind,
       },
     ];
   });

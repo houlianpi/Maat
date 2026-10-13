@@ -15,7 +15,7 @@
     "format:check": "prettier --check .",
     "package:check": "node --experimental-strip-types scripts/check-package.ts",
     "test": "node --experimental-strip-types --test test/*.test.ts",
-    "test:mobile:core": "node --experimental-strip-types --test test/connection-job-supervisor.test.ts test/device-lock.test.ts test/execution-errors.test.ts test/native.test.ts test/setup-assistant.test.ts test/android-setup.test.ts test/android-tools.test.ts test/ios-setup.test.ts test/ios-wda.test.ts test/session-target-selection.test.ts test/mobile-device-contract.test.ts",
+    "test:mobile:core": "node --experimental-strip-types --test test/connection-job-supervisor.test.ts test/device-lock.test.ts test/execution-errors.test.ts test/native.test.ts test/setup-assistant.test.ts test/android-setup.test.ts test/android-tools.test.ts test/ios-setup.test.ts test/ios-wda.test.ts test/session-target-selection.test.ts test/mobile-device-contract.test.ts test/mobile-internal-ports.test.ts",
     "test:mobile:pi": "node --experimental-strip-types --test test/exec-js-tool.test.ts test/mobile-preparation.test.ts test/mobile-ui.test.ts test/pi-extension.test.ts test/pi-session-isolation.test.ts test/setup-tools.test.ts test/android-setup-tools.test.ts test/android-tools-script.test.ts test/setup-ui.test.ts test/setup-skill.test.ts test/setup-model-context.test.ts",
     "test:shared:smoke": "node --experimental-strip-types --test test/shared-boundaries.test.ts",
     "test:mobile": "npm run test:mobile:core && npm run test:mobile:pi && npm run test:shared:smoke",

@@ -1,16 +1,11 @@
 import { randomBytes } from 'node:crypto';
 
 import type { SetupReadinessSuccess } from '../../setup-assistant/types.ts';
+import type { ConnectionJobState } from '../contracts/connection.ts';
 import { MobileBusyError } from '../devices/coordinator.ts';
 import { acquireConnectionJobSlot } from './job-slot.ts';
 
-export type ConnectionJobState =
-  | 'queued'
-  | 'running'
-  | 'creation-uncertain'
-  | 'succeeded'
-  | 'failed'
-  | 'cancelled';
+export type { ConnectionJobState } from '../contracts/connection.ts';
 
 export type ConnectionJobSnapshot = Readonly<{
   jobId: string;
