@@ -293,9 +293,52 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
   }
 
   private sameGeneration(left: DeviceIdentity[], right: DeviceIdentity[]): boolean {
-    return (
-      left.length === right.length &&
-      left.every((identity) => right.some((candidate) => sameDeviceIdentity(identity, candidate)))
+    if (left.length !== right.length) return false;
+    const remaining = [...right];
+    return left.every((identity) => {
+      const index = remaining.findIndex((candidate) => sameDeviceIdentity(identity, candidate));
+      if (index < 0) return false;
+      remaining.splice(index, 1);
+      return true;
+    });
+  }
+
+  private hasDuplicateIdentities(identities: DeviceIdentity[]): boolean {
+    return identities.some((identity, index) =>
+      identities.slice(index + 1).some((candidate) => sameDeviceIdentity(identity, candidate)),
+    );
+  }
+
+  private legacyHintProposal(
+    identities: DeviceIdentity[],
+    candidates: PublicDeviceCandidate[],
+  ): PublicDeviceCandidate[] {
+    const environment = this.environment!;
+    const selectors: Array<{ kind?: string; name?: string }> = [];
+    if (environment.device?.kind !== undefined || environment.device?.name !== undefined)
+      selectors.push(environment.device);
+    const deviceName = environment.capabilities['appium:deviceName'];
+    if (typeof deviceName === 'string') selectors.push({ name: deviceName });
+    const options = environment.capabilities['appium:options'];
+    if (isRecord(options)) {
+      for (const key of ['deviceName', 'appium:deviceName']) {
+        const nestedDeviceName = options[key];
+        if (typeof nestedDeviceName === 'string') selectors.push({ name: nestedDeviceName });
+      }
+    }
+    if (!selectors.length) return candidates;
+
+    const matches = identities.filter((identity) =>
+      selectors.every(
+        (selector) =>
+          (selector.kind === undefined || identity.kind === selector.kind) &&
+          (selector.name === undefined || identity.displayName === selector.name),
+      ),
+    );
+    if (matches.length !== 1) return candidates;
+    const matched = matches[0]!;
+    return candidates.filter((_candidate, index) =>
+      sameDeviceIdentity(identities[index]!, matched),
     );
   }
 
@@ -332,23 +375,29 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
         return { status: 'selection-stale', platform };
       if (
         !Number.isSafeInteger(selection.candidateNumber) ||
-        selection.candidateNumber < 1 ||
-        selection.candidateNumber > snapshot.identities.length
+        !snapshot.candidates.some(
+          (candidate) => candidate.candidateNumber === selection.candidateNumber,
+        )
       )
         return { status: 'selection-invalid', platform };
       const current = (await this.currentSelectionIdentities(signal)).filter(
         isLocalPhysicalMobileTarget,
       );
-      if (!this.sameGeneration(snapshot.identities, current)) {
+      if (
+        this.hasDuplicateIdentities(snapshot.identities) ||
+        this.hasDuplicateIdentities(current) ||
+        !this.sameGeneration(snapshot.identities, current)
+      ) {
         this.selectionSnapshot = undefined;
         return { status: 'selection-stale', platform };
       }
       const expected = snapshot.identities[selection.candidateNumber - 1]!;
-      const identity = current.find((candidate) => sameDeviceIdentity(candidate, expected));
-      if (!identity) {
+      const exact = current.filter((candidate) => sameDeviceIdentity(candidate, expected));
+      if (exact.length !== 1) {
         this.selectionSnapshot = undefined;
         return { status: 'selection-stale', platform };
       }
+      const identity = exact[0]!;
       const candidate = this.publicCandidate(identity, selection.candidateNumber);
       this.target = {
         identity,
@@ -383,12 +432,13 @@ export class AppiumPlatformAdapter implements PlatformAdapter {
     );
     if (identities.length > 1) {
       const id = randomUUID();
-      this.selectionSnapshot = { id, identities, candidates };
+      const proposal = this.legacyHintProposal(identities, candidates);
+      this.selectionSnapshot = { id, identities, candidates: proposal };
       return {
         status: 'selection-required',
         platform,
         discoveryId: id,
-        candidates,
+        candidates: proposal,
       };
     }
     const identity = identities[0]!;

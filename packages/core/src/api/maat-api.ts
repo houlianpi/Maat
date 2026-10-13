@@ -384,7 +384,8 @@ export class MaatApi {
             if (
               snapshot.technicalDetails?.serverScope === 'local' &&
               !hints?.device &&
-              hints?.capabilities['appium:deviceName']
+              hints?.capabilities['appium:deviceName'] &&
+              !isMigratedLocalPhysicalRoute(adapter)
             )
               throw new Error(
                 `${label} setup readiness requires a stable device selector for local deviceName routing.`,
