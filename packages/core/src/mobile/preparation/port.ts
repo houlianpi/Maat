@@ -43,9 +43,9 @@ export type PreparationResultView = Readonly<{
 }>;
 
 /**
- * G2 contract only: there is no production consumer in G2. Preparation moves behind this port in
- * G3P. Legacy preparation can be retired only after migration and the G5/G5M/G6/G7 deletion gates
- * plus explicit deletion authorization.
+ * G2 contract only: there is no production consumer in G2. Read-only facts inspection integrates
+ * in G3; planning and execution remain G3P. Legacy preparation can be retired only after migration
+ * and the G5/G5M/G6/G7 deletion gates plus explicit deletion authorization.
  */
 export interface MobilePreparationPort {
   inspect(target: LifecycleTarget, signal?: AbortSignal): Promise<PreparationFactsView>;
