@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { createInterface, type Interface } from 'node:readline';
 import test from 'node:test';
@@ -27,6 +27,16 @@ function identity(routingId = fictionalSerial) {
 }
 
 const readers = new WeakMap<ChildProcessWithoutNullStreams, Interface>();
+
+async function pathIsAbsent(candidate: string): Promise<boolean> {
+  try {
+    await stat(candidate);
+    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
+    throw error;
+  }
+}
 
 async function line(child: ChildProcessWithoutNullStreams, timeoutMs = 3_000) {
   let reader = readers.get(child);
@@ -200,4 +210,39 @@ test('lock artifacts and public errors do not disclose device identity or derive
   assert.equal((await readFile(path.join(root, lockFiles[0]!))).byteLength, 0);
   assert.ok(entries.includes(lockFiles[0]!));
   await rm(root, { recursive: true, force: true });
+});
+
+test('test entry points preserve user home and require explicit device-lock test state', async () => {
+  const home = process.env.HOME;
+  const userProfile = process.env.USERPROFILE;
+  const defaultStateDirectory = path.join(homedir(), '.maat', 'device-lock');
+  const defaultStateWasAbsent = await pathIsAbsent(defaultStateDirectory);
+  const repositoryRoot = path.join(import.meta.dirname, '..');
+  const rootManifest = JSON.parse(
+    await readFile(path.join(repositoryRoot, 'package.json'), 'utf8'),
+  ) as { scripts: Record<string, string> };
+  const coreManifest = JSON.parse(
+    await readFile(path.join(repositoryRoot, 'packages', 'core', 'package.json'), 'utf8'),
+  ) as { scripts: Record<string, string> };
+  const fixture = await readFile(
+    path.join(import.meta.dirname, 'fixtures', 'device-lock-child.ts'),
+    'utf8',
+  );
+
+  assert.doesNotMatch(JSON.stringify(rootManifest.scripts), /--test-global-setup/);
+  assert.doesNotMatch(JSON.stringify(coreManifest.scripts), /--test-global-setup/);
+  assert.doesNotMatch(fixture, /globalSetup|globalTeardown|process\.env\.(?:HOME|USERPROFILE)/);
+
+  const root = await mkdtemp(path.join(tmpdir(), 'maat-device-lock-explicit-state-'));
+  try {
+    acquireDeviceLock(identity('FICTIONAL-EXPLICIT-STATE'), {
+      stateDirectory: root,
+    }).release();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+
+  assert.equal(process.env.HOME, home);
+  assert.equal(process.env.USERPROFILE, userProfile);
+  if (defaultStateWasAbsent) assert.equal(await pathIsAbsent(defaultStateDirectory), true);
 });

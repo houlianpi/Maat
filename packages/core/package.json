@@ -14,7 +14,7 @@
   "scripts": {
     "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\" && tsc -p tsconfig.json",
     "prepack": "npm run build",
-    "test": "node --experimental-strip-types --test --test-global-setup=../../test/fixtures/device-lock-child.ts ../../test/connection-job-supervisor.test.ts ../../test/device-lock.test.ts ../../test/execution-errors.test.ts ../../test/javascript-session.test.ts ../../test/maat-api.test.ts ../../test/mixed-case.test.ts ../../test/platform-adapter.test.ts ../../test/native.test.ts ../../test/setup-assistant.test.ts ../../test/android-setup.test.ts ../../test/android-tools.test.ts ../../test/session-target-selection.test.ts ../../test/mobile-device-contract.test.ts",
+    "test": "node --experimental-strip-types --test ../../test/connection-job-supervisor.test.ts ../../test/device-lock.test.ts ../../test/execution-errors.test.ts ../../test/javascript-session.test.ts ../../test/maat-api.test.ts ../../test/mixed-case.test.ts ../../test/platform-adapter.test.ts ../../test/native.test.ts ../../test/setup-assistant.test.ts ../../test/android-setup.test.ts ../../test/android-tools.test.ts ../../test/session-target-selection.test.ts ../../test/mobile-device-contract.test.ts",
     "test:android": "node --experimental-strip-types --test ../../test/android-tools.test.ts ../../test/android-setup.test.ts"
   },
   "dependencies": {

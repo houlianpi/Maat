@@ -1,7 +1,5 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,26 +18,6 @@ import {
   createAppiumPlatformAdapterWithInspectionProvidersForTests,
 } from '../../packages/core/src/platforms/appium/appium-adapter.ts';
 import { aggregateSetup } from '../../packages/core/src/setup-assistant/model.ts';
-
-let isolatedHome: string | undefined;
-let previousHome: string | undefined;
-let previousUserProfile: string | undefined;
-
-export async function globalSetup() {
-  isolatedHome = await mkdtemp(path.join(tmpdir(), 'maat-test-home-'));
-  previousHome = process.env.HOME;
-  previousUserProfile = process.env.USERPROFILE;
-  process.env.HOME = isolatedHome;
-  process.env.USERPROFILE = isolatedHome;
-}
-
-export async function globalTeardown() {
-  if (previousHome === undefined) delete process.env.HOME;
-  else process.env.HOME = previousHome;
-  if (previousUserProfile === undefined) delete process.env.USERPROFILE;
-  else process.env.USERPROFILE = previousUserProfile;
-  if (isolatedHome) await rm(isolatedHome, { recursive: true, force: true });
-}
 
 function safeCode(error: unknown): string | undefined {
   return error instanceof Error && 'code' in error

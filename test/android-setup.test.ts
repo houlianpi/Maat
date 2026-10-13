@@ -18,6 +18,7 @@ import type {
   NativeEnvironment,
 } from '../packages/core/src/platforms/appium/schema.ts';
 import { AppiumPlatformAdapter } from '../packages/core/src/platforms/appium/appium-adapter.ts';
+import { setDeviceLockStateDirectoryForTests } from '../packages/core/src/mobile/devices/device-lock.ts';
 import {
   detectAndroidSetup,
   type AndroidSetupDetectorDependencies,
@@ -915,8 +916,14 @@ test('Android ready exposes stable safe source, viewport, screenshot and executi
   });
 });
 
-test('explicit App target clearing restores Android ready in the same API without automatic clearing or fallback', async () => {
+test('explicit App target clearing restores Android ready in the same API without automatic clearing or fallback', async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), 'maat-android-clear-target-'));
+  const deviceLockRoot = await mkdtemp(path.join(tmpdir(), 'maat-android-device-lock-'));
+  setDeviceLockStateDirectoryForTests(deviceLockRoot);
+  t.after(async () => {
+    setDeviceLockStateDirectoryForTests(undefined);
+    await rm(deviceLockRoot, { recursive: true, force: true });
+  });
   const previousHintsDirectory = process.env.MAAT_SESSION_HINTS_DIR;
   process.env.MAAT_SESSION_HINTS_DIR = root;
   class TestAdapter extends AppiumPlatformAdapter {
